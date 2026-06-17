@@ -159,6 +159,7 @@
     font-family: "Inter", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
+    min-height: 100dvh;
   }
 
   .material-symbols-outlined {

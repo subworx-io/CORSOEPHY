@@ -190,7 +190,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <FollowProvider>
-        <div className="min-h-dvh bg-neutral-950">
+        <div className="h-dvh bg-neutral-950 overflow-hidden">
           <Outlet />
           <BottomNav />
         </div>

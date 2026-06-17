@@ -52,7 +52,7 @@ const TILES: Tile[] = [
   { handle: "@clara.mondo",   src: PORTRAITS.claraMondo,   alt: "Black-and-white portrait of a woman sitting on a curb." },
   { handle: "@paul.altstadt", src: PORTRAITS.paulAltstadt, alt: "Black-and-white night portrait of a man on a city street." },
   { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    alt: "Close-up editorial portrait with braids and feathered collar." },
-  { handle: "@david.bruecke", src: PORTRAITS.davidArch,    alt: "Monochrome street portrait with sunglasses." },
+  { handle: "@david.bruecke", src: PORTRAITS.davidArch,    alt: "Black-and-white street portrait of a man with beard and aviator sunglasses." },
   { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     alt: "Editorial portrait grid of a young man in studio light." },
   { handle: "@leo.see",       src: PORTRAITS.leoWild,      alt: "Atmospheric sepia-toned portrait in a foggy field." },
 ];
