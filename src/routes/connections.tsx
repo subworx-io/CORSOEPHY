@@ -6,7 +6,7 @@ import {
   canRenew,
   type FollowedPerson,
 } from "@/lib/follow-context";
-import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
+import { useSnapScroll } from "@/hooks/use-snap-scroll";
 
 export const Route = createFileRoute("/connections")({
   head: () => ({
@@ -40,7 +40,13 @@ function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
   const urgent = fill < 0.2;
 
   return (
-    <div className="absolute inset-0 px-4 pt-6 pb-28">
+    <div
+      className="absolute inset-0 px-4"
+      style={{
+        paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)",
+        paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
+      }}
+    >
       <div
         className="relative w-full h-full rounded-[2rem] overflow-hidden"
         style={{
@@ -133,7 +139,7 @@ function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
 function ConnectionsPage() {
   const { followed } = useFollow();
   const people = Array.from(followed.values());
-  const { currentIndex } = useSnapScroll({ count: people.length, axis: "y" });
+  const { currentIndex, slideRef } = useSnapScroll({ count: people.length, axis: "y" });
 
   // Live-Ticker: lässt die Herzen über die Zeit sichtbar an Fülle verlieren
   const [now, setNow] = useState(() => Date.now());
@@ -161,20 +167,14 @@ function ConnectionsPage() {
       {people.map((person, i) => {
         const offset = i - currentIndex;
         const isActive = offset === 0;
-        const clampedOffset = Math.max(-1, Math.min(1, offset));
         const isNeighbor = Math.abs(offset) === 1;
 
         return (
           <div
             key={person.handle}
+            ref={slideRef(i)}
             className="absolute inset-0 w-full h-full"
-            style={{
-              transform: `translateY(${clampedOffset * 100}%)`,
-              opacity: isActive || isNeighbor ? 1 : 0,
-              zIndex: isActive ? 10 : 5,
-              transition: `transform ${SNAP_MS}ms cubic-bezier(0.2,0.9,0.25,1), opacity ${SNAP_MS - 80}ms ease`,
-              willChange: "transform, opacity",
-            }}
+            style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
           >
             <PersonSlide person={person} now={now} />
           </div>

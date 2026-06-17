@@ -23,7 +23,7 @@ function BottomNav() {
   const pathname = location.pathname;
 
   return (
-    <nav className="fixed bottom-6 left-0 right-0 z-50 flex justify-center pointer-events-none px-4">
+    <nav className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none px-4" style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}>
       <div className="pointer-events-auto inline-flex items-center gap-1 p-1.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl">
         {TABS.map((item) => {
           const isActive = pathname === item.to;

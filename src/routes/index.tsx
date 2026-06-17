@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { PORTRAITS } from "@/assets/portraits";
 import { useFollow } from "@/lib/follow-context";
-import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
+import { useSnapScroll } from "@/hooks/use-snap-scroll";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -46,11 +46,11 @@ const pad = (n: number) => n.toString().padStart(2, "0");
 
 // Discovery zeigt immer neue, unbekannte Personen aus der Stadt — kein Overlap mit "ich folge"
 const TILES: Tile[] = [
-  { handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, alt: "High-fashion editorial portrait in a concrete studio." },
+  { handle: "@felix.rhein",   src: PORTRAITS.felixRhein,   alt: "Black-and-white street portrait of a man with beard and sunglasses." },
   { handle: "@mia.galerie",   src: PORTRAITS.miaGalerie,   alt: "Black-and-white street portrait of a woman walking in the city." },
   { handle: "@jan.motor",     src: PORTRAITS.jannisLux,    alt: "1960s retro motorsport fashion editorial." },
   { handle: "@clara.mondo",   src: PORTRAITS.claraMondo,   alt: "Black-and-white portrait of a woman sitting on a curb." },
-  { handle: "@paul.altstadt", src: PORTRAITS.paulAltstadt, alt: "Black-and-white street portrait of a man walking in the city." },
+  { handle: "@paul.altstadt", src: PORTRAITS.paulAltstadt, alt: "Black-and-white night portrait of a man on a city street." },
   { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    alt: "Close-up editorial portrait with braids and feathered collar." },
   { handle: "@david.bruecke", src: PORTRAITS.davidArch,    alt: "Monochrome street portrait with sunglasses." },
   { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     alt: "Editorial portrait grid of a young man in studio light." },
@@ -105,7 +105,7 @@ function Index() {
     [excludedHandles]
   );
 
-  const { currentIndex } = useSnapScroll({ count: slides.length, axis: "y" });
+  const { currentIndex, slideRef } = useSnapScroll({ count: slides.length, axis: "y" });
 
   const triggerBurst = (handle: string) => {
     setBurstHandle(handle);
@@ -118,22 +118,22 @@ function Index() {
       {slides.map((slide, i) => {
         const offset = i - currentIndex;
         const isActive = offset === 0;
-        const clampedOffset = Math.max(-1, Math.min(1, offset));
         const isNeighbor = Math.abs(offset) === 1;
 
         return (
           <div
             key={slide.kind === "countdown" ? "__countdown" : slide.handle}
+            ref={slideRef(i)}
             className="absolute inset-0 w-full h-full"
-            style={{
-              transform: `translateY(${clampedOffset * 100}%)`,
-              opacity: isActive || isNeighbor ? 1 : 0,
-              zIndex: isActive ? 10 : 5,
-              transition: `transform ${SNAP_MS}ms cubic-bezier(0.2,0.9,0.25,1), opacity ${SNAP_MS - 80}ms ease`,
-              willChange: "transform, opacity",
-            }}
+            style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
           >
-            <div className="absolute inset-0 px-4 pt-6 pb-28">
+            <div
+              className="absolute inset-0 px-4"
+              style={{
+                paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)",
+                paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
+              }}
+            >
               <div
                 className="relative w-full h-full rounded-[2rem] overflow-hidden"
                 style={{
@@ -228,6 +228,15 @@ function Index() {
           />
         ))}
       </div>
+
+      {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
+      <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+        <div className="flex justify-end items-center px-6 h-14 max-w-[600px] mx-auto">
+          <button className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md" aria-label="Einstellungen">
+            <span className="material-symbols-outlined">settings</span>
+          </button>
+        </div>
+      </header>
 
     </div>
   );

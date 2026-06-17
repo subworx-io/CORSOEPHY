@@ -18,7 +18,13 @@ function RecordPage() {
   const [cityStory, setCityStory] = useState(true);
 
   return (
-    <div className="relative h-dvh w-full flex flex-col bg-neutral-950 text-white px-4 pt-8 pb-28">
+    <div
+      className="relative h-dvh w-full flex flex-col bg-neutral-950 text-white px-4"
+      style={{
+        paddingTop: "calc(env(safe-area-inset-top) + 2rem)",
+        paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
+      }}
+    >
       {/* Prompt des Tages */}
       <div className="text-center px-2">
         <div className="text-[11px] uppercase tracking-[0.4em] text-white/40 font-medium">

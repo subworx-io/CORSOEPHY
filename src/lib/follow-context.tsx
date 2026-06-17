@@ -53,7 +53,7 @@ const INITIAL_FOLLOWED: FollowedPerson[] = [
   // frisch heute gefolgt → volles Herz, (noch) nicht erneuerbar
   { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    followedAt: NOW - 1 * H,  hasPostedToday: true,  nudged: false },
   // gestern → halb verfallen, erneuerbar
-  { handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, followedAt: NOW - 14 * H, hasPostedToday: true,  nudged: false },
+  { handle: "@felix.rhein",   src: PORTRAITS.felixRhein,   followedAt: NOW - 14 * H, hasPostedToday: true,  nudged: false },
   // hat heute noch nicht gepostet → leerer State, Herz fast leer
   { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     followedAt: NOW - 20 * H, hasPostedToday: false, nudged: false },
   // läuft fast ab → Herz nahezu leer, dringend erneuern

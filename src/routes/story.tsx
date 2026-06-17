@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PORTRAITS } from "@/assets/portraits";
 import { useFollow } from "@/lib/follow-context";
-import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
+import { useSnapScroll } from "@/hooks/use-snap-scroll";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
@@ -26,7 +26,7 @@ interface Clip {
 
 // 🔒 Stadt-Story = genau 8 Momente (PRD 4.6). Handles konsistent zur Discovery.
 const CLIPS: Clip[] = [
-  { id: "c1", handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, city: "Düsseldorf", time: "20:00", caption: "Am Burgplatz" },
+  { id: "c1", handle: "@felix.rhein",   src: PORTRAITS.felixRhein,   city: "Düsseldorf", time: "20:00", caption: "Am Burgplatz" },
   { id: "c2", handle: "@mia.galerie",   src: PORTRAITS.miaGalerie,   city: "Düsseldorf", time: "20:00", caption: "In der Galerie" },
   { id: "c3", handle: "@clara.mondo",   src: PORTRAITS.claraMondo,   city: "Düsseldorf", time: "20:00", caption: "An der Königsallee" },
   { id: "c4", handle: "@david.bruecke", src: PORTRAITS.davidArch, city: "Düsseldorf", time: "20:00", caption: "Auf der Brücke" },
@@ -37,7 +37,7 @@ const CLIPS: Clip[] = [
 ];
 
 function StoryPage() {
-  const { currentIndex: index } = useSnapScroll({ count: CLIPS.length, axis: "x" });
+  const { currentIndex: index, slideRef } = useSnapScroll({ count: CLIPS.length, axis: "x" });
   const { isFollowing, follow } = useFollow();
   const [burstHandle, setBurstHandle] = useState<string | null>(null);
 
@@ -55,20 +55,14 @@ function StoryPage() {
         {CLIPS.map((c, i) => {
           const offset = i - index;
           const isActive = offset === 0;
-          const isNeighbor = Math.abs(offset) === 1;
           const following = isFollowing(c.handle);
 
           return (
             <div
               key={c.id}
+              ref={slideRef(i)}
               className="absolute inset-0 w-full h-full"
-              style={{
-                transform: `translateX(${offset * 100}%)`,
-                opacity: isActive || isNeighbor ? 1 : 0,
-                zIndex: isActive ? 10 : 5,
-                transition: `transform ${SNAP_MS - 60}ms cubic-bezier(0.2,0.9,0.25,1), opacity ${SNAP_MS - 120}ms ease`,
-                willChange: "transform, opacity",
-              }}
+              style={{ zIndex: isActive ? 10 : Math.abs(offset) === 1 ? 5 : 0 }}
             >
               <img
                 src={c.src}
@@ -141,8 +135,8 @@ function StoryPage() {
         })}
       </div>
 
-      {/* Progress dots */}
-      <div className="absolute top-6 right-6 z-30 flex gap-1.5">
+      {/* Progress dots — safe-area-inset-top für Notch */}
+      <div className="absolute right-6 z-30 flex gap-1.5" style={{ top: "calc(env(safe-area-inset-top, 0px) + 24px)" }}>
         {CLIPS.map((_, i) => (
           <div
             key={i}

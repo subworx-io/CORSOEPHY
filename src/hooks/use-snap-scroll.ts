@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export const SNAP_MS = 360;
-
-// Momentum erst bei echtem schnellen Flick — verhindert Doppel-Advance bei normalem Swipe
-const MOMENTUM_THRESHOLD_PX_MS = 1.2;
+export const SNAP_MS = 380;
 
 function fireHaptic() {
   if (typeof navigator !== "undefined" && "vibrate" in navigator) {
@@ -11,10 +8,13 @@ function fireHaptic() {
   }
 }
 
+function easeOutCubic(t: number) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
 /**
- * Snap-scroll mit Velocity-Tracking und Glücksrad-Momentum.
- * axis "y" = Discovery & Connections (vertikal)
- * axis "x" = Stadt-Story (horizontal)
+ * Physik-basiertes Snap-Scroll: Bild folgt direkt dem Finger,
+ * nach dem Loslassen schnappt es mit RAF + easeOutCubic ein.
  */
 export function useSnapScroll({
   count,
@@ -25,49 +25,89 @@ export function useSnapScroll({
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const indexRef = useRef(0);
-  const lockedRef = useRef(false);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Weltposition in Pixeln: indexRef.current * Bildschirmhöhe/-breite
+  const posRef = useRef(0);
+  const slidesRef = useRef<(HTMLElement | null)[]>([]);
+  const rafRef = useRef(0);
+  // Stabile Callback-Refs pro Slide-Index — verhindert React-Re-Registration bei Re-Render
+  const callbacksRef = useRef<((el: HTMLElement | null) => void)[]>([]);
 
-  const advance = useCallback(
-    (dir: 1 | -1) => {
-      if (lockedRef.current) return;
-      const next = indexRef.current + dir;
-      if (next < 0 || next >= count) return;
-      indexRef.current = next;
-      setCurrentIndex(next);
-      fireHaptic();
-      lockedRef.current = true;
-      setTimeout(() => {
-        lockedRef.current = false;
-      }, SNAP_MS);
-    },
-    [count]
+  const getDim = useCallback(
+    () => (axis === "y" ? window.innerHeight : window.innerWidth),
+    [axis]
   );
 
-  const scheduleMomentum = useCallback(
-    (dir: 1 | -1, speedPxMs: number) => {
-      timers.current.forEach(clearTimeout);
-      timers.current = [];
-      // Extra-Schritte nur bei schnellem Flick, max 3
-      const steps = Math.min(Math.floor((speedPxMs - MOMENTUM_THRESHOLD_PX_MS) / 0.7), 3);
-      if (steps <= 0) return;
-      let delay = SNAP_MS + 40;
-      for (let i = 0; i < steps; i++) {
-        const t = setTimeout(() => advance(dir), delay);
-        timers.current.push(t);
-        delay = Math.round(delay * 1.8);
-      }
+  const applyPos = useCallback(
+    (pos: number) => {
+      const dim = getDim();
+      const tr = axis === "y" ? "Y" : "X";
+      slidesRef.current.forEach((el, i) => {
+        if (!el) return;
+        const offset = i * dim - pos;
+        el.style.transform = `translate${tr}(${offset}px)`;
+        // Weit entfernte Slides ausblenden
+        el.style.opacity = Math.abs(offset) > dim * 1.5 ? "0" : "1";
+      });
     },
-    [advance]
+    [axis, getDim]
   );
 
+  // Animation zum nächsten Einrastpunkt mit easeOutCubic
+  const snapTo = useCallback(
+    (rawIdx: number) => {
+      const targetIdx = Math.max(0, Math.min(count - 1, rawIdx));
+      const dim = getDim();
+      const startPos = posRef.current;
+      const targetPos = targetIdx * dim;
+      const startTime = performance.now();
+
+      cancelAnimationFrame(rafRef.current);
+
+      const animate = (now: number) => {
+        const t = Math.min((now - startTime) / SNAP_MS, 1);
+        posRef.current = startPos + (targetPos - startPos) * easeOutCubic(t);
+        applyPos(posRef.current);
+
+        if (t < 1) {
+          rafRef.current = requestAnimationFrame(animate);
+        } else {
+          posRef.current = targetPos;
+          applyPos(targetPos);
+          if (indexRef.current !== targetIdx) {
+            fireHaptic();
+          }
+          indexRef.current = targetIdx;
+          setCurrentIndex(targetIdx);
+        }
+      };
+
+      rafRef.current = requestAnimationFrame(animate);
+    },
+    [count, getDim, applyPos]
+  );
+
+  // Initiale Positionen setzen wenn count sich ändert (z.B. neue Slides in Connections)
   useEffect(() => {
-    let startPos = 0;
-    let startTime = 0;
-    // gestureActive verhindert iOS-Bug: touchend feuert auf window manchmal zweimal
-    let gestureActive = false;
-    // Ringpuffer letzter 80ms für stabiles Velocity-Measurement
+    posRef.current = indexRef.current * getDim();
+    applyPos(posRef.current);
+  }, [count, getDim, applyPos]);
+
+  // Fenstergröße-Änderung (z.B. Orientierung)
+  useEffect(() => {
+    const onResize = () => {
+      posRef.current = indexRef.current * getDim();
+      applyPos(posRef.current);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [getDim, applyPos]);
+
+  // Touch: Finger folgt direkt, Velocity-Projektion beim Loslassen
+  useEffect(() => {
+    let startTouchPos = 0;
+    let startWorldPos = 0;
     let history: { pos: number; t: number }[] = [];
+    let gestureActive = false;
 
     const getPos = (e: TouchEvent) =>
       axis === "y" ? e.touches[0].clientY : e.touches[0].clientX;
@@ -75,60 +115,55 @@ export function useSnapScroll({
       axis === "y" ? e.changedTouches[0].clientY : e.changedTouches[0].clientX;
 
     const onStart = (e: TouchEvent) => {
-      timers.current.forEach(clearTimeout);
-      timers.current = [];
+      cancelAnimationFrame(rafRef.current);
       gestureActive = true;
-      startPos = getPos(e);
-      startTime = performance.now();
-      history = [{ pos: startPos, t: startTime }];
+      startTouchPos = getPos(e);
+      startWorldPos = posRef.current;
+      const now = performance.now();
+      history = [{ pos: startTouchPos, t: now }];
     };
 
     const onMove = (e: TouchEvent) => {
       if (!gestureActive) return;
-      // preventDefault blockiert iOS-Rubber-Band und Safari-eigene Scroll-Interferenz
       e.preventDefault();
       const now = performance.now();
       const cur = getPos(e);
       history.push({ pos: cur, t: now });
-      // Nur letzten 80ms behalten
-      const cutoff = now - 80;
-      history = history.filter((h) => h.t >= cutoff);
+      // Nur letzten 100ms behalten
+      const cutoff = now - 100;
+      while (history.length > 1 && history[0].t < cutoff) history.shift();
+      // Bild folgt Finger in Echtzeit
+      posRef.current = startWorldPos + (startTouchPos - cur);
+      applyPos(posRef.current);
     };
 
     const onEnd = (e: TouchEvent) => {
-      // Guard: auf iOS feuert touchend auf window manchmal doppelt
       if (!gestureActive) return;
       gestureActive = false;
 
-      const diff = startPos - getEndPos(e);
-      if (Math.abs(diff) < 50) return;
-      const dir = diff > 0 ? 1 : -1;
-      advance(dir);
-
-      // Velocity aus Zeitfenster (primär) — stabiler als Momentanwert
-      let speedPxMs = 0;
+      // Velocity aus Zeitfenster berechnen
+      let velocityPxMs = 0;
       if (history.length >= 2) {
         const oldest = history[0];
         const newest = history[history.length - 1];
         const dt = newest.t - oldest.t;
-        if (dt > 0) speedPxMs = Math.abs(oldest.pos - newest.pos) / dt;
-      }
-      // Fallback: Gesamtstrecke / Gesamtzeit — fängt schnelle Flicks mit wenig touchmove-Events
-      const totalTime = performance.now() - startTime;
-      if (totalTime > 0) {
-        const totalSpeed = Math.abs(diff) / totalTime;
-        speedPxMs = Math.max(speedPxMs, totalSpeed);
+        if (dt > 0) velocityPxMs = (oldest.pos - newest.pos) / dt;
       }
 
-      if (speedPxMs >= MOMENTUM_THRESHOLD_PX_MS) scheduleMomentum(dir, speedPxMs);
+      const dim = getDim();
+      // 150ms Momentum-Projektion → bestimmt den Ziel-Index
+      const projectedPos = posRef.current + velocityPxMs * 150;
+      const targetIdx = Math.round(projectedPos / dim);
+      snapTo(targetIdx);
     };
 
     const onCancel = () => {
+      if (!gestureActive) return;
       gestureActive = false;
+      snapTo(indexRef.current);
     };
 
     window.addEventListener("touchstart", onStart, { passive: true });
-    // non-passive: damit e.preventDefault() in onMove wirkt
     window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("touchend", onEnd);
     window.addEventListener("touchcancel", onCancel);
@@ -138,75 +173,97 @@ export function useSnapScroll({
       window.removeEventListener("touchend", onEnd);
       window.removeEventListener("touchcancel", onCancel);
     };
-  }, [axis, advance, scheduleMomentum]);
+  }, [axis, getDim, applyPos, snapTo]);
 
-  // Trackpad / Mausrad (Desktop)
+  // Trackpad / Mausrad
   useEffect(() => {
-    let accumulated = 0;
-    let resetId: ReturnType<typeof setTimeout> | null = null;
+    let snapId: ReturnType<typeof setTimeout> | null = null;
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      if (lockedRef.current) {
-        accumulated = 0;
-        return;
-      }
+      cancelAnimationFrame(rafRef.current);
       const delta = axis === "x" ? e.deltaX || e.deltaY : e.deltaY;
-      accumulated += delta;
-      if (resetId) clearTimeout(resetId);
-      resetId = setTimeout(() => {
-        accumulated = 0;
+      posRef.current += delta;
+      applyPos(posRef.current);
+      if (snapId) clearTimeout(snapId);
+      snapId = setTimeout(() => {
+        const dim = getDim();
+        snapTo(Math.round(posRef.current / dim));
+        snapId = null;
       }, 150);
-      if (accumulated > 80) {
-        advance(1);
-        accumulated = 0;
-      } else if (accumulated < -80) {
-        advance(-1);
-        accumulated = 0;
-      }
     };
+
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       window.removeEventListener("wheel", onWheel);
-      if (resetId) clearTimeout(resetId);
+      if (snapId) clearTimeout(snapId);
     };
-  }, [axis, advance]);
+  }, [axis, getDim, applyPos, snapTo]);
 
-  // Maus-Drag nur horizontal für Stadt-Story auf Desktop
-  // Schutz vor iOS synthetischen Mouse-Events nach touchend
+  // Maus-Drag horizontal für Stadt-Story auf Desktop
   useEffect(() => {
     if (axis !== "x") return;
     let startX = 0;
+    let startWorldPos = 0;
     let tracking = false;
     let lastTouchEnd = 0;
 
-    const onTouchEndGuard = () => {
+    const onTouchEnd = () => {
       lastTouchEnd = Date.now();
     };
-
     const onDown = (e: MouseEvent) => {
-      // iOS feuert nach touchend synthetische mousedown/mouseup — ignorieren
       if (Date.now() - lastTouchEnd < 600) return;
+      cancelAnimationFrame(rafRef.current);
       startX = e.clientX;
+      startWorldPos = posRef.current;
       tracking = true;
     };
-    const onUp = (e: MouseEvent) => {
+    const onMove = (e: MouseEvent) => {
       if (!tracking) return;
-      if (Date.now() - lastTouchEnd < 600) { tracking = false; return; }
+      posRef.current = startWorldPos + (startX - e.clientX);
+      applyPos(posRef.current);
+    };
+    const onUp = () => {
+      if (!tracking) return;
       tracking = false;
-      const diff = startX - e.clientX;
-      if (diff > 60) advance(1);
-      else if (diff < -60) advance(-1);
+      if (Date.now() - lastTouchEnd < 600) {
+        snapTo(indexRef.current);
+        return;
+      }
+      snapTo(Math.round(posRef.current / getDim()));
     };
 
-    window.addEventListener("touchend", onTouchEndGuard);
+    window.addEventListener("touchend", onTouchEnd);
     window.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
-      window.removeEventListener("touchend", onTouchEndGuard);
+      window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [axis, advance]);
+  }, [axis, getDim, applyPos, snapTo]);
 
-  return { currentIndex };
+  // Stabile Callback-Ref-Factory — React ruft den Callback nicht erneut auf bei Re-Render
+  const slideRef = useCallback(
+    (i: number) => {
+      if (!callbacksRef.current[i]) {
+        callbacksRef.current[i] = (el: HTMLElement | null) => {
+          slidesRef.current[i] = el;
+          if (el) {
+            const dim = getDim();
+            const offset = i * dim - posRef.current;
+            const tr = axis === "y" ? "Y" : "X";
+            el.style.transform = `translate${tr}(${offset}px)`;
+            el.style.willChange = "transform, opacity";
+          }
+        };
+      }
+      return callbacksRef.current[i];
+    },
+    [axis, getDim]
+  );
+
+  return { currentIndex, slideRef };
 }

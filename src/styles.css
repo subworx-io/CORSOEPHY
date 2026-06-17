@@ -151,7 +151,6 @@
   html {
     background-color: oklch(0.08 0 0);
     overscroll-behavior: none;
-    height: 100%;
   }
 
   body {
@@ -160,7 +159,6 @@
     font-family: "Inter", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
-    height: 100%;
   }
 
   .material-symbols-outlined {
