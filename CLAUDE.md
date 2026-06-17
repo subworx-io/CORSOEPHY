@@ -2,7 +2,7 @@
 
 ## Was wird hier gebaut
 
-**Korso** ist eine lokale Stadtbeobachtungs-App mit Dating-Ausgang.
+**Corso** ist eine lokale Stadtbeobachtungs-App mit Dating-Ausgang.
 Jeden Abend "geht deine Stadt gemeinsam spazieren": rohe, ungeschnittene Video-Momente echter Menschen aus der Umgebung. Um 20:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden. Publikum verfällt nach 24 Stunden wenn man nicht nachliefert.
 
 **Pilot:** Düsseldorf, 60–100 zahlende Mitglieder (€9/Monat), 4–6 Wochen, Telegram-Bot als MVP-Kanal.

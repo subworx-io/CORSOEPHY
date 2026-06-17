@@ -1,14 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PORTRAITS } from "@/assets/portraits";
 import { useFollow } from "@/lib/follow-context";
+import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Korso — deine Stadt heute Abend" },
+      { title: "Corso — deine Stadt heute Abend" },
       { name: "description", content: "Jeden Abend geht deine Stadt gemeinsam spazieren. Echte Momente, echte Menschen." },
-      { property: "og:title", content: "Korso — deine Stadt heute Abend" },
+      { property: "og:title", content: "Corso — deine Stadt heute Abend" },
       { property: "og:description", content: "Jeden Abend geht deine Stadt gemeinsam spazieren." },
     ],
   }),
@@ -20,20 +21,25 @@ type CountdownSlide = { kind: "countdown" };
 type TileSlide = { kind: "tile" } & Tile;
 type Slide = CountdownSlide | TileSlide;
 
-const COUNTDOWN_TARGET = new Date("2026-07-01T00:00:00").getTime();
+// Stadt-Story ist jeden Tag um 20:00 — Countdown läuft auf die nächste 20:00 und rollt danach automatisch weiter
+function nextStoryTarget(now: number) {
+  const target = new Date(now);
+  target.setHours(20, 0, 0, 0);
+  if (now >= target.getTime()) target.setDate(target.getDate() + 1);
+  return target.getTime();
+}
 
-function useCountdown(target: number) {
+function useCountdown() {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  const diff = Math.max(0, target - now);
-  const days = Math.floor(diff / 86400000);
-  const hours = Math.floor((diff % 86400000) / 3600000);
+  const diff = Math.max(0, nextStoryTarget(now) - now);
+  const hours = Math.floor(diff / 3600000);
   const minutes = Math.floor((diff % 3600000) / 60000);
   const seconds = Math.floor((diff % 60000) / 1000);
-  return { days, hours, minutes, seconds };
+  return { hours, minutes, seconds };
 }
 
 const pad = (n: number) => n.toString().padStart(2, "0");
@@ -41,19 +47,19 @@ const pad = (n: number) => n.toString().padStart(2, "0");
 // Discovery zeigt immer neue, unbekannte Personen aus der Stadt — kein Overlap mit "ich folge"
 const TILES: Tile[] = [
   { handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, alt: "High-fashion editorial portrait in a concrete studio." },
-  { handle: "@mia.galerie",   src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCMsc8hfp9Lbs2mI6x5b6hEh9SfxUE1TjjuHKTvHmydbuoH7vuAAqenojfX6oG5lugKEGg6KWZupfy7An0ESbZ6VHN0G_hhUmnwsFlaLZt4V1JQDCIUFuUusg3kdsU5P1dFKWqMM585mTZB-G-qtWMnrW15E4qOro9c287DDc-U3vH7CiO30if3qzRXY9a6UOGP2W8K-WujTatDlp1ivyAk8LCQagacw5lNQCpnrblMNr46SHLkeyf-g_8A06MZRol7ODgXJhkrGeQ", alt: "Artist in a bright white-walled gallery." },
+  { handle: "@mia.galerie",   src: PORTRAITS.miaGalerie,   alt: "Black-and-white street portrait of a woman walking in the city." },
   { handle: "@jan.motor",     src: PORTRAITS.jannisLux,    alt: "1960s retro motorsport fashion editorial." },
-  { handle: "@clara_mondo",   src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCNAGoqfZYjD0KGwJ5NyYi0NPETnyhYBJKWL-KIu01CeJxxUTXERz5QQKlco40pWoCbIPCbqb8Z40YEqy9KeC5KGaZbV4OQvCHnyMYpUkOqhb_xDx44OBCGn5HRifDnj2BpxrRb6qTmi5xgRG4bOU8jCrwtP_vliEQZOHNA2n6HUgnYz6QN5DbTg18FZNRLIm-c2YpVROf77tbL4q11x6G0mFf3EQIo7uFZfNhlmEJHi7RBhj-Q66qsegy-0G_yjdV0RqRWc2_KdhI", alt: "Portrait against a white architectural wall." },
-  { handle: "@paul.altstadt", src: "https://lh3.googleusercontent.com/aida-public/AB6AXuAPcJaaO61LZuueix4hrVPy7HIpLRzj6uvsrz4OCNOVv6BagJwwqSZobRp-Vax-IAmF0rC_nWE1rY4Pyg5B83__bFXsS7hzequ1Cu1Wo4LizHH8VLGVqbwGa2pvbBSa6MhDnmzo1KEwpAJzBfmgIO4DVcysq9gWUQi0cqGWPgCD4P6VyX4BRHlkbnPuLV2sGlN-3iTiD1mNDsLrDC1RPCOgLVNJf3An3KsDPzDCJpNgEy_9Rdq4Op2GNPa0jfjzo3fFz4itzZU348I", alt: "Creative professional in a high-contrast urban scene." },
+  { handle: "@clara_mondo",   src: PORTRAITS.claraMondo,   alt: "Black-and-white portrait of a woman sitting on a curb." },
+  { handle: "@paul.altstadt", src: PORTRAITS.paulAltstadt, alt: "Black-and-white street portrait of a man walking in the city." },
   { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    alt: "Close-up editorial portrait with braids and feathered collar." },
   { handle: "@david.bruecke", src: PORTRAITS.davidArch,    alt: "Monochrome street portrait with sunglasses." },
   { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     alt: "Editorial portrait grid of a young man in studio light." },
   { handle: "@leo.see",       src: PORTRAITS.leoWild,      alt: "Atmospheric sepia-toned portrait in a foggy field." },
 ];
 
-const SLIDES: Slide[] = [
+const buildSlides = (tiles: Tile[]): Slide[] => [
   { kind: "countdown" },
-  ...TILES.map((t) => ({ kind: "tile" as const, ...t })),
+  ...tiles.map((t) => ({ kind: "tile" as const, ...t })),
 ];
 
 function FollowButton({ handle, src, onBurst }: { handle: string; src: string; onBurst: () => void }) {
@@ -87,90 +93,29 @@ function FollowButton({ handle, src, onBurst }: { handle: string; src: string; o
 }
 
 function Index() {
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [burstHandle, setBurstHandle] = useState<string | null>(null);
-  const isLockedRef = useRef(false);
-  const { days, hours, minutes, seconds } = useCountdown(COUNTDOWN_TARGET);
+  const { hours, minutes, seconds } = useCountdown();
+
+  // Discovery zeigt nur Fremde: Personen, denen du beim Öffnen schon folgst, werden ausgeblendet.
+  // Folgst du jemandem während der Session, bleibt die Kachel sichtbar (Herz-Burst + "folgst du").
+  const { followed } = useFollow();
+  const [excludedHandles] = useState(() => new Set(followed.keys()));
+  const slides = useMemo(
+    () => buildSlides(TILES.filter((t) => !excludedHandles.has(t.handle))),
+    [excludedHandles]
+  );
+
+  const { currentIndex } = useSnapScroll({ count: slides.length, axis: "y" });
 
   const triggerBurst = (handle: string) => {
     setBurstHandle(handle);
     setTimeout(() => setBurstHandle(null), 700);
   };
 
-  const goNext = useCallback(() => {
-    if (isLockedRef.current) return;
-    setCurrentIndex((i) => {
-      if (i >= SLIDES.length - 1) return i;
-      isLockedRef.current = true;
-      setTimeout(() => { isLockedRef.current = false; }, 700);
-      return i + 1;
-    });
-  }, []);
-
-  const goPrev = useCallback(() => {
-    if (isLockedRef.current) return;
-    setCurrentIndex((i) => {
-      if (i <= 0) return i;
-      isLockedRef.current = true;
-      setTimeout(() => { isLockedRef.current = false; }, 700);
-      return i - 1;
-    });
-  }, []);
-
-  useEffect(() => {
-    let accumulated = 0;
-    const threshold = 80;
-    let resetId: ReturnType<typeof setTimeout> | null = null;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (isLockedRef.current) {
-        accumulated = 0;
-        return;
-      }
-      accumulated += e.deltaY;
-      if (resetId) clearTimeout(resetId);
-      resetId = setTimeout(() => { accumulated = 0; }, 150);
-      if (accumulated > threshold) {
-        goNext();
-        accumulated = 0;
-      } else if (accumulated < -threshold) {
-        goPrev();
-        accumulated = 0;
-      }
-    };
-    window.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      window.removeEventListener("wheel", onWheel);
-      if (resetId) clearTimeout(resetId);
-    };
-  }, [goNext, goPrev]);
-
-  useEffect(() => {
-    let startY = 0;
-    let tracking = false;
-    const onTouchStart = (e: TouchEvent) => {
-      startY = e.touches[0].clientY;
-      tracking = true;
-    };
-    const onTouchEnd = (e: TouchEvent) => {
-      if (!tracking) return;
-      tracking = false;
-      const diff = startY - e.changedTouches[0].clientY;
-      if (diff > 60) goNext();
-      else if (diff < -60) goPrev();
-    };
-    window.addEventListener("touchstart", onTouchStart);
-    window.addEventListener("touchend", onTouchEnd);
-    return () => {
-      window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchend", onTouchEnd);
-    };
-  }, [goNext, goPrev]);
-
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
       {/* Slides */}
-      {SLIDES.map((slide, i) => {
+      {slides.map((slide, i) => {
         const offset = i - currentIndex;
         const isActive = offset === 0;
         const clampedOffset = Math.max(-1, Math.min(1, offset));
@@ -184,7 +129,7 @@ function Index() {
               transform: `translateY(${clampedOffset * 100}%)`,
               opacity: isActive || isNeighbor ? 1 : 0,
               zIndex: isActive ? 10 : 5,
-              transition: "transform 0.7s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.5s ease",
+              transition: `transform ${SNAP_MS}ms cubic-bezier(0.2,0.9,0.25,1), opacity ${SNAP_MS - 80}ms ease`,
               willChange: "transform, opacity",
             }}
           >
@@ -239,15 +184,14 @@ function Index() {
                     className="w-full h-full flex flex-col items-center justify-center text-white relative"
                     style={{
                       background:
-                        "radial-gradient(circle at 30% 20=20%, rgba(255,255,255,0.08), transparent 60%), radial-gradient(circle at 70% 80%, rgba(255,255,255,0.04), transparent 55%), linear-gradient(160deg, #111 0%, #050505 100%)",
+                        "radial-gradient(circle at 30% 20%, rgba(255,255,255,0.08), transparent 60%), radial-gradient(circle at 70% 80%, rgba(255,255,255,0.04), transparent 55%), linear-gradient(160deg, #111 0%, #050505 100%)",
                     }}
                   >
                     <div className="text-[11px] uppercase tracking-[0.4em] text-white/50 mb-6 font-medium">
-                      Korso — heute Abend in
+                      Corso — Stadt-Story um 20:00
                     </div>
                     <div className="flex items-end gap-3 tabular-nums">
                       {[
-                        { v: pad(days), l: "Tage" },
                         { v: pad(hours), l: "Std" },
                         { v: pad(minutes), l: "Min" },
                         { v: pad(seconds), l: "Sek" },
@@ -257,7 +201,7 @@ function Index() {
                             <span className="text-5xl font-semibold tracking-tight">{u.v}</span>
                             <span className="text-[10px] uppercase tracking-[0.25em] text-white/40 mt-2 font-medium">{u.l}</span>
                           </div>
-                          {idx < 3 && <span className="text-3xl font-semibold text-white/30 pb-6">:</span>}
+                          {idx < 2 && <span className="text-3xl font-semibold text-white/30 pb-6">:</span>}
                         </div>
                       ))}
                     </div>
@@ -284,7 +228,7 @@ function Index() {
 
       {/* Page indicators */}
       <div className="absolute top-1/2 right-3 z-20 -translate-y-1/2 flex flex-col gap-1.5">
-        {SLIDES.map((_, i) => (
+        {slides.map((_, i) => (
           <div
             key={i}
             className={`w-1.5 rounded-full transition-all duration-300 ${

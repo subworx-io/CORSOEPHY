@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/record")({
   head: () => ({
     meta: [
-      { title: "Aufnahme — Korso" },
+      { title: "Aufnahme — Corso" },
       { name: "description", content: "Nimm deinen Moment auf." },
     ],
   }),

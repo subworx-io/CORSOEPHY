@@ -1,11 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { PORTRAITS } from "@/assets/portraits";
+import { useFollow } from "@/lib/follow-context";
+import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
     meta: [
-      { title: "Stadt-Story — Korso" },
+      { title: "Stadt-Story — Corso" },
       { name: "description", content: "20:00 — Deine Stadt enthüllt sich." },
     ],
   }),
@@ -15,136 +17,28 @@ export const Route = createFileRoute("/story")({
 /* ---- Demo clips (reuse existing imagery) ---- */
 interface Clip {
   id: string;
+  handle: string;
   src: string;
   city: string;
   time: string;
   caption: string;
 }
 
+// 🔒 Stadt-Story = genau 8 Momente (PRD 4.6). Handles konsistent zur Discovery.
 const CLIPS: Clip[] = [
-  {
-    id: "c1",
-    src: PORTRAITS.eliasFashion,
-    city: "Düsseldorf",
-    time: "20:00",
-    caption: "Am Burgplatz",
-  },
-  {
-    id: "c2",
-    src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCMsc8hfp9Lbs2mI6x5b6hEh9SfxUE1TjjuHKTvHmydbuoH7vuAAqenojfX6oG5lugKEGg6KWZupfy7An0ESbZ6VHN0G_hhUmnwsFlaLZt4V1JQDCIUFuUusg3kdsU5P1dFKWqMM585mTZB-G-qtWMnrW15E4qOro9c287DDc-U3vH7CiO30if3qzRXY9a6UOGP2W8K-WujTatDlp1ivyAk8LCQagacw5lNQCpnrblMNr46SHLkeyf-g_8A06MZRol7ODgXJhkrGeQ",
-    city: "Düsseldorf",
-    time: "20:00",
-    caption: "In der Galerie",
-  },
-  {
-    id: "c3",
-    src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCuu59PSEWUsK2k3Hywp03qrPdpdlxzVlyF0NtaVDa5FIxouDSRPHQY8tXBNu9yQhmVuqKrHmRq7azYU2_JJXa45Jjt5VESxpmHdZ5pQBUJ_BsHVlAmfwCh9ZuzeLkLdMHwDDJ2WG3Q_YkWUcmaHbWlYrKSvx1t987qzh1sBz9Bgo5vO_CEYoQETOTK9RCeyt8p3AXINmeM86s7n1QrJTCUT5wQ6THSzpaHhfS0708kZ8ttZVAfxzevERxsbUmxqHZR2TJVzCiJ2WM",
-    city: "Düsseldorf",
-    time: "20:00",
-    caption: "An der Königsallee",
-  },
-  {
-    id: "c4",
-    src: PORTRAITS.davidArch,
-    city: "Düsseldorf",
-    time: "20:00",
-    caption: "Auf der Brücke",
-  },
-  {
-    id: "c5",
-    src: PORTRAITS.leoWild,
-    city: "Düsseldorf",
-    time: "20:00",
-    caption: "Am Rhein",
-  },
+  { id: "c1", handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, city: "Düsseldorf", time: "20:00", caption: "Am Burgplatz" },
+  { id: "c2", handle: "@mia.galerie",   src: PORTRAITS.miaGalerie,   city: "Düsseldorf", time: "20:00", caption: "In der Galerie" },
+  { id: "c3", handle: "@clara_mondo",   src: PORTRAITS.claraMondo,   city: "Düsseldorf", time: "20:00", caption: "An der Königsallee" },
+  { id: "c4", handle: "@david.bruecke", src: PORTRAITS.davidArch, city: "Düsseldorf", time: "20:00", caption: "Auf der Brücke" },
+  { id: "c5", handle: "@leo.see",       src: PORTRAITS.leoWild,   city: "Düsseldorf", time: "20:00", caption: "Am Rhein" },
+  { id: "c6", handle: "@jan.motor",     src: PORTRAITS.jannisLux, city: "Düsseldorf", time: "20:00", caption: "Vor dem Schauspielhaus" },
+  { id: "c7", handle: "@lena.rhein",    src: PORTRAITS.saraSound, city: "Düsseldorf", time: "20:00", caption: "Im Hofgarten" },
+  { id: "c8", handle: "@nina.medien",   src: PORTRAITS.ninaPure,  city: "Düsseldorf", time: "20:00", caption: "In der Altstadt" },
 ];
 
-/* ---- Swipe helpers ---- */
-const SWIPE_THRESHOLD = 60;
-
 function StoryPage() {
-  const [index, setIndex] = useState(0);
-  const [followed, setFollowed] = useState<Set<string>>(new Set());
-  const isLockedRef = useRef(false);
-
-  const goNext = useCallback(() => {
-    if (isLockedRef.current) return;
-    setIndex((i) => {
-      if (i >= CLIPS.length - 1) return i;
-      isLockedRef.current = true;
-      setTimeout(() => { isLockedRef.current = false; }, 500);
-      return i + 1;
-    });
-  }, []);
-
-  const goPrev = useCallback(() => {
-    if (isLockedRef.current) return;
-    setIndex((i) => {
-      if (i <= 0) return i;
-      isLockedRef.current = true;
-      setTimeout(() => { isLockedRef.current = false; }, 500);
-      return i - 1;
-    });
-  }, []);
-
-  /* Touch swipe */
-  useEffect(() => {
-    let startX = 0;
-    let tracking = false;
-    const onStart = (e: TouchEvent) => {
-      startX = e.touches[0].clientX;
-      tracking = true;
-    };
-    const onEnd = (e: TouchEvent) => {
-      if (!tracking) return;
-      tracking = false;
-      const diff = startX - e.changedTouches[0].clientX;
-      if (diff > SWIPE_THRESHOLD) goNext();
-      else if (diff < -SWIPE_THRESHOLD) goPrev();
-    };
-    window.addEventListener("touchstart", onStart);
-    window.addEventListener("touchend", onEnd);
-    return () => {
-      window.removeEventListener("touchstart", onStart);
-      window.removeEventListener("touchend", onEnd);
-    };
-  }, [goNext, goPrev]);
-
-  /* Mouse / trackpad swipe */
-  useEffect(() => {
-    let startX = 0;
-    let tracking = false;
-    const onDown = (e: MouseEvent) => {
-      startX = e.clientX;
-      tracking = true;
-    };
-    const onUp = (e: MouseEvent) => {
-      if (!tracking) return;
-      tracking = false;
-      const diff = startX - e.clientX;
-      if (diff > SWIPE_THRESHOLD) goNext();
-      else if (diff < -SWIPE_THRESHOLD) goPrev();
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [goNext, goPrev]);
-
-  const clip = CLIPS[index];
-
-  const toggleFollow = useCallback(() => {
-    setFollowed((prev) => {
-      const next = new Set(prev);
-      if (next.has(clip.id)) next.delete(clip.id);
-      else next.add(clip.id);
-      return next;
-    });
-  }, [clip.id]);
-
-  const isFollowed = followed.has(clip.id);
+  const { currentIndex: index } = useSnapScroll({ count: CLIPS.length, axis: "x" });
+  const { isFollowing, follow } = useFollow();
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
@@ -154,6 +48,7 @@ function StoryPage() {
           const offset = i - index;
           const isActive = offset === 0;
           const isNeighbor = Math.abs(offset) === 1;
+          const following = isFollowing(c.handle);
 
           return (
             <div
@@ -163,7 +58,7 @@ function StoryPage() {
                 transform: `translateX(${offset * 100}%)`,
                 opacity: isActive || isNeighbor ? 1 : 0,
                 zIndex: isActive ? 10 : 5,
-                transition: "transform 0.5s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.4s ease",
+                transition: `transform ${SNAP_MS - 60}ms cubic-bezier(0.2,0.9,0.25,1), opacity ${SNAP_MS - 120}ms ease`,
                 willChange: "transform, opacity",
               }}
             >
@@ -203,17 +98,18 @@ function StoryPage() {
                     {c.caption}
                   </p>
                   <button
-                    onClick={toggleFollow}
+                    onClick={() => follow({ handle: c.handle, src: c.src })}
+                    disabled={following}
                     className={`shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95 ${
-                      isFollowed
+                      following
                         ? "bg-white text-black"
                         : "bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25"
                     }`}
                   >
                     <span className="material-symbols-outlined text-[18px]">
-                      {isFollowed ? "check" : "person_add"}
+                      {following ? "check" : "person_add"}
                     </span>
-                    {isFollowed ? "Folgst du" : "Folgen"}
+                    {following ? "Folgst du" : "Folgen"}
                   </button>
                 </div>
               </div>

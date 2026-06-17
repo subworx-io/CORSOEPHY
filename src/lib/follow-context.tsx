@@ -4,26 +4,29 @@ import { PORTRAITS } from "@/assets/portraits";
 export interface FollowedPerson {
   handle: string;
   src: string | null;
-  followState: "today" | "renewed" | "renew" | "nudge";
+  // Status des Follows selbst (heute frisch / erneuert / wartet auf Erneuerung)
+  followState: "today" | "renewed" | "renew";
+  // Unabhängig davon: hat die Person heute schon einen Moment gepostet?
+  hasPostedToday: boolean;
 }
 
 interface FollowContextType {
   followed: Map<string, FollowedPerson>;
   isFollowing: (handle: string) => boolean;
-  follow: (person: Omit<FollowedPerson, "followState">) => void;
+  follow: (person: Pick<FollowedPerson, "handle" | "src">) => void;
 }
 
 const FollowContext = createContext<FollowContextType | null>(null);
 
 const INITIAL_FOLLOWED: FollowedPerson[] = [
-  { handle: "@sara_sound",   src: PORTRAITS.saraSound,    followState: "today" },
-  { handle: "@elias_v",      src: PORTRAITS.eliasFashion, followState: "renewed" },
-  { handle: "@david_arch",   src: PORTRAITS.davidArch,    followState: "renew" },
-  { handle: "@marah.k",      src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCMsc8hfp9Lbs2mI6x5b6hEh9SfxUE1TjjuHKTvHmydbuoH7vuAAqenojfX6oG5lugKEGg6KWZupfy7An0ESbZ6VHN0G_hhUmnwsFlaLZt4V1JQDCIUFuUusg3kdsU5P1dFKWqMM585mTZB-G-qtWMnrW15E4qOro9c287DDc-U3vH7CiO30if3qzRXY9a6UOGP2W8K-WujTatDlp1ivyAk8LCQagacw5lNQCpnrblMNr46SHLkeyf-g_8A06MZRol7ODgXJhkrGeQ", followState: "today" },
-  { handle: "@nina.pure",    src: PORTRAITS.ninaPure,     followState: "nudge" },
-  { handle: "@jannis_lux",   src: PORTRAITS.jannisLux,    followState: "nudge" },
-  { handle: "@leo.wild",     src: PORTRAITS.leoWild,      followState: "renew" },
-  { handle: "@lukas.berlin", src: "https://lh3.googleusercontent.com/aida-public/AB6AXuAPcJaaO61LZuueix4hrVPy7HIpLRzj6uvsrz4OCNOVv6BagJwwqSZobRp-Vax-IAmF0rC_nWE1rY4Pyg5B83__bFXsS7hzequ1Cu1Wo4LizHH8VLGVqbwGa2pvbBSa6MhDnmzo1KEwpAJzBfmgIO4DVcysq9gWUQi0cqGWPgCD4P6VyX4BRHlkbnPuLV2sGlN-3iTiD1mNDsLrDC1RPCOgLVNJf3An3KsDPzDCJpNgEy_9Rdq4Op2GNPa0jfjzo3fFz4itzZU348I", followState: "renewed" },
+  { handle: "@sara_sound",   src: PORTRAITS.saraSound,    followState: "today",   hasPostedToday: true },
+  { handle: "@elias_v",      src: PORTRAITS.eliasFashion, followState: "renewed", hasPostedToday: true },
+  { handle: "@david_arch",   src: PORTRAITS.davidArch,    followState: "renew",   hasPostedToday: true },
+  { handle: "@marah.k",      src: PORTRAITS.miaGalerie,   followState: "today",   hasPostedToday: true },
+  { handle: "@nina.pure",    src: PORTRAITS.ninaPure,     followState: "renew",   hasPostedToday: false },
+  { handle: "@jannis_lux",   src: PORTRAITS.jannisLux,    followState: "renew",   hasPostedToday: false },
+  { handle: "@leo.wild",     src: PORTRAITS.leoWild,      followState: "renew",   hasPostedToday: true },
+  { handle: "@lukas.berlin", src: PORTRAITS.paulAltstadt, followState: "renewed", hasPostedToday: true },
 ];
 
 export function FollowProvider({ children }: { children: ReactNode }) {
@@ -33,10 +36,15 @@ export function FollowProvider({ children }: { children: ReactNode }) {
 
   const isFollowing = (handle: string) => followed.has(handle);
 
-  const follow = (person: Omit<FollowedPerson, "followState">) => {
+  const follow = (person: Pick<FollowedPerson, "handle" | "src">) => {
     setFollowed((prev) => {
       if (prev.has(person.handle)) return prev;
-      return new Map(prev).set(person.handle, { ...person, followState: "today" });
+      // Neu gefolgte Person stammt aus Discovery/Stadt-Story → hat heute gepostet
+      return new Map(prev).set(person.handle, {
+        ...person,
+        followState: "today",
+        hasPostedToday: true,
+      });
     });
   };
 

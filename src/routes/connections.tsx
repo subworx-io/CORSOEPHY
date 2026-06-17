@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useFollow, type FollowedPerson } from "@/lib/follow-context";
+import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
 
 export const Route = createFileRoute("/connections")({
   head: () => ({
     meta: [
-      { title: "ich folge — Korso" },
+      { title: "ich folge — Corso" },
       { name: "description", content: "Menschen denen du folgst." },
     ],
   }),
@@ -28,8 +29,8 @@ function HeartIcon({ filled, className = "" }: { filled: boolean; className?: st
 function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: boolean }) {
   const [followState, setFollowState] = useState<FollowState>(person.followState);
   const [nudged, setNudged] = useState(false);
-  // hasPostedToday ist fix — ändert sich nicht wenn der User den Follow erneuert
-  const hasPostedToday = person.followState !== "nudge";
+  // Post-Status und Follow-Status sind getrennt — Follow erneuern ändert nicht, ob heute gepostet wurde
+  const hasPostedToday = person.hasPostedToday;
   const hasImage = person.src !== null && hasPostedToday;
 
   return (
@@ -138,69 +139,21 @@ function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: b
 function ConnectionsPage() {
   const { followed } = useFollow();
   const people = Array.from(followed.values());
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const isLockedRef = useRef(false);
+  const { currentIndex } = useSnapScroll({ count: people.length, axis: "y" });
 
-  const goNext = useCallback(() => {
-    if (isLockedRef.current) return;
-    setCurrentIndex((i) => {
-      if (i >= people.length - 1) return i;
-      isLockedRef.current = true;
-      setTimeout(() => { isLockedRef.current = false; }, 700);
-      return i + 1;
-    });
-  }, []);
-
-  const goPrev = useCallback(() => {
-    if (isLockedRef.current) return;
-    setCurrentIndex((i) => {
-      if (i <= 0) return i;
-      isLockedRef.current = true;
-      setTimeout(() => { isLockedRef.current = false; }, 700);
-      return i - 1;
-    });
-  }, []);
-
-  // Trackpad / Mausrad
-  useEffect(() => {
-    let accumulated = 0;
-    const threshold = 80;
-    let resetId: ReturnType<typeof setTimeout> | null = null;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (isLockedRef.current) { accumulated = 0; return; }
-      accumulated += e.deltaY;
-      if (resetId) clearTimeout(resetId);
-      resetId = setTimeout(() => { accumulated = 0; }, 150);
-      if (accumulated > threshold) { goNext(); accumulated = 0; }
-      else if (accumulated < -threshold) { goPrev(); accumulated = 0; }
-    };
-    window.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      window.removeEventListener("wheel", onWheel);
-      if (resetId) clearTimeout(resetId);
-    };
-  }, [goNext, goPrev]);
-
-  // Touch Swipe
-  useEffect(() => {
-    let startY = 0;
-    let tracking = false;
-    const onTouchStart = (e: TouchEvent) => { startY = e.touches[0].clientY; tracking = true; };
-    const onTouchEnd = (e: TouchEvent) => {
-      if (!tracking) return;
-      tracking = false;
-      const diff = startY - e.changedTouches[0].clientY;
-      if (diff > 60) goNext();
-      else if (diff < -60) goPrev();
-    };
-    window.addEventListener("touchstart", onTouchStart);
-    window.addEventListener("touchend", onTouchEnd);
-    return () => {
-      window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchend", onTouchEnd);
-    };
-  }, [goNext, goPrev]);
+  if (people.length === 0) {
+    return (
+      <div className="relative h-dvh w-full flex flex-col items-center justify-center bg-neutral-950 px-8 text-center">
+        <div className="w-20 h-20 rounded-full bg-white/8 border border-white/10 flex items-center justify-center mb-6">
+          <span className="material-symbols-outlined text-white/25 text-[36px]">explore</span>
+        </div>
+        <p className="text-white text-lg font-semibold tracking-tight">Noch niemand</p>
+        <p className="mt-2 text-white/40 text-sm leading-snug max-w-[15rem]">
+          Folge Menschen in der Discovery — sie erscheinen hier, bis ihr Publikum verfällt.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
@@ -218,7 +171,7 @@ function ConnectionsPage() {
               transform: `translateY(${clampedOffset * 100}%)`,
               opacity: isActive || isNeighbor ? 1 : 0,
               zIndex: isActive ? 10 : 5,
-              transition: "transform 0.7s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.5s ease",
+              transition: `transform ${SNAP_MS}ms cubic-bezier(0.2,0.9,0.25,1), opacity ${SNAP_MS - 80}ms ease`,
               willChange: "transform, opacity",
             }}
           >

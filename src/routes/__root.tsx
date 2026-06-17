@@ -15,7 +15,7 @@ const TABS = [
   { to: "/connections" as const, label: "ich folge", icon: "favorite" },
   { to: "/story" as const, label: "Story", icon: "movie" },
   { to: "/record" as const, label: "Aufnahme", icon: "videocam" },
-  { to: "/feedback" as const, label: "Dashboard", icon: "trending_up" },
+  { to: "/feedback" as const, label: "Rücklauf", icon: "trending_up" },
 ];
 
 function BottomNav() {
@@ -123,15 +123,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       // Mobile-first viewport: kein Zoom, skaliert wie eine native App
       { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" },
-      { title: "Korso" },
+      { title: "Corso" },
       { name: "description", content: "Deine Stadt. Jeden Abend." },
       // PWA: Als App installierbar (iOS + Android)
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-      { name: "apple-mobile-web-app-title", content: "Korso" },
+      { name: "apple-mobile-web-app-title", content: "Corso" },
       { name: "theme-color", content: "#0a0a0a" },
-      { property: "og:title", content: "Korso" },
+      { property: "og:title", content: "Corso" },
       { property: "og:description", content: "Deine Stadt. Jeden Abend." },
       { property: "og:type", content: "website" },
     ],
