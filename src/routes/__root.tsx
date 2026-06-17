@@ -14,7 +14,7 @@ const TABS = [
   { to: "/" as const, label: "Discovery", icon: "explore" },
   { to: "/story" as const, label: "Story", icon: "movie" },
   { to: "/record" as const, label: "Aufnahme", icon: "videocam" },
-  { to: "/connections" as const, label: "Korso", icon: "favorite" },
+  { to: "/connections" as const, label: "ich folge", icon: "favorite" },
   { to: "/feedback" as const, label: "Rücklauf", icon: "trending_up" },
 ];
 

@@ -181,8 +181,9 @@ function Index() {
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
-                        <button className="bg-white/95 backdrop-blur-sm text-black px-4 py-1.5 text-sm font-semibold rounded-full hover:bg-white transition-colors active:scale-95">
-                          Ansehen
+                        <button className="bg-white/95 backdrop-blur-sm text-black px-4 py-1.5 text-sm font-semibold rounded-full hover:bg-white transition-colors active:scale-95 flex items-center gap-1.5">
+                          Folgen
+                          <span className="material-symbols-outlined text-[16px] leading-none" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
                         </button>
                       </div>
                     </div>
