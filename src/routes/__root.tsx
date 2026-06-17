@@ -15,7 +15,7 @@ const TABS = [
   { to: "/story" as const, label: "Story", icon: "movie" },
   { to: "/record" as const, label: "Aufnahme", icon: "videocam" },
   { to: "/connections" as const, label: "ich folge", icon: "favorite" },
-  { to: "/feedback" as const, label: "Rücklauf", icon: "trending_up" },
+  { to: "/feedback" as const, label: "Dashboard", icon: "trending_up" },
 ];
 
 function BottomNav() {
