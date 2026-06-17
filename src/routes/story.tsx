@@ -28,7 +28,7 @@ interface Clip {
 const CLIPS: Clip[] = [
   { id: "c1", handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, city: "Düsseldorf", time: "20:00", caption: "Am Burgplatz" },
   { id: "c2", handle: "@mia.galerie",   src: PORTRAITS.miaGalerie,   city: "Düsseldorf", time: "20:00", caption: "In der Galerie" },
-  { id: "c3", handle: "@clara_mondo",   src: PORTRAITS.claraMondo,   city: "Düsseldorf", time: "20:00", caption: "An der Königsallee" },
+  { id: "c3", handle: "@clara.mondo",   src: PORTRAITS.claraMondo,   city: "Düsseldorf", time: "20:00", caption: "An der Königsallee" },
   { id: "c4", handle: "@david.bruecke", src: PORTRAITS.davidArch, city: "Düsseldorf", time: "20:00", caption: "Auf der Brücke" },
   { id: "c5", handle: "@leo.see",       src: PORTRAITS.leoWild,   city: "Düsseldorf", time: "20:00", caption: "Am Rhein" },
   { id: "c6", handle: "@jan.motor",     src: PORTRAITS.jannisLux, city: "Düsseldorf", time: "20:00", caption: "Vor dem Schauspielhaus" },
@@ -39,9 +39,17 @@ const CLIPS: Clip[] = [
 function StoryPage() {
   const { currentIndex: index } = useSnapScroll({ count: CLIPS.length, axis: "x" });
   const { isFollowing, follow } = useFollow();
+  const [burstHandle, setBurstHandle] = useState<string | null>(null);
+
+  const handleFollow = (c: Clip) => {
+    if (isFollowing(c.handle)) return;
+    follow({ handle: c.handle, src: c.src });
+    setBurstHandle(c.handle);
+    setTimeout(() => setBurstHandle(null), 700);
+  };
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
+    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
       {/* Clips (horizontal stack) */}
       <div className="absolute inset-0 flex">
         {CLIPS.map((c, i) => {
@@ -80,6 +88,18 @@ function StoryPage() {
                 }}
               />
 
+              {/* Herz-Burst beim Folgen */}
+              {burstHandle === c.handle && (
+                <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                  <span
+                    className="material-symbols-outlined animate-heart-burst text-white"
+                    style={{ fontSize: "100px", fontVariationSettings: "'FILL' 1" }}
+                  >
+                    favorite
+                  </span>
+                </div>
+              )}
+
               {/* Top-left metadata */}
               <div className="absolute top-6 left-6 z-20">
                 <div className="flex items-center gap-2 text-white/90">
@@ -98,7 +118,7 @@ function StoryPage() {
                     {c.caption}
                   </p>
                   <button
-                    onClick={() => follow({ handle: c.handle, src: c.src })}
+                    onClick={() => handleFollow(c)}
                     disabled={following}
                     className={`shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95 ${
                       following
@@ -106,10 +126,13 @@ function StoryPage() {
                         : "bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25"
                     }`}
                   >
-                    <span className="material-symbols-outlined text-[18px]">
-                      {following ? "check" : "person_add"}
+                    {following ? "folgst du" : "Folgen"}
+                    <span
+                      className="material-symbols-outlined text-[18px] leading-none"
+                      style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
+                    >
+                      favorite
                     </span>
-                    {following ? "Folgst du" : "Folgen"}
                   </button>
                 </div>
               </div>

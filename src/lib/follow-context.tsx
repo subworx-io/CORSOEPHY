@@ -4,29 +4,60 @@ import { PORTRAITS } from "@/assets/portraits";
 export interface FollowedPerson {
   handle: string;
   src: string | null;
-  // Status des Follows selbst (heute frisch / erneuert / wartet auf Erneuerung)
-  followState: "today" | "renewed" | "renew";
-  // Unabhängig davon: hat die Person heute schon einen Moment gepostet?
+  // Zeitpunkt des letzten (Re-)Follows in ms — Basis für das verfallende Herz
+  followedAt: number;
+  // Hat die Person heute schon einen Moment gepostet? (unabhängig vom Follow-Status)
   hasPostedToday: boolean;
+  // Hat der User die Person heute angestupst?
+  nudged: boolean;
 }
 
 interface FollowContextType {
   followed: Map<string, FollowedPerson>;
   isFollowing: (handle: string) => boolean;
   follow: (person: Pick<FollowedPerson, "handle" | "src">) => void;
+  renew: (handle: string) => void;
+  nudge: (handle: string) => void;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Füllgrad des Herzens (0..1): voll bei frischem Follow, leer nach 24h. */
+export function followFill(followedAt: number, now: number) {
+  return Math.max(0, Math.min(1, 1 - (now - followedAt) / DAY_MS));
+}
+
+/** Jüngster 08:00-Reset vor `now`. */
+export function lastReset(now: number) {
+  const r = new Date(now);
+  r.setHours(8, 0, 0, 0);
+  if (now < r.getTime()) r.setDate(r.getDate() - 1);
+  return r.getTime();
+}
+
+/**
+ * Refolgen erst ab dem nächsten 08:00-Reset (PRD 4.3: kein Doppel-Follow am selben Tag).
+ * → erneuerbar, wenn der letzte Follow vor dem heutigen Reset lag.
+ */
+export function canRenew(followedAt: number, now: number) {
+  return followedAt < lastReset(now);
 }
 
 const FollowContext = createContext<FollowContextType | null>(null);
 
+// Demo-Zeitpunkte relativ zum App-Start, damit die Herzen unterschiedliche Füllstände zeigen.
+const NOW = Date.now();
+const H = 60 * 60 * 1000;
+
 const INITIAL_FOLLOWED: FollowedPerson[] = [
-  { handle: "@sara_sound",   src: PORTRAITS.saraSound,    followState: "today",   hasPostedToday: true },
-  { handle: "@elias_v",      src: PORTRAITS.eliasFashion, followState: "renewed", hasPostedToday: true },
-  { handle: "@david_arch",   src: PORTRAITS.davidArch,    followState: "renew",   hasPostedToday: true },
-  { handle: "@marah.k",      src: PORTRAITS.miaGalerie,   followState: "today",   hasPostedToday: true },
-  { handle: "@nina.pure",    src: PORTRAITS.ninaPure,     followState: "renew",   hasPostedToday: false },
-  { handle: "@jannis_lux",   src: PORTRAITS.jannisLux,    followState: "renew",   hasPostedToday: false },
-  { handle: "@leo.wild",     src: PORTRAITS.leoWild,      followState: "renew",   hasPostedToday: true },
-  { handle: "@lukas.berlin", src: PORTRAITS.paulAltstadt, followState: "renewed", hasPostedToday: true },
+  // frisch heute gefolgt → volles Herz, (noch) nicht erneuerbar
+  { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    followedAt: NOW - 1 * H,  hasPostedToday: true,  nudged: false },
+  // gestern → halb verfallen, erneuerbar
+  { handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, followedAt: NOW - 14 * H, hasPostedToday: true,  nudged: false },
+  // hat heute noch nicht gepostet → leerer State, Herz fast leer
+  { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     followedAt: NOW - 20 * H, hasPostedToday: false, nudged: false },
+  // läuft fast ab → Herz nahezu leer, dringend erneuern
+  { handle: "@leo.see",       src: PORTRAITS.leoWild,      followedAt: NOW - 26 * H, hasPostedToday: true,  nudged: false },
 ];
 
 export function FollowProvider({ children }: { children: ReactNode }) {
@@ -39,17 +70,35 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   const follow = (person: Pick<FollowedPerson, "handle" | "src">) => {
     setFollowed((prev) => {
       if (prev.has(person.handle)) return prev;
-      // Neu gefolgte Person stammt aus Discovery/Stadt-Story → hat heute gepostet
+      // Neu gefolgte Person stammt aus Discovery/Stadt-Story → hat heute gepostet, Herz voll
       return new Map(prev).set(person.handle, {
         ...person,
-        followState: "today",
+        followedAt: Date.now(),
         hasPostedToday: true,
+        nudged: false,
       });
     });
   };
 
+  // Follow erneuern → Herz füllt wieder auf (followedAt zurücksetzen)
+  const renew = (handle: string) => {
+    setFollowed((prev) => {
+      const person = prev.get(handle);
+      if (!person) return prev;
+      return new Map(prev).set(handle, { ...person, followedAt: Date.now() });
+    });
+  };
+
+  const nudge = (handle: string) => {
+    setFollowed((prev) => {
+      const person = prev.get(handle);
+      if (!person || person.nudged) return prev;
+      return new Map(prev).set(handle, { ...person, nudged: true });
+    });
+  };
+
   return (
-    <FollowContext.Provider value={{ followed, isFollowing, follow }}>
+    <FollowContext.Provider value={{ followed, isFollowing, follow, renew, nudge }}>
       {children}
     </FollowContext.Provider>
   );

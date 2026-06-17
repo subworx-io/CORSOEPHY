@@ -49,7 +49,7 @@ const TILES: Tile[] = [
   { handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, alt: "High-fashion editorial portrait in a concrete studio." },
   { handle: "@mia.galerie",   src: PORTRAITS.miaGalerie,   alt: "Black-and-white street portrait of a woman walking in the city." },
   { handle: "@jan.motor",     src: PORTRAITS.jannisLux,    alt: "1960s retro motorsport fashion editorial." },
-  { handle: "@clara_mondo",   src: PORTRAITS.claraMondo,   alt: "Black-and-white portrait of a woman sitting on a curb." },
+  { handle: "@clara.mondo",   src: PORTRAITS.claraMondo,   alt: "Black-and-white portrait of a woman sitting on a curb." },
   { handle: "@paul.altstadt", src: PORTRAITS.paulAltstadt, alt: "Black-and-white street portrait of a man walking in the city." },
   { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    alt: "Close-up editorial portrait with braids and feathered collar." },
   { handle: "@david.bruecke", src: PORTRAITS.davidArch,    alt: "Monochrome street portrait with sunglasses." },
@@ -113,7 +113,7 @@ function Index() {
   };
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
+    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
       {/* Slides */}
       {slides.map((slide, i) => {
         const offset = i - currentIndex;
@@ -216,15 +216,6 @@ function Index() {
           </div>
         );
       })}
-
-      {/* Top bar */}
-      <header className="absolute top-0 left-0 right-0 z-20">
-        <div className="flex justify-end items-center px-6 h-14 max-w-[600px] mx-auto">
-          <button className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md" aria-label="Einstellungen">
-            <span className="material-symbols-outlined">settings</span>
-          </button>
-        </div>
-      </header>
 
       {/* Page indicators */}
       <div className="absolute top-1/2 right-3 z-20 -translate-y-1/2 flex flex-col gap-1.5">

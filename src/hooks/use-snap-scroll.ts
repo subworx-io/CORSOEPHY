@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export const SNAP_MS = 360;
 
+// Momentum erst bei echtem schnellen Flick — verhindert Doppel-Advance bei normalem Swipe
+const MOMENTUM_THRESHOLD_PX_MS = 1.2;
+
 function fireHaptic() {
   if (typeof navigator !== "undefined" && "vibrate" in navigator) {
     navigator.vibrate(4);
@@ -45,25 +48,26 @@ export function useSnapScroll({
     (dir: 1 | -1, speedPxMs: number) => {
       timers.current.forEach(clearTimeout);
       timers.current = [];
-      // Anzahl Extra-Schritte nach Geschwindigkeit — max 4
-      const steps = Math.min(Math.floor(speedPxMs / 0.45), 4);
-      let delay = SNAP_MS + 30;
+      // Extra-Schritte nur bei schnellem Flick, max 3
+      const steps = Math.min(Math.floor((speedPxMs - MOMENTUM_THRESHOLD_PX_MS) / 0.7), 3);
+      if (steps <= 0) return;
+      let delay = SNAP_MS + 40;
       for (let i = 0; i < steps; i++) {
         const t = setTimeout(() => advance(dir), delay);
         timers.current.push(t);
-        // Jeder Schritt dauert länger → Rad bremst exponentiell ab
-        delay = Math.round(delay * 1.7);
+        delay = Math.round(delay * 1.8);
       }
     },
     [advance]
   );
 
-  // Touch mit Velocity-Tracking auf touchmove
   useEffect(() => {
     let startPos = 0;
-    let lastPos = 0;
-    let lastTime = 0;
-    let velPxMs = 0;
+    let startTime = 0;
+    // gestureActive verhindert iOS-Bug: touchend feuert auf window manchmal zweimal
+    let gestureActive = false;
+    // Ringpuffer letzter 80ms für stabiles Velocity-Measurement
+    let history: { pos: number; t: number }[] = [];
 
     const getPos = (e: TouchEvent) =>
       axis === "y" ? e.touches[0].clientY : e.touches[0].clientX;
@@ -73,39 +77,70 @@ export function useSnapScroll({
     const onStart = (e: TouchEvent) => {
       timers.current.forEach(clearTimeout);
       timers.current = [];
+      gestureActive = true;
       startPos = getPos(e);
-      lastPos = startPos;
-      lastTime = performance.now();
-      velPxMs = 0;
+      startTime = performance.now();
+      history = [{ pos: startPos, t: startTime }];
     };
+
     const onMove = (e: TouchEvent) => {
+      if (!gestureActive) return;
+      // preventDefault blockiert iOS-Rubber-Band und Safari-eigene Scroll-Interferenz
+      e.preventDefault();
       const now = performance.now();
       const cur = getPos(e);
-      const dt = now - lastTime;
-      if (dt > 0) velPxMs = (lastPos - cur) / dt; // positiv = vorwärts
-      lastPos = cur;
-      lastTime = now;
+      history.push({ pos: cur, t: now });
+      // Nur letzten 80ms behalten
+      const cutoff = now - 80;
+      history = history.filter((h) => h.t >= cutoff);
     };
+
     const onEnd = (e: TouchEvent) => {
+      // Guard: auf iOS feuert touchend auf window manchmal doppelt
+      if (!gestureActive) return;
+      gestureActive = false;
+
       const diff = startPos - getEndPos(e);
       if (Math.abs(diff) < 50) return;
       const dir = diff > 0 ? 1 : -1;
       advance(dir);
-      const speed = Math.abs(velPxMs);
-      if (speed > 0.4) scheduleMomentum(dir, speed);
+
+      // Velocity aus Zeitfenster (primär) — stabiler als Momentanwert
+      let speedPxMs = 0;
+      if (history.length >= 2) {
+        const oldest = history[0];
+        const newest = history[history.length - 1];
+        const dt = newest.t - oldest.t;
+        if (dt > 0) speedPxMs = Math.abs(oldest.pos - newest.pos) / dt;
+      }
+      // Fallback: Gesamtstrecke / Gesamtzeit — fängt schnelle Flicks mit wenig touchmove-Events
+      const totalTime = performance.now() - startTime;
+      if (totalTime > 0) {
+        const totalSpeed = Math.abs(diff) / totalTime;
+        speedPxMs = Math.max(speedPxMs, totalSpeed);
+      }
+
+      if (speedPxMs >= MOMENTUM_THRESHOLD_PX_MS) scheduleMomentum(dir, speedPxMs);
+    };
+
+    const onCancel = () => {
+      gestureActive = false;
     };
 
     window.addEventListener("touchstart", onStart, { passive: true });
-    window.addEventListener("touchmove", onMove, { passive: true });
+    // non-passive: damit e.preventDefault() in onMove wirkt
+    window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("touchend", onEnd);
+    window.addEventListener("touchcancel", onCancel);
     return () => {
       window.removeEventListener("touchstart", onStart);
       window.removeEventListener("touchmove", onMove);
       window.removeEventListener("touchend", onEnd);
+      window.removeEventListener("touchcancel", onCancel);
     };
   }, [axis, advance, scheduleMomentum]);
 
-  // Trackpad / Mausrad
+  // Trackpad / Mausrad (Desktop)
   useEffect(() => {
     let accumulated = 0;
     let resetId: ReturnType<typeof setTimeout> | null = null;
@@ -136,25 +171,38 @@ export function useSnapScroll({
     };
   }, [axis, advance]);
 
-  // Maus-Drag (nur horizontal für Stadt-Story auf Desktop)
+  // Maus-Drag nur horizontal für Stadt-Story auf Desktop
+  // Schutz vor iOS synthetischen Mouse-Events nach touchend
   useEffect(() => {
     if (axis !== "x") return;
     let startX = 0;
     let tracking = false;
+    let lastTouchEnd = 0;
+
+    const onTouchEndGuard = () => {
+      lastTouchEnd = Date.now();
+    };
+
     const onDown = (e: MouseEvent) => {
+      // iOS feuert nach touchend synthetische mousedown/mouseup — ignorieren
+      if (Date.now() - lastTouchEnd < 600) return;
       startX = e.clientX;
       tracking = true;
     };
     const onUp = (e: MouseEvent) => {
       if (!tracking) return;
+      if (Date.now() - lastTouchEnd < 600) { tracking = false; return; }
       tracking = false;
       const diff = startX - e.clientX;
       if (diff > 60) advance(1);
       else if (diff < -60) advance(-1);
     };
+
+    window.addEventListener("touchend", onTouchEndGuard);
     window.addEventListener("mousedown", onDown);
     window.addEventListener("mouseup", onUp);
     return () => {
+      window.removeEventListener("touchend", onTouchEndGuard);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("mouseup", onUp);
     };

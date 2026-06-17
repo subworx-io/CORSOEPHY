@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { useFollow, type FollowedPerson } from "@/lib/follow-context";
+import { useEffect, useState } from "react";
+import {
+  useFollow,
+  followFill,
+  canRenew,
+  type FollowedPerson,
+} from "@/lib/follow-context";
 import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
 
 export const Route = createFileRoute("/connections")({
@@ -13,25 +18,26 @@ export const Route = createFileRoute("/connections")({
   component: ConnectionsPage,
 });
 
-type FollowState = FollowedPerson["followState"];
-
-function HeartIcon({ filled, className = "" }: { filled: boolean; className?: string }) {
+/** Herz mit stufenlosem Füllgrad (0..1) — visualisiert den täglichen Verfall. */
+function HeartIcon({ fill, className = "" }: { fill: number; className?: string }) {
   return (
     <span
       className={`material-symbols-outlined leading-none ${className}`}
-      style={{ fontVariationSettings: filled ? "'FILL' 1" : "'FILL' 0" }}
+      style={{ fontVariationSettings: `'FILL' ${fill.toFixed(2)}` }}
     >
       favorite
     </span>
   );
 }
 
-function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: boolean }) {
-  const [followState, setFollowState] = useState<FollowState>(person.followState);
-  const [nudged, setNudged] = useState(false);
-  // Post-Status und Follow-Status sind getrennt — Follow erneuern ändert nicht, ob heute gepostet wurde
+function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
+  const { renew, nudge } = useFollow();
   const hasPostedToday = person.hasPostedToday;
   const hasImage = person.src !== null && hasPostedToday;
+  const fill = followFill(person.followedAt, now);
+  const renewable = canRenew(person.followedAt, now);
+  // Herz wird gegen Ablauf dringlich
+  const urgent = fill < 0.2;
 
   return (
     <div className="absolute inset-0 px-4 pt-6 pb-28">
@@ -74,62 +80,50 @@ function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: b
 
         {/* Bottom overlay + Buttons */}
         <div className={`absolute bottom-0 left-0 right-0 p-5 flex flex-col gap-3 ${hasImage ? "bg-gradient-to-t from-black/80 via-black/30 to-transparent" : ""}`}>
-          <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
-            {person.handle}
-          </span>
+          {/* Handle + verfallendes Herz (der „Tank") */}
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
+              {person.handle}
+            </span>
+            <HeartIcon
+              fill={fill}
+              className={`text-[26px] drop-shadow transition-colors duration-500 ${urgent ? "text-rose-400" : "text-white"}`}
+            />
+          </div>
 
-          {/* Noch nicht gepostet heute: anstupsen + follow erneuern/erneuert */}
-          {!hasPostedToday ? (
-            <div className="flex gap-2">
+          <div className="flex gap-2">
+            {/* Anstupsen nur, wenn heute noch nichts gepostet (PRD 4.5) */}
+            {!hasPostedToday && (
               <button
-                onClick={() => setNudged(true)}
-                disabled={nudged}
+                onClick={() => nudge(person.handle)}
+                disabled={person.nudged}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95 ${
-                  nudged
+                  person.nudged
                     ? "bg-white/10 text-white/40"
                     : "bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25"
                 }`}
               >
                 <span className="material-symbols-outlined text-[16px] leading-none">notification_add</span>
-                {nudged ? "angestupst" : "anstupsen"}
+                {person.nudged ? "angestupst" : "anstupsen"}
               </button>
+            )}
+
+            {/* Erneuern, sobald der Follow vor dem heutigen Reset lag — sonst Status „folgst du heute" */}
+            {renewable ? (
               <button
-                onClick={() => setFollowState("renewed")}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95 ${
-                  followState === "renewed"
-                    ? "bg-white text-black"
-                    : "bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25"
-                }`}
+                onClick={() => renew(person.handle)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25 transition-all active:scale-95"
               >
-                <HeartIcon filled={followState === "renewed"} className="text-[16px]" />
-                {followState === "renewed" ? "follow erneuert" : "follow erneuern"}
+                <HeartIcon fill={0} className="text-[16px]" />
+                follow erneuern
               </button>
-            </div>
-          ) : (
-            <>
-              {followState === "today" && (
-                <button className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black transition-all active:scale-95">
-                  <HeartIcon filled className="text-[16px]" />
-                  heute gefolgt
-                </button>
-              )}
-              {followState === "renewed" && (
-                <button className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black transition-all active:scale-95">
-                  <HeartIcon filled className="text-[16px]" />
-                  follow erneuert
-                </button>
-              )}
-              {followState === "renew" && (
-                <button
-                  onClick={() => setFollowState("renewed")}
-                  className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25 transition-all active:scale-95"
-                >
-                  <HeartIcon filled={false} className="text-[16px]" />
-                  follow erneuern
-                </button>
-              )}
-            </>
-          )}
+            ) : (
+              <div className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black">
+                <HeartIcon fill={1} className="text-[16px]" />
+                folgst du heute
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -140,6 +134,13 @@ function ConnectionsPage() {
   const { followed } = useFollow();
   const people = Array.from(followed.values());
   const { currentIndex } = useSnapScroll({ count: people.length, axis: "y" });
+
+  // Live-Ticker: lässt die Herzen über die Zeit sichtbar an Fülle verlieren
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   if (people.length === 0) {
     return (
@@ -156,7 +157,7 @@ function ConnectionsPage() {
   }
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
+    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
       {people.map((person, i) => {
         const offset = i - currentIndex;
         const isActive = offset === 0;
@@ -175,7 +176,7 @@ function ConnectionsPage() {
               willChange: "transform, opacity",
             }}
           >
-            <PersonSlide person={person} isActive={isActive} />
+            <PersonSlide person={person} now={now} />
           </div>
         );
       })}
