@@ -1,0 +1,17 @@
+{
+  "name": "Korso",
+  "short_name": "Korso",
+  "description": "Deine Stadt. Jeden Abend.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ Jeden Abend geht deine Stadt gemeinsam spazieren: rohe, ungeschnittene Video-Mom
 
 > Dating ist der Ausgang, nicht der Eingang.
 
-**Pilot:** Karlsruhe · 60–100 zahlende Mitglieder · €9/Monat · Telegram-Bot MVP
+**Pilot:** Düsseldorf · 60–100 zahlende Mitglieder · €9/Monat · Telegram-Bot MVP
 
 ---
 
