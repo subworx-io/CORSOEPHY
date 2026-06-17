@@ -1,0 +1,32 @@
+---
+description: Allgemeine Code-Stil-Regeln und Kommunikationssprache
+---
+
+# Allgemeine Regeln
+
+## Sprache
+- Alle Antworten, Erklärungen und Kommentare im Chat: **Deutsch**
+- Code (Variablen, Funktionen, Klassen): **Englisch**
+- Commit-Messages: **Englisch**
+
+## Code-Stil
+- Einrückung: 2 Spaces
+- Semikolons: je nach Projekt-Konvention (TODO: festlegen)
+- Anführungszeichen: einfach (`'`) außer bei JSX-Attributen (`"`)
+- Maximale Zeilenlänge: 100 Zeichen
+- Keine `console.log` im finalen Code – stattdessen strukturiertes Logging
+
+## Funktionen & Variablen
+- Sprechende Namen – kein `x`, `tmp`, `data` ohne Kontext
+- Boolean-Variablen mit `is`, `has`, `can` präfixieren (z.B. `isLoading`, `hasError`)
+- Event-Handler mit `handle` präfixieren (z.B. `handleSubmit`, `handleClick`)
+- Async-Funktionen konsequent mit `await` behandeln, keine unbehandelten Promises
+
+## Fehlerbehandlung
+- Alle Fehler explizit behandeln – kein leeres `catch {}`
+- Nutzerfreundliche Fehlermeldungen in der UI
+- Technische Details nur im Log, nicht in der UI
+
+## Kommentare
+- Nur kommentieren wenn das WARUM nicht offensichtlich ist
+- Kein auskommentierter Code im Repository

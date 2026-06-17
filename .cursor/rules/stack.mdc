@@ -1,0 +1,39 @@
+---
+description: Erlaubte Libraries, verbotene Patterns und Stack-Entscheidungen
+---
+
+# Stack & Libraries
+
+<!-- TODO: Fülle aus sobald der Stack definiert ist -->
+
+## Erlaubte Libraries
+
+PLATZHALTER – Liste hier alle genehmigten Abhängigkeiten auf.
+
+Beispielstruktur:
+```
+- UI: [Library] – weil [Grund]
+- State: [Library] – weil [Grund]
+- Formulare: [Library] – weil [Grund]
+- HTTP-Client: [Library] – weil [Grund]
+- Testing: [Library] – weil [Grund]
+```
+
+## Verbotene Libraries / Patterns
+
+<!-- TODO: Ergänze was explizit nicht verwendet werden soll und warum -->
+- Keine neuen Abhängigkeiten ohne Absprache einführen
+- PLATZHALTER – weitere verbotene Patterns hier eintragen
+
+## Versions-Pinning
+
+<!-- TODO: Entscheide ob exact versions oder ranges -->
+PLATZHALTER – Strategie für package.json Versionen festlegen.
+
+## CSS / Styling
+
+PLATZHALTER – Wie wird gestylt? (TailwindCSS, CSS Modules, styled-components etc.)
+
+## Testing-Strategie
+
+PLATZHALTER – Was wird getestet, mit welchem Framework, welche Coverage wird erwartet?

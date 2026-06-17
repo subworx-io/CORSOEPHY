@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Write(**)",
+      "Edit(**)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(node *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(cat *)",
+      "Bash(mkdir *)",
+      "Bash(rm *)",
+      "Bash(mv *)",
+      "Bash(cp *)",
+      "Bash(touch *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)"
+    ],
+    "deny": [
+      "Bash(git *)",
+      "Bash(vercel *)",
+      "Bash(netlify *)",
+      "Bash(fly *)",
+      "Bash(railway *)",
+      "Bash(heroku *)"
+    ]
+  }
+}

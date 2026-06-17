@@ -1,0 +1,35 @@
+---
+description: Projektarchitektur und Ordnerstruktur
+---
+
+# Architektur
+
+<!-- TODO: Fülle diese Datei aus sobald die Grundstruktur steht. Fragen die du beantworten solltest:
+  - Monorepo oder separate Repos?
+  - Wie ist das Frontend aufgebaut? (Pages, Components, Hooks, Utils)
+  - Wie ist das Backend aufgebaut? (Routes, Controllers, Services, Models)
+  - Wie kommunizieren Frontend und Backend? (REST, GraphQL, tRPC)
+  - Wie wird State verwaltet? (lokal, Zustand, Redux, Context)
+  - Wie wird Auth gehandhabt?
+-->
+
+## Ordnerstruktur
+
+PLATZHALTER – Struktur hier dokumentieren sobald sie feststeht.
+
+## Naming-Konventionen für Dateien
+
+<!-- TODO: Festlegen und eintragen -->
+- Komponenten: PLATZHALTER (z.B. PascalCase: `UserCard.tsx`)
+- Hooks: PLATZHALTER (z.B. `useUserData.ts`)
+- Utils: PLATZHALTER (z.B. camelCase: `formatDate.ts`)
+- Seiten: PLATZHALTER
+
+## Datenfluss
+
+PLATZHALTER – Beschreibe wie Daten durch die App fließen.
+
+## Wichtige Architektur-Entscheidungen
+
+<!-- TODO: Halte hier fest WARUM bestimmte Entscheidungen getroffen wurden -->
+- PLATZHALTER
