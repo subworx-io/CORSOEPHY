@@ -56,52 +56,46 @@ const SLIDES: Slide[] = [
   ...TILES.map((t) => ({ kind: "tile" as const, ...t })),
 ];
 
-function FollowButton({ handle, src }: { handle: string; src: string }) {
+function FollowButton({ handle, src, onBurst }: { handle: string; src: string; onBurst: () => void }) {
   const { isFollowing, follow } = useFollow();
-  const [burst, setBurst] = useState(false);
   const following = isFollowing(handle);
 
   const handleFollow = () => {
     if (following) return;
     follow({ handle, src });
-    setBurst(true);
-    setTimeout(() => setBurst(false), 650);
+    onBurst();
   };
 
   return (
-    <div className="relative">
-      {burst && (
-        <span
-          className="material-symbols-outlined animate-heart-burst pointer-events-none absolute inset-0 flex items-center justify-center text-[48px] text-white"
-          style={{ fontVariationSettings: "'FILL' 1", top: "50%", left: "50%", transform: "translate(-50%,-50%)" }}
-        >
-          favorite
-        </span>
-      )}
-      <button
-        onClick={handleFollow}
-        className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95 ${
-          following
-            ? "bg-white text-black"
-            : "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25"
-        }`}
+    <button
+      onClick={handleFollow}
+      className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95 ${
+        following
+          ? "bg-white text-black"
+          : "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25"
+      }`}
+    >
+      {following ? "folgst du" : "Folgen"}
+      <span
+        className="material-symbols-outlined text-[16px] leading-none"
+        style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
       >
-        {following ? "folgst du" : "Folgen"}
-        <span
-          className="material-symbols-outlined text-[16px] leading-none"
-          style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
-        >
-          favorite
-        </span>
-      </button>
-    </div>
+        favorite
+      </span>
+    </button>
   );
 }
 
 function Index() {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [burstHandle, setBurstHandle] = useState<string | null>(null);
   const isLockedRef = useRef(false);
   const { days, hours, minutes, seconds } = useCountdown(COUNTDOWN_TARGET);
+
+  const triggerBurst = (handle: string) => {
+    setBurstHandle(handle);
+    setTimeout(() => setBurstHandle(null), 700);
+  };
 
   const goNext = useCallback(() => {
     if (isLockedRef.current) return;
@@ -219,13 +213,24 @@ function Index() {
                         mixBlendMode: "overlay",
                       }}
                     />
+                    {/* Herzanimation mittig über dem Bild */}
+                    {burstHandle === slide.handle && (
+                      <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                        <span
+                          className="material-symbols-outlined animate-heart-burst text-white"
+                          style={{ fontSize: "100px", fontVariationSettings: "'FILL' 1" }}
+                        >
+                          favorite
+                        </span>
+                      </div>
+                    )}
                     {/* Bottom overlay */}
                     <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
                       <div className="flex justify-between items-end">
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
-                        <FollowButton handle={slide.handle} src={slide.src} />
+                        <FollowButton handle={slide.handle} src={slide.src} onBurst={() => triggerBurst(slide.handle)} />
                       </div>
                     </div>
                   </>
