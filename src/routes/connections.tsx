@@ -28,7 +28,9 @@ function HeartIcon({ filled, className = "" }: { filled: boolean; className?: st
 function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: boolean }) {
   const [followState, setFollowState] = useState<FollowState>(person.followState);
   const [nudged, setNudged] = useState(false);
-  const hasImage = person.src !== null && followState !== "nudge";
+  // hasPostedToday ist fix — ändert sich nicht wenn der User den Follow erneuert
+  const hasPostedToday = person.followState !== "nudge";
+  const hasImage = person.src !== null && hasPostedToday;
 
   return (
     <div className="absolute inset-0 px-4 pt-6 pb-28">
@@ -75,8 +77,8 @@ function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: b
             {person.handle}
           </span>
 
-          {/* Nudge-State: zwei Buttons nebeneinander, volle Breite */}
-          {followState === "nudge" && (
+          {/* Noch nicht gepostet heute: anstupsen + follow erneuern/erneuert */}
+          {!hasPostedToday ? (
             <div className="flex gap-2">
               <button
                 onClick={() => setNudged(true)}
@@ -92,36 +94,40 @@ function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: b
               </button>
               <button
                 onClick={() => setFollowState("renewed")}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25 transition-all active:scale-95"
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95 ${
+                  followState === "renewed"
+                    ? "bg-white text-black"
+                    : "bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25"
+                }`}
               >
-                <HeartIcon filled={false} className="text-[16px]" />
-                erneuern
+                <HeartIcon filled={followState === "renewed"} className="text-[16px]" />
+                {followState === "renewed" ? "follow erneuert" : "follow erneuern"}
               </button>
             </div>
-          )}
-
-          {followState === "today" && (
-            <button className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black transition-all active:scale-95">
-              <HeartIcon filled className="text-[16px]" />
-              heute gefolgt
-            </button>
-          )}
-
-          {followState === "renewed" && (
-            <button className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black transition-all active:scale-95">
-              <HeartIcon filled className="text-[16px]" />
-              follow erneuert
-            </button>
-          )}
-
-          {followState === "renew" && (
-            <button
-              onClick={() => setFollowState("renewed")}
-              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25 transition-all active:scale-95"
-            >
-              <HeartIcon filled={false} className="text-[16px]" />
-              follow erneuern
-            </button>
+          ) : (
+            <>
+              {followState === "today" && (
+                <button className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black transition-all active:scale-95">
+                  <HeartIcon filled className="text-[16px]" />
+                  heute gefolgt
+                </button>
+              )}
+              {followState === "renewed" && (
+                <button className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black transition-all active:scale-95">
+                  <HeartIcon filled className="text-[16px]" />
+                  follow erneuert
+                </button>
+              )}
+              {followState === "renew" && (
+                <button
+                  onClick={() => setFollowState("renewed")}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25 transition-all active:scale-95"
+                >
+                  <HeartIcon filled={false} className="text-[16px]" />
+                  follow erneuern
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
