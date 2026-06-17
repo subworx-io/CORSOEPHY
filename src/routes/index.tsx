@@ -38,16 +38,17 @@ function useCountdown(target: number) {
 
 const pad = (n: number) => n.toString().padStart(2, "0");
 
+// Discovery zeigt immer neue, unbekannte Personen aus der Stadt — kein Overlap mit "ich folge"
 const TILES: Tile[] = [
-  { handle: "@elias_v", src: PORTRAITS.eliasFashion, alt: "High-fashion editorial portrait in a concrete studio." },
-  { handle: "@marah.k", src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCMsc8hfp9Lbs2mI6x5b6hEh9SfxUE1TjjuHKTvHmydbuoH7vuAAqenojfX6oG5lugKEGg6KWZupfy7An0ESbZ6VHN0G_hhUmnwsFlaLZt4V1JQDCIUFuUusg3kdsU5P1dFKWqMM585mTZB-G-qtWMnrW15E4qOro9c287DDc-U3vH7CiO30if3qzRXY9a6UOGP2W8K-WujTatDlp1ivyAk8LCQagacw5lNQCpnrblMNr46SHLkeyf-g_8A06MZRol7ODgXJhkrGeQ", alt: "Artist in a bright white-walled gallery." },
-  { handle: "@jannis_lux", src: PORTRAITS.jannisLux, alt: "1960s retro motorsport fashion editorial." },
-  { handle: "@clara_mondo", src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCNAGoqfZYjD0KGwJ5NyYi0NPETnyhYBJKWL-KIu01CeJxxUTXERz5QQKlco40pWoCbIPCbqb8Z40YEqy9KeC5KGaZbV4OQvCHnyMYpUkOqhb_xDx44OBCGn5HRifDnj2BpxrRb6qTmi5xgRG4bOU8jCrwtP_vliEQZOHNA2n6HUgnYz6QN5DbTg18FZNRLIm-c2YpVROf77tbL4q11x6G0mFf3EQIo7uFZfNhlmEJHi7RBhj-Q66qsegy-0G_yjdV0RqRWc2_KdhI", alt: "Portrait against a white architectural wall." },
-  { handle: "@lukas.berlin", src: "https://lh3.googleusercontent.com/aida-public/AB6AXuAPcJaaO61LZuueix4hrVPy7HIpLRzj6uvsrz4OCNOVv6BagJwwqSZobRp-Vax-IAmF0rC_nWE1rY4Pyg5B83__bFXsS7hzequ1Cu1Wo4LizHH8VLGVqbwGa2pvbBSa6MhDnmzo1KEwpAJzBfmgIO4DVcysq9gWUQi0cqGWPgCD4P6VyX4BRHlkbnPuLV2sGlN-3iTiD1mNDsLrDC1RPCOgLVNJf3An3KsDPzDCJpNgEy_9Rdq4Op2GNPa0jfjzo3fFz4itzZU348I", alt: "Creative professional in a high-contrast urban scene." },
-  { handle: "@sara_sound", src: PORTRAITS.saraSound, alt: "Close-up editorial portrait with braids and feathered collar." },
-  { handle: "@david_arch", src: PORTRAITS.davidArch, alt: "Monochrome street portrait with sunglasses." },
-  { handle: "@nina.pure", src: PORTRAITS.ninaPure, alt: "Editorial portrait grid of a young man in studio light." },
-  { handle: "@leo.wild", src: PORTRAITS.leoWild, alt: "Atmospheric sepia-toned portrait in a foggy field." },
+  { handle: "@felix.rhein",   src: PORTRAITS.eliasFashion, alt: "High-fashion editorial portrait in a concrete studio." },
+  { handle: "@mia.galerie",   src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCMsc8hfp9Lbs2mI6x5b6hEh9SfxUE1TjjuHKTvHmydbuoH7vuAAqenojfX6oG5lugKEGg6KWZupfy7An0ESbZ6VHN0G_hhUmnwsFlaLZt4V1JQDCIUFuUusg3kdsU5P1dFKWqMM585mTZB-G-qtWMnrW15E4qOro9c287DDc-U3vH7CiO30if3qzRXY9a6UOGP2W8K-WujTatDlp1ivyAk8LCQagacw5lNQCpnrblMNr46SHLkeyf-g_8A06MZRol7ODgXJhkrGeQ", alt: "Artist in a bright white-walled gallery." },
+  { handle: "@jan.motor",     src: PORTRAITS.jannisLux,    alt: "1960s retro motorsport fashion editorial." },
+  { handle: "@clara_mondo",   src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCNAGoqfZYjD0KGwJ5NyYi0NPETnyhYBJKWL-KIu01CeJxxUTXERz5QQKlco40pWoCbIPCbqb8Z40YEqy9KeC5KGaZbV4OQvCHnyMYpUkOqhb_xDx44OBCGn5HRifDnj2BpxrRb6qTmi5xgRG4bOU8jCrwtP_vliEQZOHNA2n6HUgnYz6QN5DbTg18FZNRLIm-c2YpVROf77tbL4q11x6G0mFf3EQIo7uFZfNhlmEJHi7RBhj-Q66qsegy-0G_yjdV0RqRWc2_KdhI", alt: "Portrait against a white architectural wall." },
+  { handle: "@paul.altstadt", src: "https://lh3.googleusercontent.com/aida-public/AB6AXuAPcJaaO61LZuueix4hrVPy7HIpLRzj6uvsrz4OCNOVv6BagJwwqSZobRp-Vax-IAmF0rC_nWE1rY4Pyg5B83__bFXsS7hzequ1Cu1Wo4LizHH8VLGVqbwGa2pvbBSa6MhDnmzo1KEwpAJzBfmgIO4DVcysq9gWUQi0cqGWPgCD4P6VyX4BRHlkbnPuLV2sGlN-3iTiD1mNDsLrDC1RPCOgLVNJf3An3KsDPzDCJpNgEy_9Rdq4Op2GNPa0jfjzo3fFz4itzZU348I", alt: "Creative professional in a high-contrast urban scene." },
+  { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    alt: "Close-up editorial portrait with braids and feathered collar." },
+  { handle: "@david.bruecke", src: PORTRAITS.davidArch,    alt: "Monochrome street portrait with sunglasses." },
+  { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     alt: "Editorial portrait grid of a young man in studio light." },
+  { handle: "@leo.see",       src: PORTRAITS.leoWild,      alt: "Atmospheric sepia-toned portrait in a foggy field." },
 ];
 
 const SLIDES: Slide[] = [
@@ -55,11 +56,52 @@ const SLIDES: Slide[] = [
   ...TILES.map((t) => ({ kind: "tile" as const, ...t })),
 ];
 
+function FollowButton({ handle, src }: { handle: string; src: string }) {
+  const { isFollowing, follow } = useFollow();
+  const [burst, setBurst] = useState(false);
+  const following = isFollowing(handle);
+
+  const handleFollow = () => {
+    if (following) return;
+    follow({ handle, src });
+    setBurst(true);
+    setTimeout(() => setBurst(false), 650);
+  };
+
+  return (
+    <div className="relative">
+      {burst && (
+        <span
+          className="material-symbols-outlined animate-heart-burst pointer-events-none absolute inset-0 flex items-center justify-center text-[48px] text-white"
+          style={{ fontVariationSettings: "'FILL' 1", top: "50%", left: "50%", transform: "translate(-50%,-50%)" }}
+        >
+          favorite
+        </span>
+      )}
+      <button
+        onClick={handleFollow}
+        className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95 ${
+          following
+            ? "bg-white text-black"
+            : "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25"
+        }`}
+      >
+        {following ? "folgst du" : "Folgen"}
+        <span
+          className="material-symbols-outlined text-[16px] leading-none"
+          style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
+        >
+          favorite
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function Index() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const isLockedRef = useRef(false);
   const { days, hours, minutes, seconds } = useCountdown(COUNTDOWN_TARGET);
-  const { isFollowing, follow } = useFollow();
 
   const goNext = useCallback(() => {
     if (isLockedRef.current) return;
@@ -183,27 +225,7 @@ function Index() {
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
-                        {(() => {
-                          const following = isFollowing(slide.handle);
-                          return (
-                            <button
-                              onClick={() => follow({ handle: slide.handle, src: slide.src })}
-                              className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95 ${
-                                following
-                                  ? "bg-white text-black"
-                                  : "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25"
-                              }`}
-                            >
-                              {following ? "folgst du" : "Folgen"}
-                              <span
-                                className="material-symbols-outlined text-[16px] leading-none"
-                                style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
-                              >
-                                favorite
-                              </span>
-                            </button>
-                          );
-                        })()}
+                        <FollowButton handle={slide.handle} src={slide.src} />
                       </div>
                     </div>
                   </>
