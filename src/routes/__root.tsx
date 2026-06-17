@@ -12,9 +12,9 @@ import { useEffect, type ReactNode } from "react";
 
 const TABS = [
   { to: "/" as const, label: "Discovery", icon: "explore" },
+  { to: "/connections" as const, label: "ich folge", icon: "favorite" },
   { to: "/story" as const, label: "Story", icon: "movie" },
   { to: "/record" as const, label: "Aufnahme", icon: "videocam" },
-  { to: "/connections" as const, label: "ich folge", icon: "favorite" },
   { to: "/feedback" as const, label: "Dashboard", icon: "trending_up" },
 ];
 
@@ -55,6 +55,7 @@ function BottomNav() {
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { FollowProvider } from "../lib/follow-context";
 
 function NotFoundComponent() {
   return (
@@ -188,10 +189,12 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-dvh bg-neutral-950">
-        <Outlet />
-        <BottomNav />
-      </div>
+      <FollowProvider>
+        <div className="min-h-dvh bg-neutral-950">
+          <Outlet />
+          <BottomNav />
+        </div>
+      </FollowProvider>
     </QueryClientProvider>
   );
 }

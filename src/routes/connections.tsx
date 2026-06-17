@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PORTRAITS } from "@/assets/portraits";
+import { useFollow, type FollowedPerson } from "@/lib/follow-context";
 
 export const Route = createFileRoute("/connections")({
   head: () => ({
@@ -12,25 +12,7 @@ export const Route = createFileRoute("/connections")({
   component: ConnectionsPage,
 });
 
-type FollowState = "today" | "renewed" | "renew" | "nudge";
-
-interface Person {
-  id: string;
-  handle: string;
-  src: string | null;
-  followState: FollowState;
-}
-
-const PEOPLE: Person[] = [
-  { id: "p1", handle: "@sara_sound",  src: PORTRAITS.saraSound,    followState: "today" },
-  { id: "p2", handle: "@elias_v",     src: PORTRAITS.eliasFashion, followState: "renewed" },
-  { id: "p3", handle: "@david_arch",  src: PORTRAITS.davidArch,    followState: "renew" },
-  { id: "p4", handle: "@marah.k",     src: "https://lh3.googleusercontent.com/aida-public/AB6AXuCMsc8hfp9Lbs2mI6x5b6hEh9SfxUE1TjjuHKTvHmydbuoH7vuAAqenojfX6oG5lugKEGg6KWZupfy7An0ESbZ6VHN0G_hhUmnwsFlaLZt4V1JQDCIUFuUusg3kdsU5P1dFKWqMM585mTZB-G-qtWMnrW15E4qOro9c287DDc-U3vH7CiO30if3qzRXY9a6UOGP2W8K-WujTatDlp1ivyAk8LCQagacw5lNQCpnrblMNr46SHLkeyf-g_8A06MZRol7ODgXJhkrGeQ", followState: "today" },
-  { id: "p5", handle: "@nina.pure",   src: null,                   followState: "nudge" },
-  { id: "p6", handle: "@jannis_lux",  src: null,                   followState: "nudge" },
-  { id: "p7", handle: "@leo.wild",    src: PORTRAITS.leoWild,      followState: "renew" },
-  { id: "p8", handle: "@lukas.berlin",src: "https://lh3.googleusercontent.com/aida-public/AB6AXuAPcJaaO61LZuueix4hrVPy7HIpLRzj6uvsrz4OCNOVv6BagJwwqSZobRp-Vax-IAmF0rC_nWE1rY4Pyg5B83__bFXsS7hzequ1Cu1Wo4LizHH8VLGVqbwGa2pvbBSa6MhDnmzo1KEwpAJzBfmgIO4DVcysq9gWUQi0cqGWPgCD4P6VyX4BRHlkbnPuLV2sGlN-3iTiD1mNDsLrDC1RPCOgLVNJf3An3KsDPzDCJpNgEy_9Rdq4Op2GNPa0jfjzo3fFz4itzZU348I", followState: "renewed" },
-];
+type FollowState = FollowedPerson["followState"];
 
 function HeartIcon({ filled, className = "" }: { filled: boolean; className?: string }) {
   return (
@@ -43,7 +25,7 @@ function HeartIcon({ filled, className = "" }: { filled: boolean; className?: st
   );
 }
 
-function PersonSlide({ person, isActive }: { person: Person; isActive: boolean }) {
+function PersonSlide({ person, isActive }: { person: FollowedPerson; isActive: boolean }) {
   const [followState, setFollowState] = useState<FollowState>(person.followState);
   const [nudged, setNudged] = useState(false);
   const hasImage = person.src !== null && followState !== "nudge";
@@ -148,13 +130,15 @@ function PersonSlide({ person, isActive }: { person: Person; isActive: boolean }
 }
 
 function ConnectionsPage() {
+  const { followed } = useFollow();
+  const people = Array.from(followed.values());
   const [currentIndex, setCurrentIndex] = useState(0);
   const isLockedRef = useRef(false);
 
   const goNext = useCallback(() => {
     if (isLockedRef.current) return;
     setCurrentIndex((i) => {
-      if (i >= PEOPLE.length - 1) return i;
+      if (i >= people.length - 1) return i;
       isLockedRef.current = true;
       setTimeout(() => { isLockedRef.current = false; }, 700);
       return i + 1;
@@ -214,7 +198,7 @@ function ConnectionsPage() {
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
-      {PEOPLE.map((person, i) => {
+      {people.map((person, i) => {
         const offset = i - currentIndex;
         const isActive = offset === 0;
         const clampedOffset = Math.max(-1, Math.min(1, offset));
@@ -222,7 +206,7 @@ function ConnectionsPage() {
 
         return (
           <div
-            key={person.id}
+            key={person.handle}
             className="absolute inset-0 w-full h-full"
             style={{
               transform: `translateY(${clampedOffset * 100}%)`,
@@ -239,7 +223,7 @@ function ConnectionsPage() {
 
       {/* Seitenindikatoren */}
       <div className="absolute top-1/2 right-3 z-20 -translate-y-1/2 flex flex-col gap-1.5">
-        {PEOPLE.map((_, i) => (
+        {people.map((_, i) => (
           <div
             key={i}
             className={`w-1.5 rounded-full transition-all duration-300 ${

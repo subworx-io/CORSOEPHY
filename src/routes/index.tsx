@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PORTRAITS } from "@/assets/portraits";
+import { useFollow } from "@/lib/follow-context";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -58,6 +59,7 @@ function Index() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const isLockedRef = useRef(false);
   const { days, hours, minutes, seconds } = useCountdown(COUNTDOWN_TARGET);
+  const { isFollowing, follow } = useFollow();
 
   const goNext = useCallback(() => {
     if (isLockedRef.current) return;
@@ -181,10 +183,27 @@ function Index() {
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
-                        <button className="bg-white/95 backdrop-blur-sm text-black px-4 py-1.5 text-sm font-semibold rounded-full hover:bg-white transition-colors active:scale-95 flex items-center gap-1.5">
-                          Folgen
-                          <span className="material-symbols-outlined text-[16px] leading-none" style={{ fontVariationSettings: "'FILL' 1" }}>favorite</span>
-                        </button>
+                        {(() => {
+                          const following = isFollowing(slide.handle);
+                          return (
+                            <button
+                              onClick={() => follow({ handle: slide.handle, src: slide.src })}
+                              className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95 ${
+                                following
+                                  ? "bg-white text-black"
+                                  : "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25"
+                              }`}
+                            >
+                              {following ? "folgst du" : "Folgen"}
+                              <span
+                                className="material-symbols-outlined text-[16px] leading-none"
+                                style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
+                              >
+                                favorite
+                              </span>
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   </>
