@@ -16,7 +16,17 @@
       "Bash(mv *)",
       "Bash(cp *)",
       "Bash(touch *)",
-      "Bash(git *)"
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
+      "Bash(git add*)",
+      "Bash(git fetch*)"
+    ],
+    "ask": [
+      "Bash(git commit*)",
+      "Bash(git push*)"
     ],
     "deny": [
       "Bash(vercel *)",

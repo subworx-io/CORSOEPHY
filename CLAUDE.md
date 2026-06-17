@@ -73,7 +73,7 @@ CORSO_EPHY/
 
 ## Was du NICHT tun sollst
 
-- Kein automatisches `git commit` oder `git push`
+- `git commit` und `git push` nur nach ausdrücklicher Rückfrage — niemals ungefragt
 - Kein Deployment
 - Keine neuen npm/bun-Abhängigkeiten ohne Rückfrage
 - Keine Architektur-Entscheidungen ohne Absprache
