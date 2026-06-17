@@ -1,39 +1,76 @@
 ---
-description: Erlaubte Libraries, verbotene Patterns und Stack-Entscheidungen
+description: Erlaubte Libraries, verbotene Patterns und Stack-Entscheidungen für Korso
 ---
 
 # Stack & Libraries
 
-<!-- TODO: Fülle aus sobald der Stack definiert ist -->
+## Package Manager
 
-## Erlaubte Libraries
+**Bun** — nicht npm oder yarn. Immer `bun install`, `bun add`, `bun run`.
 
-PLATZHALTER – Liste hier alle genehmigten Abhängigkeiten auf.
+## Frontend-Framework
 
-Beispielstruktur:
-```
-- UI: [Library] – weil [Grund]
-- State: [Library] – weil [Grund]
-- Formulare: [Library] – weil [Grund]
-- HTTP-Client: [Library] – weil [Grund]
-- Testing: [Library] – weil [Grund]
-```
+**TanStack Start** (React 19, SSR-fähig, Vite-basiert)
+- Routing: TanStack Router (file-based, `src/routes/`)
+- Data Fetching: TanStack Query v5
+- Kein Next.js, kein Remix
 
-## Verbotene Libraries / Patterns
+## UI
 
-<!-- TODO: Ergänze was explizit nicht verwendet werden soll und warum -->
-- Keine neuen Abhängigkeiten ohne Absprache einführen
-- PLATZHALTER – weitere verbotene Patterns hier eintragen
+- **shadcn/ui** — Basis-Komponenten in `src/components/ui/` (generiert, nicht manuell bearbeiten)
+- **Radix UI** — Primitives, via shadcn/ui eingebunden
+- **Tailwind CSS v4** — Styling (kein CSS-in-JS)
+- **Material Symbols Outlined** — Icons via Google Fonts (`<span className="material-symbols-outlined">`)
+- **Lucide React** — Backup-Icons
 
-## Versions-Pinning
+## Formulare & Validierung
 
-<!-- TODO: Entscheide ob exact versions oder ranges -->
-PLATZHALTER – Strategie für package.json Versionen festlegen.
+- **React Hook Form** + **Zod** — immer zusammen verwenden
+- Kein unkontrolliertes `<form>` ohne Hook Form
+
+## Erlaubte Libraries (bereits installiert)
+
+| Library | Verwendung |
+|---|---|
+| `@tanstack/react-router` | Routing |
+| `@tanstack/react-query` | Server State |
+| `@tanstack/react-start` | Framework |
+| `react-hook-form` + `zod` | Formulare |
+| `tailwindcss` v4 | Styling |
+| `shadcn/ui` (Radix-based) | UI-Komponenten |
+| `lucide-react` | Icons |
+| `date-fns` | Datum-Formatierung |
+| `recharts` | Charts (Rücklauf-Screen) |
+| `sonner` | Toast-Notifications |
+| `embla-carousel-react` | Carousel (falls nötig) |
+| `class-variance-authority` + `clsx` + `tailwind-merge` | Klassen-Utilities |
+
+## Verbotene Patterns
+
+- ❌ Kein `<input type="file">` — Korso erlaubt nur Live-Kamera (WebRTC)
+- ❌ Keine Follower-Zahlen / Publikumsgröße sichtbar für andere Nutzer
+- ❌ Kein globaler Store (Redux, Zustand) ohne Absprache
+- ❌ Keine neuen Libraries ohne Rückfrage (`bun add` immer erst fragen)
+- ❌ Kein `any` in TypeScript
+- ❌ Kein `console.log` im finalen Code — strukturiertes Logging
+- ❌ Keine hartcodierten Hex-Farben — Tailwind-Klassen oder CSS-Variablen
+- ❌ Kein manuelles Routing — immer Datei in `src/routes/` anlegen
+
+## TypeScript
+
+- Strict Mode aktiv (`tsconfig.json`)
+- Alle Props explizit typen
+- Keine impliziten `any`
+- Interfaces für Datenstrukturen, Types für Unions/Utilities
 
 ## CSS / Styling
 
-PLATZHALTER – Wie wird gestylt? (TailwindCSS, CSS Modules, styled-components etc.)
+Tailwind CSS v4 — utility-first.
+- Mobile-first (`sm:`, `md:` etc.)
+- Design-Sprache: dunkel (`bg-neutral-950`), Weiß auf Schwarz, minimalistisch
+- Glas-Effekte: `backdrop-blur`, `bg-white/15`, `border-white/10`
+- Animationen: `transition-all`, `cubic-bezier(0.32, 0.72, 0, 1)` für Swipe
 
-## Testing-Strategie
+## Testing
 
-PLATZHALTER – Was wird getestet, mit welchem Framework, welche Coverage wird erwartet?
+Noch nicht konfiguriert — wird festgelegt sobald Backend steht.

@@ -1,41 +1,65 @@
-# CORSO EPHY
+# Korso
 
-<!-- TODO: Ein-Satz-Beschreibung was diese App macht -->
+**Lokale Stadtbeobachtungs-App mit Dating-Ausgang.**
 
-## Was ist das?
+Jeden Abend geht deine Stadt gemeinsam spazieren: rohe, ungeschnittene Video-Momente echter Menschen aus deiner Umgebung. Um 20:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden. Wer dort gefällt, gewinnt Publikum — aber dieses Publikum verfällt nach 24 Stunden, wenn man nicht nachliefert.
 
-<!-- TODO: 2-3 Sätze. Wer nutzt es, welches Problem löst es? -->
+> Dating ist der Ausgang, nicht der Eingang.
+
+**Pilot:** Karlsruhe · 60–100 zahlende Mitglieder · €9/Monat · Telegram-Bot MVP
+
+---
 
 ## Setup
 
 ```bash
-# Repository klonen
 git clone git@github.com:subworx-io/CORSOEPHY.git
 cd CORSOEPHY
 
-# Abhängigkeiten installieren
-npm install
+bun install
 
-# Umgebungsvariablen konfigurieren
 cp .env.example .env
 # .env mit echten Werten befüllen
 
-# Entwicklungsserver starten
-npm run dev
+bun run dev
 ```
 
-## Umgebungsvariablen
+## Verfügbare Scripts
 
-Siehe `.env.example` für alle benötigten Variablen.
+```bash
+bun run dev        # Entwicklungsserver
+bun run build      # Production Build
+bun run preview    # Build lokal vorschauen
+bun run lint       # ESLint
+bun run format     # Prettier
+```
 
 ## Stack
 
-<!-- TODO: Ausfüllen sobald definiert -->
+- **Framework:** TanStack Start + React 19
+- **Build:** Vite + Bun
+- **UI:** shadcn/ui + Radix UI + Tailwind CSS v4
+- **Routing:** TanStack Router (file-based)
+- **Data:** TanStack Query
 
-## Projektstruktur
+Details → `.cursor/rules/stack.mdc`
 
-<!-- TODO: Ausfüllen sobald die Ordnerstruktur steht -->
+## Screens
+
+| Route | Screen |
+|---|---|
+| `/` | Discovery — vertikaler Swipe durch Stadtmomente |
+| `/story` | Stadt-Story — 20:00 Ritual, horizontal |
+| `/record` | Aufnahme — Live-Kamera + Tages-Prompt |
+| `/connections` | Korso — Verbindungen + verdienter Chat |
+| `/feedback` | Rücklauf — morgendliche Reichweite (privat) |
+
+## Dokumentation
+
+- `docs/PRD.md` — Product Requirements, Kern-Mechaniken, Pilot-Spezifikation
+- `CLAUDE.md` — Konventionen und Leitplanken für AI-Assistenten
+- `.cursor/rules/` — Cursor IDE Regeln
 
 ## Kontakt
 
-Dominik – tools@subworx.io
+Dominik — tools@subworx.io

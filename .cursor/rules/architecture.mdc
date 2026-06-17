@@ -1,35 +1,76 @@
 ---
-description: Projektarchitektur und Ordnerstruktur
+description: Projektarchitektur, Ordnerstruktur und Datenfluss für Korso
 ---
 
 # Architektur
 
-<!-- TODO: Fülle diese Datei aus sobald die Grundstruktur steht. Fragen die du beantworten solltest:
-  - Monorepo oder separate Repos?
-  - Wie ist das Frontend aufgebaut? (Pages, Components, Hooks, Utils)
-  - Wie ist das Backend aufgebaut? (Routes, Controllers, Services, Models)
-  - Wie kommunizieren Frontend und Backend? (REST, GraphQL, tRPC)
-  - Wie wird State verwaltet? (lokal, Zustand, Redux, Context)
-  - Wie wird Auth gehandhabt?
--->
+## Überblick
 
-## Ordnerstruktur
+Korso ist eine **mobile-first Web-App** (TanStack Start, SSR-fähig).
+Aktueller Stand: Frontend-only mit Demo-Daten. Backend und Datenbank noch nicht integriert.
 
-PLATZHALTER – Struktur hier dokumentieren sobald sie feststeht.
+## Routing (TanStack Router, file-based)
 
-## Naming-Konventionen für Dateien
+Jede Datei in `src/routes/` wird automatisch zur Route:
 
-<!-- TODO: Festlegen und eintragen -->
-- Komponenten: PLATZHALTER (z.B. PascalCase: `UserCard.tsx`)
-- Hooks: PLATZHALTER (z.B. `useUserData.ts`)
-- Utils: PLATZHALTER (z.B. camelCase: `formatDate.ts`)
-- Seiten: PLATZHALTER
+| Datei | Route | Screen |
+|---|---|---|
+| `__root.tsx` | Layout | BottomNav, QueryClientProvider, Error Boundaries |
+| `index.tsx` | `/` | Discovery-Screen — vertikaler Swipe durch Nutzer-Tiles + Countdown |
+| `record.tsx` | `/record` | Aufnahme — Live-Kamera + Tages-Prompt |
+| `story.tsx` | `/story` | Stadt-Story — horizontaler Swipe, 20:00-Ritual |
+| `connections.tsx` | `/connections` | Verbindungen + verdienter Chat |
+| `feedback.tsx` | `/feedback` | Rücklauf — morgendliche Reichweite (privat) |
 
-## Datenfluss
+**Neue Routes:** Immer als neue Datei in `src/routes/` anlegen. Kein manuelles Routing.
 
-PLATZHALTER – Beschreibe wie Daten durch die App fließen.
+## Komponentenstruktur
 
-## Wichtige Architektur-Entscheidungen
+```
+src/components/ui/     → shadcn/ui Basiskomponenten (generiert, nicht manuell bearbeiten)
+src/components/        → App-spezifische Komponenten (hier eigene Komponenten anlegen)
+src/hooks/             → Custom React Hooks
+src/lib/               → Utilities, Hilfsfunktionen
+```
 
-<!-- TODO: Halte hier fest WARUM bestimmte Entscheidungen getroffen wurden -->
-- PLATZHALTER
+## State-Management
+
+- **Server State:** TanStack Query (`useQuery`, `useMutation`)
+- **Lokaler UI-State:** React `useState` / `useReducer`
+- **Kein globaler Store** (kein Zustand, kein Redux) — solange nicht nötig
+
+## Datenfluss (aktuell Demo, später Backend)
+
+```
+Route Component
+  → useQuery(queryKey, fetchFn)     ← TanStack Query
+  → fetchFn → API-Endpunkt          ← noch nicht implementiert
+  → Daten → UI-Render
+```
+
+Alle Demo-Daten (`TILES`, `CLIPS` etc.) sind direkt in den Route-Dateien als Konstanten.
+Wenn das Backend kommt, werden diese durch `useQuery`-Calls ersetzt.
+
+## Kern-Mechaniken und wo sie sitzen
+
+| Mechanik | Wo implementiert (geplant) |
+|---|---|
+| Verfallendes Publikum (24h) | Backend-Job + `/feedback` Route |
+| Stadt-Story Auswahl (gedämpft) | Backend-Job um 20:00, `/story` Route |
+| Live-Kamera Pflicht | `/record` Route — WebRTC, kein `<input type="file">` |
+| Verdienter Chat (3–4 Runden) | `/connections` Route + Backend-Logik |
+| Follow (24h Ablauf) | Backend-Job + `/story` und `/connections` |
+
+## Navigation
+
+BottomNav in `__root.tsx` mit 5 Tabs:
+Discovery → Story → Aufnahme → Korso (Connections) → Rücklauf (Feedback)
+
+## Was noch fehlt (Stand: Pilot-Phase)
+
+- Backend / API-Schicht (noch kein Stack definiert)
+- Auth / ID-Verifizierung
+- Datenbank
+- Push-Notifications
+- Video-Handling (Upload, Streaming)
+- Admin-Panel für Pilot
