@@ -56,6 +56,8 @@ function BottomNav() {
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { FollowProvider } from "../lib/follow-context";
+import { AuthProvider } from "../lib/auth-context";
+import { AuthGate } from "../components/auth-gate";
 
 function NotFoundComponent() {
   return (
@@ -189,12 +191,16 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <FollowProvider>
-        <div className="h-dvh bg-neutral-950 overflow-hidden">
-          <Outlet />
-          <BottomNav />
-        </div>
-      </FollowProvider>
+      <AuthProvider>
+        <AuthGate>
+          <FollowProvider>
+            <div className="h-dvh bg-neutral-950 overflow-hidden">
+              <Outlet />
+              <BottomNav />
+            </div>
+          </FollowProvider>
+        </AuthGate>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

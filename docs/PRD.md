@@ -1,12 +1,18 @@
 # Corso — Product Requirements Document
 
-**Version:** 0.2 (Stand 18. Juni 2026)
-**Status:** Pre-Pilot. Konzept final, Pilot-Spezifikation offen.
+**Version:** 0.3 (Stand 18. Juni 2026)
+**Status:** Pre-Pilot. Konzept final, Pilot als gratis Freundes-Pilot auf PWA spezifiziert.
 **Eigner:** Maxim
 
 > Single Source of Truth für Menschen und AI-Agents, die Corso aufbauen.
 > Offene Entscheidungen sind als `[ENTSCHEIDUNG OFFEN]` markiert und dürfen nicht stillschweigend getroffen werden.
 > Kritische Leitplanken sind mit 🔒 LEITPLANKE markiert — nicht verhandelbar ohne Freigabe des Eigners.
+> Die priorisierte Bau-Reihenfolge steht in `docs/ROADMAP.md`, der tagesaktuelle Stand in `docs/STATUS.md`. Bei Konflikt gewinnt dieses PRD.
+
+> **Changelog v0.2 → v0.3** (eingearbeitet aus Roadmap v0.1):
+> - Pilot-Tooling **Telegram → PWA** (Grundsatzentscheidung G1). Die Live-Kamera-Pflicht ist in der PWA nativ umsetzbar und bereits implementiert.
+> - Pilot-Modell **zahlend → gratis Freundes-Pilot** als erster Schritt (G2); zahlender Fremden-Pilot bleibt späterer zweiter Schritt.
+> - Damit erledigt: das frühere Telegram-Live-Kamera-Spannungsfeld und offene Entscheidung #9.
 
 ---
 
@@ -133,6 +139,8 @@ Wenn jemand in deinem "Ich folge"-Feed heute noch nichts gepostet hat, kannst du
 | **20:00–07:59** | Abend/Nacht | Refolge-Entscheidungen, Discovery & Ich folge aktiv |
 | **08:00 (Folgetag)** | Reset | Zyklus beginnt neu |
 
+> **Begriff „Privater Korso":** bewusst mit **K** geschrieben. „Korso" ist das deutsche Wort für Promenade/Umzug und meint hier das abendliche Push-Fenster (19–22 Uhr), in dem die Stadt gemeinsam flaniert — KEIN Tippfehler des App-Namens „Corso" (mit C). Nicht „korrigieren".
+
 ---
 
 ## 5. Screens & Flows
@@ -142,7 +150,7 @@ Wenn jemand in deinem "Ich folge"-Feed heute noch nichts gepostet hat, kannst du
 2. Heute-Screen (Prompt + Countdown bis 20:00)
 3. Discovery-Screen (randomized Feed, nur Fremde)
 4. Ich-folge-Screen (gefolgte Leute + Anstupsen)
-5. Stadt-Story-Screen (20:00, Vollbild, 8 Momente)
+5. Stadt-Story-Screen (20:00, vertikaler Karten-Feed wie Discovery, 8 Momente)
 6. Aufnahme-Screen (Live-Kamera + Einwilligungs-Toggle für Stadt-Story)
 7. Rücklauf-Screen (morgens, private Follower-Zahl)
 8. Verbindungs-Screen (Gegenseitigkeiten, verdienter Chat)
@@ -192,16 +200,25 @@ Prinzip: **Promenade zuerst, Kabine danach.**
 
 ## 9. MVP / Pilot
 
-- **Stadt:** Düsseldorf. **Dauer:** 4–6 Wochen. **Größe:** 60–100 zahlende Mitglieder.
-- **Tooling:** Telegram-Bot, keine native App.
-- **Preis:** Ab Tag 1 zahlend (€9).
-- **Kill-Metriken:**
-  - Woche-4 Daily-Open-Rate < 50 % → Konsum tot.
-  - Woche-4 aktiver-Post-Anteil < 40 % → Supply tot.
-  - < 5 verdiente Chats → reale Dates → Dating-Ausgang tot.
-- **Out of Scope:** Native App, Watermarking, autom. Stadt-Story, Consumables, mehrere Städte.
+Der Pilot läuft in zwei Schritten (siehe `docs/ROADMAP.md`):
 
-> ⚠️ **Offenes Spannungsfeld:** Die 🔒 Leitplanke "Live-Kamera-Pflicht" ist technisch im Telegram-Bot nicht nativ umsetzbar. Lösung für Pilot noch zu definieren.
+**Schritt 1 — Gratis Freundes-Pilot (jetzt):**
+- **Stadt:** Düsseldorf. **Tooling:** PWA (keine native App, kein Telegram).
+- **Größe:** 20–30 Freunde. **Preis:** gratis.
+- **Zweck:** misst NUR, ob der Kern-Loop zieht (täglich öffnen + posten). Beweist bewusst NICHT das Geschäft — Freunde nutzen aus Gefälligkeit.
+
+**Schritt 2 — Zahlender Fremden-Pilot (später):**
+- **Stadt:** Düsseldorf. **Dauer:** 4–6 Wochen. **Größe:** 60–100 zahlende Mitglieder. **Preis:** ab Tag 1 zahlend (€9).
+- **Zweck:** erst dieser Schritt validiert das Geschäft.
+
+**Kill-Metriken (gelten für die Pilot-Auswertung):**
+- Woche-4 Daily-Open-Rate < 50 % → Konsum tot.
+- Woche-4 aktiver-Post-Anteil < 40 % → Supply tot.
+- < 5 verdiente Chats → reale Dates → Dating-Ausgang tot.
+
+**Out of Scope (beide Schritte):** Native App, Watermarking, autom. Stadt-Story-Algorithmus, Consumables, mehrere Städte, volle ID-Verifizierung.
+
+> ✅ Die 🔒 Leitplanke „Live-Kamera-Pflicht" ist in der PWA via `getUserMedia` nativ umgesetzt (`src/hooks/use-camera.ts`). Das frühere Telegram-Spannungsfeld entfällt.
 
 ---
 
@@ -213,13 +230,13 @@ Prinzip: **Promenade zuerst, Kabine danach.**
 | 2 | Austausch-Runden bis Chat | **3–4** ✓ (Trigger-Logik offen) |
 | 3 | Rücklauf zählt Pool-Zuschauer | **JA** ✓ |
 | 4 | Strukturierter Treffen-Vorschlag UI | **NEIN** ✓ |
-| 5 | Tech-Stack native App | offen |
-| 6 | Stadt-Story-Frequenz/-Größe Tuning | offen |
+| 5 | Tech-Stack Pilot | **PWA** ✓ (native App nicht für Pilot) |
+| 6 | Stadt-Story-Frequenz/-Größe Tuning | offen (blockt Roadmap Phase 1) |
 | 7 | Privater Korso (Push 19–22 Uhr) — genaue Mechanik | offen |
-| 8 | Verbindungs-Trigger bei täglich-verfallenden Follows | offen |
-| 9 | Live-Kamera-Lösung für Telegram-Pilot | offen |
+| 8 | Verbindungs-Trigger bei täglich-verfallenden Follows | offen (blockt Roadmap Phase 3) |
+| 9 | Live-Kamera-Lösung für Telegram-Pilot | **HINFÄLLIG** ✓ (PWA + `getUserMedia`, kein Telegram) |
 | 10 | Mitigation Geschlechter-Asymmetrie | offen |
 
 ---
 
-*Ende PRD v0.2 — Stand 18. Juni 2026.*
+*Ende PRD v0.3 — Stand 18. Juni 2026.*

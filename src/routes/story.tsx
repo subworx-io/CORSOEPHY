@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { PORTRAITS } from "@/assets/portraits";
-import { useFollow } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
+import { FollowButton } from "@/components/follow-button";
+import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
@@ -37,117 +38,92 @@ const CLIPS: Clip[] = [
 ];
 
 function StoryPage() {
-  const { currentIndex: index, slideRef } = useSnapScroll({ count: CLIPS.length, axis: "x" });
-  const { isFollowing, follow } = useFollow();
-  const [burstHandle, setBurstHandle] = useState<string | null>(null);
-
-  const handleFollow = (c: Clip) => {
-    if (isFollowing(c.handle)) return;
-    follow({ handle: c.handle, src: c.src });
-    setBurstHandle(c.handle);
-    setTimeout(() => setBurstHandle(null), 700);
-  };
+  // Gleiche Scroll-UX wie Discovery: vertikales Snap-Scrollen.
+  const { currentIndex, slideRef } = useSnapScroll({ count: CLIPS.length, axis: "y" });
+  const { burstHandle, triggerBurst } = useHeartBurst();
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
-      {/* Clips (horizontal stack) */}
-      <div className="absolute inset-0 flex">
-        {CLIPS.map((c, i) => {
-          const offset = i - index;
-          const isActive = offset === 0;
-          const following = isFollowing(c.handle);
+      {CLIPS.map((c, i) => {
+        const offset = i - currentIndex;
+        const isActive = offset === 0;
+        const isNeighbor = Math.abs(offset) === 1;
 
-          return (
+        return (
+          <div
+            key={c.id}
+            ref={slideRef(i)}
+            className="absolute inset-0 w-full h-full"
+            style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
+          >
+            {/* Gerahmte Karte wie in der Discovery */}
             <div
-              key={c.id}
-              ref={slideRef(i)}
-              className="absolute inset-0 w-full h-full"
-              style={{ zIndex: isActive ? 10 : Math.abs(offset) === 1 ? 5 : 0 }}
+              className="absolute inset-0 px-4"
+              style={{
+                paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)",
+                paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
+              }}
             >
-              <img
-                src={c.src}
-                alt={c.caption}
-                className="w-full h-full object-cover"
-                draggable={false}
-              />
-
-              {/* Gradient overlays for readability */}
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/60" />
               <div
-                className="pointer-events-none absolute inset-0"
+                className="relative w-full h-full rounded-[2rem] overflow-hidden"
                 style={{
-                  background:
-                    "linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.06) 100%)",
-                  mixBlendMode: "overlay",
+                  boxShadow:
+                    "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
                 }}
-              />
+              >
+                <img
+                  src={c.src}
+                  alt={c.caption}
+                  className="w-full h-full object-cover"
+                  draggable={false}
+                />
 
-              {/* Herz-Burst beim Folgen */}
-              {burstHandle === c.handle && (
-                <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-                  <span
-                    className="material-symbols-outlined animate-heart-burst text-white"
-                    style={{ fontSize: "100px", fontVariationSettings: "'FILL' 1" }}
-                  >
-                    favorite
-                  </span>
-                </div>
-              )}
+                {/* Gradient-Ring-Overlay (identisch zur Discovery) */}
+                <div
+                  className="pointer-events-none absolute inset-0 rounded-[2rem]"
+                  style={{
+                    background:
+                      "linear-gradient(160deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.08) 100%)",
+                    mixBlendMode: "overlay",
+                  }}
+                />
 
-              {/* Top-left metadata */}
-              <div className="absolute top-6 left-6 z-20">
-                <div className="flex items-center gap-2 text-white/90">
-                  <span className="material-symbols-outlined text-[18px]">location_on</span>
-                  <span className="text-sm font-medium tracking-tight">{c.city}</span>
-                </div>
-                <div className="mt-1 text-white/50 text-[11px] uppercase tracking-[0.25em] font-medium">
-                  {c.time}
-                </div>
-              </div>
+                {/* Herz-Burst beim Folgen — geteilt mit Discovery */}
+                <HeartBurst active={burstHandle === c.handle} />
 
-              {/* Bottom caption + follow */}
-              <div className="absolute bottom-0 left-0 right-0 z-20 p-6">
-                <div className="flex items-end justify-between gap-4">
-                  <p className="text-white text-lg font-medium tracking-tight drop-shadow-md max-w-[70%]">
-                    {c.caption}
-                  </p>
-                  <button
-                    onClick={() => handleFollow(c)}
-                    disabled={following}
-                    className={`shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95 ${
-                      following
-                        ? "bg-white text-black"
-                        : "bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25"
-                    }`}
-                  >
-                    {following ? "folgst du" : "Folgen"}
-                    <span
-                      className="material-symbols-outlined text-[18px] leading-none"
-                      style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
-                    >
-                      favorite
+                {/* Bottom overlay — Ort/Zeit + Caption + Handle + Folgen */}
+                <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
+                  <div className="flex items-center gap-1.5 text-white/70 mb-1.5">
+                    <span className="material-symbols-outlined text-[16px] leading-none">location_on</span>
+                    <span className="text-xs font-medium tracking-tight">{c.city}</span>
+                    <span className="text-white/40 text-xs">· {c.time}</span>
+                  </div>
+                  <p className="text-white/90 text-sm tracking-tight mb-2.5">{c.caption}</p>
+                  <div className="flex justify-between items-end">
+                    <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
+                      {c.handle}
                     </span>
-                  </button>
+                    <FollowButton handle={c.handle} src={c.src} onBurst={() => triggerBurst(c.handle)} />
+                  </div>
                 </div>
               </div>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
 
-      {/* Progress dots — safe-area-inset-top für Notch */}
-      <div className="absolute right-6 z-30 flex gap-1.5" style={{ top: "calc(env(safe-area-inset-top, 0px) + 24px)" }}>
+      {/* Seitenindikatoren — identisch zur Discovery */}
+      <div className="absolute top-1/2 right-3 z-20 -translate-y-1/2 flex flex-col gap-1.5">
         {CLIPS.map((_, i) => (
           <div
             key={i}
-            className={`h-1 rounded-full transition-all duration-300 ${
-              i === index ? "w-6 bg-white" : "w-1.5 bg-white/40"
+            className={`w-1.5 rounded-full transition-all duration-300 ${
+              i === currentIndex ? "h-6 bg-white shadow-lg" : "h-1.5 bg-white/40"
             }`}
           />
         ))}
       </div>
 
-      {/* Swipe hint (fades out after first interaction) */}
       <SwipeHint />
     </div>
   );
@@ -168,9 +144,9 @@ function SwipeHint() {
   if (!visible) return null;
 
   return (
-    <div className="absolute bottom-24 left-0 right-0 z-30 flex justify-center pointer-events-none">
+    <div className="absolute bottom-28 left-0 right-0 z-30 flex justify-center pointer-events-none">
       <div className="flex flex-col items-center gap-1 text-white/40 animate-pulse">
-        <span className="material-symbols-outlined text-[24px]">swipe_left</span>
+        <span className="material-symbols-outlined text-[24px]">keyboard_arrow_up</span>
         <span className="text-[11px] uppercase tracking-widest font-medium">Wischen</span>
       </div>
     </div>

@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { PORTRAITS } from "@/assets/portraits";
+import skylineUrl from "@/assets/duesseldorf-skyline.jpg";
 import { useFollow } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
+import { FollowButton } from "@/components/follow-button";
+import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -62,55 +65,41 @@ const buildSlides = (tiles: Tile[]): Slide[] => [
   ...tiles.map((t) => ({ kind: "tile" as const, ...t })),
 ];
 
-function FollowButton({ handle, src, onBurst }: { handle: string; src: string; onBurst: () => void }) {
-  const { isFollowing, follow } = useFollow();
-  const following = isFollowing(handle);
-
-  const handleFollow = () => {
-    if (following) return;
-    follow({ handle, src });
-    onBurst();
-  };
-
-  return (
-    <button
-      onClick={handleFollow}
-      className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95 ${
-        following
-          ? "bg-white text-black"
-          : "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25"
-      }`}
-    >
-      {following ? "folgst du" : "Folgen"}
-      <span
-        className="material-symbols-outlined text-[16px] leading-none"
-        style={{ fontVariationSettings: following ? "'FILL' 1" : "'FILL' 0" }}
-      >
-        favorite
-      </span>
-    </button>
-  );
-}
+// Dauer, die eine gerade gefolgte Kachel noch sichtbar bleibt: Herz-Burst (700ms) + Wegblenden.
+const EXIT_MS = 1100;
 
 function Index() {
-  const [burstHandle, setBurstHandle] = useState<string | null>(null);
+  const { burstHandle, triggerBurst } = useHeartBurst();
   const { hours, minutes, seconds } = useCountdown();
 
-  // Discovery zeigt nur Fremde: Personen, denen du beim Öffnen schon folgst, werden ausgeblendet.
-  // Folgst du jemandem während der Session, bleibt die Kachel sichtbar (Herz-Burst + "folgst du").
-  const { followed } = useFollow();
-  const [excludedHandles] = useState(() => new Set(followed.keys()));
+  // Discovery zeigt nur Fremde (PRD §4.4): wem du folgst, verlässt den Feed.
+  // Reaktiv auf den Follow-State — nicht am Mount eingefroren, damit das Verhalten
+  // überall gleich ist (kein "bleibt diese Session, weg nach Navigation"-Zufall mehr).
+  const { followed, reset } = useFollow();
+  // `exiting` hält eine gerade gefolgte Kachel kurz im Feed, damit sie sichtbar
+  // rausgleiten kann, statt unter dem Finger zu verschwinden.
+  const [exiting, setExiting] = useState<Set<string>>(() => new Set());
+
   const slides = useMemo(
-    () => buildSlides(TILES.filter((t) => !excludedHandles.has(t.handle))),
-    [excludedHandles]
+    () => buildSlides(TILES.filter((t) => !followed.has(t.handle) || exiting.has(t.handle))),
+    [followed, exiting]
   );
 
-  const { currentIndex, slideRef } = useSnapScroll({ count: slides.length, axis: "y" });
-
-  const triggerBurst = (handle: string) => {
-    setBurstHandle(handle);
-    setTimeout(() => setBurstHandle(null), 700);
+  // Nach dem Follow: Herz zeigen, dann die Kachel aus Discovery gleiten lassen.
+  // Die Person ist durch follow() bereits in "Ich folge" — hier geht es nur ums Ausblenden.
+  const handleFollowed = (handle: string) => {
+    triggerBurst(handle);
+    setExiting((prev) => new Set(prev).add(handle));
+    setTimeout(() => {
+      setExiting((prev) => {
+        const next = new Set(prev);
+        next.delete(handle);
+        return next;
+      });
+    }, EXIT_MS);
   };
+
+  const { currentIndex, slideRef } = useSnapScroll({ count: slides.length, axis: "y" });
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
@@ -119,6 +108,7 @@ function Index() {
         const offset = i - currentIndex;
         const isActive = offset === 0;
         const isNeighbor = Math.abs(offset) === 1;
+        const isExiting = slide.kind === "tile" && exiting.has(slide.handle);
 
         return (
           <div
@@ -132,6 +122,10 @@ function Index() {
               style={{
                 paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)",
                 paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
+                // Wegblenden erst nach dem Herz-Burst (Delay 600ms), dann sanft schrumpfen.
+                opacity: isExiting ? 0 : 1,
+                transform: isExiting ? "scale(0.9)" : "scale(1)",
+                transition: "opacity 450ms ease 600ms, transform 450ms ease 600ms",
               }}
             >
               <div
@@ -175,7 +169,7 @@ function Index() {
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
-                        <FollowButton handle={slide.handle} src={slide.src} onBurst={() => triggerBurst(slide.handle)} />
+                        <FollowButton handle={slide.handle} src={slide.src} onBurst={() => handleFollowed(slide.handle)} />
                       </div>
                     </div>
                   </>
@@ -187,10 +181,26 @@ function Index() {
                         "radial-gradient(circle at 30% 20%, rgba(255,255,255,0.08), transparent 60%), radial-gradient(circle at 70% 80%, rgba(255,255,255,0.04), transparent 55%), linear-gradient(160deg, #111 0%, #050505 100%)",
                     }}
                   >
-                    <div className="text-[11px] uppercase tracking-[0.4em] text-white/50 mb-6 font-medium">
+                    {/* Düsseldorf-Skyline als dezenter Backdrop (PRD-fern, reine Atmosphäre) */}
+                    <img
+                      src={skylineUrl}
+                      alt=""
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"
+                      draggable={false}
+                    />
+                    {/* Radial-Overlay hält den Countdown in der Mitte lesbar */}
+                    <div
+                      className="pointer-events-none absolute inset-0"
+                      style={{
+                        background:
+                          "radial-gradient(circle at 50% 45%, rgba(5,5,5,0.85) 0%, rgba(5,5,5,0.55) 35%, transparent 70%)",
+                      }}
+                    />
+                    <div className="relative z-10 text-[11px] uppercase tracking-[0.4em] text-white/50 mb-6 font-medium">
                       Corso — Stadt-Story um 20:00
                     </div>
-                    <div className="flex items-end gap-3 tabular-nums">
+                    <div className="relative z-10 flex items-end gap-3 tabular-nums">
                       {[
                         { v: pad(hours), l: "Std" },
                         { v: pad(minutes), l: "Min" },
@@ -205,7 +215,7 @@ function Index() {
                         </div>
                       ))}
                     </div>
-                    <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center gap-2 text-white/40">
+                    <div className="absolute bottom-8 left-0 right-0 z-10 flex flex-col items-center gap-2 text-white/40">
                       <span className="material-symbols-outlined animate-bounce text-[28px]">keyboard_arrow_up</span>
                       <span className="text-[11px] tracking-widest uppercase font-medium">Swipe</span>
                     </div>
@@ -231,7 +241,16 @@ function Index() {
 
       {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
       <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
-        <div className="flex justify-end items-center px-6 h-14 max-w-[600px] mx-auto">
+        <div className="flex justify-end items-center gap-4 px-6 h-14 max-w-[600px] mx-auto">
+          {/* Dev/Test: setzt Follows + persistierten Stand auf den Demo-Ausgang zurück */}
+          <button
+            onClick={() => reset()}
+            className="flex items-center text-white/70 hover:text-white active:scale-95 transition-all drop-shadow-md"
+            aria-label="App zurücksetzen"
+            title="App zurücksetzen"
+          >
+            <span className="material-symbols-outlined">restart_alt</span>
+          </button>
           <button className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md" aria-label="Einstellungen">
             <span className="material-symbols-outlined">settings</span>
           </button>

@@ -18,17 +18,37 @@ export const Route = createFileRoute("/connections")({
   component: ConnectionsPage,
 });
 
-/** Herz mit stufenlosem Füllgrad (0..1) — visualisiert den täglichen Verfall. */
-function HeartIcon({ fill, className = "" }: { fill: number; className?: string }) {
+/**
+ * Herz, das wie ein Glas von unten nach oben vollläuft (0..1) — visualisiert den
+ * täglichen Verfall. Umriss = leeres Glas, gefülltes Herz wird per clip-path von
+ * unten eingeblendet (steigender Flüssigkeitspegel statt Füllung von innen).
+ */
+function GlassHeart({ fill, className = "" }: { fill: number; className?: string }) {
+  const hiddenTop = ((1 - Math.max(0, Math.min(1, fill))) * 100).toFixed(1);
   return (
-    <span
-      className={`material-symbols-outlined leading-none ${className}`}
-      style={{ fontVariationSettings: `'FILL' ${fill.toFixed(2)}` }}
-    >
-      favorite
+    <span className={`relative inline-block leading-none ${className}`}>
+      {/* leeres Glas (Kontur) */}
+      <span
+        className="material-symbols-outlined leading-none block opacity-25"
+        style={{ fontVariationSettings: "'FILL' 0" }}
+      >
+        favorite
+      </span>
+      {/* Füllung — nur der untere `fill`-Anteil ist sichtbar */}
+      <span
+        className="material-symbols-outlined leading-none block absolute inset-0"
+        style={{ fontVariationSettings: "'FILL' 1", clipPath: `inset(${hiddenTop}% 0 0 0)` }}
+      >
+        favorite
+      </span>
     </span>
   );
 }
+
+// Einheitliche Pill-Optik wie der FollowButton in Discovery/Story.
+const PILL = "flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95";
+const PILL_OUTLINE = "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25";
+const PILL_SOLID = "bg-white text-black";
 
 function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
   const { renew, nudge } = useFollow();
@@ -36,8 +56,6 @@ function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
   const hasImage = person.src !== null && hasPostedToday;
   const fill = followFill(person.followedAt, now);
   const renewable = canRenew(person.followedAt, now);
-  // Herz wird gegen Ablauf dringlich
-  const urgent = fill < 0.2;
 
   return (
     <div
@@ -84,51 +102,39 @@ function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
           </div>
         )}
 
-        {/* Bottom overlay + Buttons */}
-        <div className={`absolute bottom-0 left-0 right-0 p-5 flex flex-col gap-3 ${hasImage ? "bg-gradient-to-t from-black/80 via-black/30 to-transparent" : ""}`}>
-          {/* Handle + verfallendes Herz (der „Tank") */}
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
+        {/* Bottom overlay — Handle links, Aktions-Pills rechts (Layout wie Discovery/Story) */}
+        <div className={`absolute bottom-0 left-0 right-0 p-5 ${hasImage ? "bg-gradient-to-t from-black/80 via-black/30 to-transparent" : ""}`}>
+          <div className="flex items-end justify-between gap-3">
+            <span className="min-w-0 truncate text-white text-lg font-semibold tracking-tight drop-shadow-md">
               {person.handle}
             </span>
-            <HeartIcon
-              fill={fill}
-              className={`text-[26px] drop-shadow transition-colors duration-500 ${urgent ? "text-rose-400" : "text-white"}`}
-            />
-          </div>
 
-          <div className="flex gap-2">
-            {/* Anstupsen nur, wenn heute noch nichts gepostet (PRD 4.5) */}
-            {!hasPostedToday && (
-              <button
-                onClick={() => nudge(person.handle)}
-                disabled={person.nudged}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold transition-all active:scale-95 ${
-                  person.nudged
-                    ? "bg-white/10 text-white/40"
-                    : "bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25"
-                }`}
-              >
-                <span className="material-symbols-outlined text-[16px] leading-none">notification_add</span>
-                {person.nudged ? "angestupst" : "anstupsen"}
-              </button>
-            )}
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {/* Anstupsen nur, wenn heute noch nichts gepostet (PRD 4.5) */}
+              {!hasPostedToday && (
+                <button
+                  onClick={() => nudge(person.handle)}
+                  disabled={person.nudged}
+                  className={`${PILL} ${person.nudged ? "bg-white/10 text-white/40" : PILL_OUTLINE}`}
+                >
+                  <span className="material-symbols-outlined text-[16px] leading-none">notification_add</span>
+                  {person.nudged ? "angestupst" : "anstupsen"}
+                </button>
+              )}
 
-            {/* Erneuern, sobald der Follow vor dem heutigen Reset lag — sonst Status „folgst du heute" */}
-            {renewable ? (
-              <button
-                onClick={() => renew(person.handle)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/20 hover:bg-white/25 transition-all active:scale-95"
-              >
-                <HeartIcon fill={0} className="text-[16px]" />
-                follow erneuern
-              </button>
-            ) : (
-              <div className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full text-sm font-semibold bg-white text-black">
-                <HeartIcon fill={1} className="text-[16px]" />
-                folgst du heute
-              </div>
-            )}
+              {/* Erneuern, sobald der Follow vor dem heutigen Reset lag — sonst Status „folgst du heute" */}
+              {renewable ? (
+                <button onClick={() => renew(person.handle)} className={`${PILL} ${PILL_OUTLINE}`}>
+                  <GlassHeart fill={fill} className="text-[16px]" />
+                  follow erneuern
+                </button>
+              ) : (
+                <div className={`${PILL} ${PILL_SOLID}`}>
+                  <GlassHeart fill={fill} className="text-[16px]" />
+                  folgst du heute
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

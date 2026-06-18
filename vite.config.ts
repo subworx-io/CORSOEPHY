@@ -11,10 +11,11 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
-    // Erreichbar im lokalen Netzwerk → Handy kann direkt auf http://<deine-IP>:3000 zugreifen
     server: {
       host: true,
       port: 3000,
+      // ngrok-Tunnel: Vite blockiert sonst fremde Hosts mit 403
+      allowedHosts: [".ngrok-free.app", ".ngrok.io", ".ngrok.app"],
     },
   },
 });

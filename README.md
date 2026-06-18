@@ -1,12 +1,12 @@
-# Korso
+# Corso
 
 **Lokale Stadtbeobachtungs-App mit Dating-Ausgang.**
 
-Jeden Abend geht deine Stadt gemeinsam spazieren: rohe, ungeschnittene Video-Momente echter Menschen aus deiner Umgebung. Um 20:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden. Wer dort gefällt, gewinnt Publikum — aber dieses Publikum verfällt nach 24 Stunden, wenn man nicht nachliefert.
+Jeden Abend geht deine Stadt gemeinsam spazieren: rohe, ungeschnittene Video-Momente echter Menschen aus deiner Umgebung. Um 20:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden. Wer dort gefällt, gewinnt Publikum — aber dieses Publikum verfällt täglich um 08:00 Uhr, wenn man nicht nachliefert.
 
 > Dating ist der Ausgang, nicht der Eingang.
 
-**Pilot:** Düsseldorf · 60–100 zahlende Mitglieder · €9/Monat · Telegram-Bot MVP
+**Pilot:** Düsseldorf · PWA · zuerst gratis Freundes-Pilot, danach zahlender Fremden-Pilot (€9/Monat)
 
 ---
 
@@ -49,15 +49,19 @@ Details → `.cursor/rules/stack.mdc`
 | Route | Screen |
 |---|---|
 | `/` | Discovery — vertikaler Swipe durch Stadtmomente |
-| `/story` | Stadt-Story — 20:00 Ritual, horizontal |
+| `/story` | Stadt-Story — 20:00 Ritual, vertikaler Swipe (UX wie Discovery) |
 | `/record` | Aufnahme — Live-Kamera + Tages-Prompt |
 | `/connections` | Korso — Verbindungen + verdienter Chat |
 | `/feedback` | Rücklauf — morgendliche Reichweite (privat) |
 
 ## Dokumentation
 
-- `docs/PRD.md` — Product Requirements, Kern-Mechaniken, Pilot-Spezifikation
-- `CLAUDE.md` — Konventionen und Leitplanken für AI-Assistenten
+Lese-Reihenfolge zum Reinkommen:
+
+1. `CLAUDE.md` — Konventionen und Leitplanken für AI-Assistenten (Einstieg)
+2. `docs/PRD.md` — Product Requirements, Kern-Mechaniken, Pilot-Spezifikation (Source of Truth)
+3. `docs/ROADMAP.md` — Bau-Reihenfolge nach Abhängigkeit (Phasen 0–3)
+4. `docs/STATUS.md` — aktueller Stand + nächster konkreter Schritt
 - `.cursor/rules/` — Cursor IDE Regeln
 
 ## Kontakt

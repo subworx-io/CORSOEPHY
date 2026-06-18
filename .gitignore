@@ -43,6 +43,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Claude Code Agent-Worktrees (lokal, nicht versionieren)
+.claude/worktrees/
+
 # Misc
 *.pem
 .vercel

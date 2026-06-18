@@ -5,8 +5,19 @@
 **Corso** ist eine lokale Stadtbeobachtungs-App mit Dating-Ausgang.
 Jeden Abend "geht deine Stadt gemeinsam spazieren": rohe, ungeschnittene Video-Momente echter Menschen aus der Umgebung. Um 20:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden. Publikum verfällt nach 24 Stunden wenn man nicht nachliefert.
 
-**Pilot:** Düsseldorf, 60–100 zahlende Mitglieder (€9/Monat), 4–6 Wochen, Telegram-Bot als MVP-Kanal.
-**Eigner:** Maxim. PRD unter `docs/PRD.md`.
+**Pilot:** Düsseldorf, **PWA** (kein Telegram, keine native App). Zwei Schritte: zuerst gratis Freundes-Pilot (20–30 Freunde, misst ob der Loop zieht), danach zahlender Fremden-Pilot (60–100 Mitglieder, €9/Monat, 4–6 Wochen).
+**Eigner:** Maxim.
+
+## Start hier (Lese-Reihenfolge für jeden neuen Kontext)
+
+Vor dem Arbeiten der Reihe nach lesen — die Docs sind die Source of Truth, nicht dieses Gedächtnis:
+
+1. **`CLAUDE.md`** (diese Datei) — Konventionen, Leitplanken, Stack.
+2. **`docs/PRD.md`** — was & warum. Produkt-Source-of-Truth. Bei jedem Konflikt gewinnt das PRD.
+3. **`docs/ROADMAP.md`** — was als nächstes & in welcher Reihenfolge (nach Abhängigkeit, Phase 0 blockt alles).
+4. **`docs/STATUS.md`** — wo genau stehen wir gerade, was ist WIP, nächster konkreter Schritt. **Bei jedem nennenswerten Fortschritt aktualisieren.**
+
+Regel: keine `[ENTSCHEIDUNG OFFEN]` stillschweigend treffen, keine 🔒 LEITPLANKE umgehen — eskalieren.
 
 ### Kern-Mechaniken (nicht verhandelbar)
 - 🔒 Live-Kamera-Pflicht — kein Galerie-Upload, keine Filter
@@ -33,13 +44,16 @@ Jeden Abend "geht deine Stadt gemeinsam spazieren": rohe, ungeschnittene Video-M
 
 ```
 CORSO_EPHY/
-├── docs/PRD.md               # Product Requirements Document (Source of Truth)
+├── docs/
+│   ├── PRD.md                # Product Requirements (Source of Truth — was & warum)
+│   ├── ROADMAP.md            # Bau-Reihenfolge nach Abhängigkeit (Phasen 0–3)
+│   └── STATUS.md             # Lebender Schnappschuss: aktueller Stand + nächster Schritt
 ├── src/
 │   ├── routes/
 │   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider
 │   │   ├── index.tsx         # Discovery-Screen (Entdeckungs-Feed, Swipe vertikal)
 │   │   ├── record.tsx        # Aufnahme-Screen (Live-Kamera + Prompt)
-│   │   ├── story.tsx         # Stadt-Story (20:00 Ritual, Swipe horizontal)
+│   │   ├── story.tsx         # Stadt-Story (20:00 Ritual, Swipe vertikal — UX/Optik wie Discovery, PRD 4.6 §5)
 │   │   ├── connections.tsx   # Verbindungen + verdienter Chat
 │   │   └── feedback.tsx      # Rücklauf (morgendliche Reichweite, privat)
 │   ├── components/
