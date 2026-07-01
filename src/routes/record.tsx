@@ -1,6 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCamera } from "@/hooks/use-camera";
+import { useAuth } from "@/lib/auth-context";
+import { uploadMoment } from "@/lib/supabase/upload";
 
 export const Route = createFileRoute("/record")({
   head: () => ({
@@ -17,7 +20,27 @@ const DAILY_PROMPT = "Was hat dich heute kurz innehalten lassen?";
 
 function RecordPage() {
   const [cityStory, setCityStory] = useState(true);
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const cam = useCamera();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  async function handleUseClip() {
+    if (!cam.recordedBlob || !user) return;
+    setUploadStatus("uploading");
+    setUploadError(null);
+    const { error } = await uploadMoment(cam.recordedBlob, user.id, cityStory);
+    if (error) {
+      setUploadStatus("error");
+      setUploadError(error);
+    } else {
+      setUploadStatus("done");
+      await queryClient.invalidateQueries({ queryKey: ["discovery"] });
+      setTimeout(() => void navigate({ to: "/" }), 1200);
+    }
+  }
 
   const showPrompt = cam.status === "idle" || cam.status === "error";
   const recordProgress = Math.min(cam.elapsedMs / cam.maxMs, 1);
@@ -130,7 +153,13 @@ function RecordPage() {
           </span>
         </button>
 
-        <CameraControls cam={cam} recordProgress={recordProgress} />
+        <CameraControls
+          cam={cam}
+          recordProgress={recordProgress}
+          uploadStatus={uploadStatus}
+          uploadError={uploadError}
+          onUseClip={() => void handleUseClip()}
+        />
       </div>
     </div>
   );
@@ -139,9 +168,15 @@ function RecordPage() {
 function CameraControls({
   cam,
   recordProgress,
+  uploadStatus,
+  uploadError,
+  onUseClip,
 }: {
   cam: ReturnType<typeof useCamera>;
   recordProgress: number;
+  uploadStatus: "idle" | "uploading" | "done" | "error";
+  uploadError: string | null;
+  onUseClip: () => void;
 }) {
   // Vor dem Start / nach Fehler: Kamera anstoßen (braucht User-Geste für iOS)
   if (cam.status === "idle" || cam.status === "starting" || cam.status === "error") {
@@ -157,25 +192,35 @@ function CameraControls({
     );
   }
 
-  // Clip aufgenommen: verwerfen oder behalten
+  // Clip aufgenommen: verwerfen oder hochladen
   if (cam.status === "recorded") {
+    const uploading = uploadStatus === "uploading";
+    const done = uploadStatus === "done";
     return (
-      <div className="flex items-center gap-3">
-        <button
-          onClick={cam.retake}
-          className="flex-1 flex items-center justify-center gap-2 py-4 rounded-full bg-white/10 border border-white/15 text-white text-sm font-semibold active:scale-[0.99] transition-transform"
-        >
-          <span className="material-symbols-outlined text-[20px]">replay</span>
-          Neu aufnehmen
-        </button>
-        <button
-          disabled
-          className="flex-1 flex items-center justify-center gap-2 py-4 rounded-full bg-white text-black text-sm font-semibold disabled:opacity-50"
-          title="Hochladen kommt im nächsten Schritt"
-        >
-          <span className="material-symbols-outlined text-[20px]">check</span>
-          Verwenden
-        </button>
+      <div className="flex flex-col gap-3">
+        {uploadError && (
+          <p className="text-center text-sm text-red-400">{uploadError}</p>
+        )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={cam.retake}
+            disabled={uploading || done}
+            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-full bg-white/10 border border-white/15 text-white text-sm font-semibold active:scale-[0.99] transition-transform disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-[20px]">replay</span>
+            Neu aufnehmen
+          </button>
+          <button
+            onClick={onUseClip}
+            disabled={uploading || done}
+            className="flex-1 flex items-center justify-center gap-2 py-4 rounded-full bg-white text-black text-sm font-semibold active:scale-[0.99] transition-transform disabled:opacity-60"
+          >
+            <span className="material-symbols-outlined text-[20px]">
+              {done ? "check_circle" : uploading ? "hourglass_top" : "check"}
+            </span>
+            {done ? "Hochgeladen" : uploading ? "Wird hochgeladen…" : "Verwenden"}
+          </button>
+        </div>
       </div>
     );
   }

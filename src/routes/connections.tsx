@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   useFollow,
   followFill,
@@ -7,6 +8,8 @@ import {
   type FollowedPerson,
 } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
+import { supabase } from "@/lib/supabase/client";
+import { useAuth } from "@/lib/auth-context";
 
 export const Route = createFileRoute("/connections")({
   head: () => ({
@@ -50,12 +53,38 @@ const PILL = "flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounde
 const PILL_OUTLINE = "bg-white/15 backdrop-blur-sm text-white border border-white/30 hover:bg-white/25";
 const PILL_SOLID = "bg-white text-black";
 
-function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
+function PersonSlide({
+  person,
+  now,
+  videoUrl,
+  isActive,
+}: {
+  person: FollowedPerson;
+  now: number;
+  videoUrl?: string;
+  isActive: boolean;
+}) {
   const { renew, nudge } = useFollow();
-  const hasPostedToday = person.hasPostedToday;
-  const hasImage = person.src !== null && hasPostedToday;
   const fill = followFill(person.followedAt, now);
   const renewable = canRenew(person.followedAt, now);
+  const [muted, setMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (isActive) v.play().catch(() => {});
+    else v.pause();
+  }, [isActive]);
+
+  function toggleMute() {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+  }
+
+  const hasMedia = !!videoUrl || (person.src !== null);
 
   return (
     <div
@@ -71,11 +100,31 @@ function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
           boxShadow: "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
         }}
       >
-        {/* Bild oder leerer State */}
-        {hasImage ? (
+        {videoUrl ? (
+          <>
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              playsInline
+              muted
+              loop
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            {isActive && (
+              <button
+                onClick={toggleMute}
+                className="absolute top-4 left-4 h-9 w-9 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition-transform z-10"
+              >
+                <span className="material-symbols-outlined text-white text-[18px]">
+                  {muted ? "volume_off" : "volume_up"}
+                </span>
+              </button>
+            )}
+          </>
+        ) : person.src ? (
           <>
             <img
-              src={person.src!}
+              src={person.src}
               alt={person.handle}
               className="w-full h-full object-cover"
               draggable={false}
@@ -103,15 +152,15 @@ function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
         )}
 
         {/* Bottom overlay — Handle links, Aktions-Pills rechts (Layout wie Discovery/Story) */}
-        <div className={`absolute bottom-0 left-0 right-0 p-5 ${hasImage ? "bg-gradient-to-t from-black/80 via-black/30 to-transparent" : ""}`}>
+        <div className={`absolute bottom-0 left-0 right-0 p-5 ${hasMedia ? "bg-gradient-to-t from-black/80 via-black/30 to-transparent" : ""}`}>
           <div className="flex items-end justify-between gap-3">
             <span className="min-w-0 truncate text-white text-lg font-semibold tracking-tight drop-shadow-md">
               {person.handle}
             </span>
 
             <div className="flex items-center gap-2 flex-wrap justify-end">
-              {/* Anstupsen nur, wenn heute noch nichts gepostet (PRD 4.5) */}
-              {!hasPostedToday && (
+              {/* Anstupsen nur, wenn heute noch kein Video vorhanden (PRD 4.5) */}
+              {!hasMedia && (
                 <button
                   onClick={() => nudge(person.handle)}
                   disabled={person.nudged}
@@ -144,6 +193,7 @@ function PersonSlide({ person, now }: { person: FollowedPerson; now: number }) {
 
 function ConnectionsPage() {
   const { followed } = useFollow();
+  const { user } = useAuth();
   const people = Array.from(followed.values());
   const { currentIndex, slideRef } = useSnapScroll({ count: people.length, axis: "y" });
 
@@ -153,6 +203,47 @@ function ConnectionsPage() {
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
   }, []);
+
+  const handles = people.map((p) => p.handle);
+
+  // Holt den aktuellsten Post (+ signierte Video-URL) für jede gefolgte Person
+  const { data: videosByHandle = {} } = useQuery({
+    queryKey: ["connections-posts", handles.join(",")],
+    queryFn: async () => {
+      if (!handles.length) return {};
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, handle")
+        .in("handle", handles);
+      if (!profiles?.length) return {};
+
+      const authorIds = profiles.map((p) => p.id);
+      const { data: posts } = await supabase
+        .from("posts")
+        .select("media_path, author_id")
+        .in("author_id", authorIds)
+        .order("created_at", { ascending: false });
+      if (!posts?.length) return {};
+
+      // Eine signierte URL pro Author (neuester Post)
+      const result: Record<string, string> = {};
+      const seen = new Set<string>();
+      for (const post of posts) {
+        if (seen.has(post.author_id)) continue;
+        seen.add(post.author_id);
+        const profile = profiles.find((p) => p.id === post.author_id);
+        if (!profile) continue;
+        const { data: urlData } = await supabase.storage
+          .from("moments")
+          .createSignedUrl(post.media_path, 3600);
+        if (urlData?.signedUrl) result[profile.handle] = urlData.signedUrl;
+      }
+      return result;
+    },
+    enabled: !!user && handles.length > 0,
+    staleTime: 0,
+    refetchOnMount: true,
+  });
 
   if (people.length === 0) {
     return (
@@ -182,7 +273,7 @@ function ConnectionsPage() {
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
           >
-            <PersonSlide person={person} now={now} />
+            <PersonSlide person={person} now={now} videoUrl={videosByHandle[person.handle]} isActive={isActive} />
           </div>
         );
       })}

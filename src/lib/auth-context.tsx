@@ -69,12 +69,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithMagicLink = useCallback(async (email: string) => {
+    // Prefer VITE_APP_URL (set to the current ngrok/prod URL in .env) so the
+    // magic-link points to the right host even when opened on a physical device.
+    // Falls back to window.location.origin for pure localhost dev.
+    const redirectTo =
+      import.meta.env.VITE_APP_URL ??
+      (typeof window !== "undefined" ? window.location.origin : undefined);
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: {
-        emailRedirectTo:
-          typeof window !== "undefined" ? window.location.origin : undefined,
-      },
+      options: { emailRedirectTo: redirectTo },
     });
     return { error: error?.message ?? null };
   }, []);

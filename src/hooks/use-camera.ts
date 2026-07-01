@@ -77,6 +77,7 @@ export function useCamera() {
   const [error, setError] = useState<CameraError | null>(null);
   const [facingMode, setFacingMode] = useState<FacingMode>("user");
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
   const stopStream = useCallback(() => {
@@ -173,6 +174,7 @@ export function useCamera() {
       const url = URL.createObjectURL(blob);
       recordedUrlRef.current = url;
       setRecordedUrl(url);
+      setRecordedBlob(blob);
       setStatus("recorded");
     };
 
@@ -192,6 +194,7 @@ export function useCamera() {
   const retake = useCallback(() => {
     revokeRecorded();
     setRecordedUrl(null);
+    setRecordedBlob(null);
     setElapsedMs(0);
     if (videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -219,6 +222,7 @@ export function useCamera() {
     error,
     facingMode,
     recordedUrl,
+    recordedBlob,
     elapsedMs,
     maxMs: MAX_RECORD_MS,
     start,

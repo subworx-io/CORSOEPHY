@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { PORTRAITS } from "@/assets/portraits";
+import { supabase } from "@/lib/supabase/client";
 
 // Persistenz-Schlüssel: Follow-State überlebt Reload auf demselben Gerät.
 // (Kein geteilter Server — das ist Phase 0 und braucht eine Architektur-Entscheidung mit dem Eigner.)
@@ -160,13 +161,28 @@ export function FollowProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // Follow erneuern → Herz füllt wieder auf (followedAt zurücksetzen)
+  // Follow erneuern → Herz füllt wieder auf (followedAt zurücksetzen) + DB-Sync
   const renew = (handle: string) => {
     setFollowed((prev) => {
       const person = prev.get(handle);
       if (!person) return prev;
       return new Map(prev).set(handle, { ...person, followedAt: Date.now() });
     });
+    // DB: expires_at zurücksetzen, followed_at aktualisieren (fire-and-forget)
+    void (async () => {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("handle", handle)
+        .maybeSingle();
+      if (!profile) return;
+      const uid = (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
+      await supabase.from("follows").upsert(
+        { follower_id: uid, followee_id: profile.id, followed_at: new Date().toISOString(), expires_at: null },
+        { onConflict: "follower_id,followee_id" },
+      );
+    })();
   };
 
   const nudge = (handle: string) => {

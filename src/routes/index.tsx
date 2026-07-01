@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PORTRAITS } from "@/assets/portraits";
 import skylineUrl from "@/assets/duesseldorf-skyline.jpg";
 import { useFollow } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { FollowButton } from "@/components/follow-button";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
+import { supabase } from "@/lib/supabase/client";
+import { useAuth } from "@/lib/auth-context";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -19,7 +22,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type Tile = { handle: string; src: string; alt: string };
+type Tile = { handle: string; src?: string; alt?: string; videoUrl?: string };
 type CountdownSlide = { kind: "countdown" };
 type TileSlide = { kind: "tile" } & Tile;
 type Slide = CountdownSlide | TileSlide;
@@ -60,6 +63,52 @@ const TILES: Tile[] = [
   { handle: "@leo.see",       src: PORTRAITS.leoWild,      alt: "Atmospheric sepia-toned portrait in a foggy field." },
 ];
 
+function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [muted, setMuted] = useState(true);
+
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    if (isActive) {
+      v.play().catch(() => {});
+    } else {
+      v.pause();
+    }
+  }, [isActive]);
+
+  function toggleMute() {
+    const v = ref.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+  }
+
+  return (
+    <>
+      <video
+        ref={ref}
+        src={src}
+        playsInline
+        muted
+        loop
+        className="absolute inset-0 h-full w-full object-cover"
+      />
+      {isActive && (
+        <button
+          onClick={toggleMute}
+          className="absolute top-4 left-4 h-9 w-9 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition-transform z-10"
+          aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
+        >
+          <span className="material-symbols-outlined text-white text-[18px]">
+            {muted ? "volume_off" : "volume_up"}
+          </span>
+        </button>
+      )}
+    </>
+  );
+}
+
 const buildSlides = (tiles: Tile[]): Slide[] => [
   { kind: "countdown" },
   ...tiles.map((t) => ({ kind: "tile" as const, ...t })),
@@ -71,6 +120,44 @@ const EXIT_MS = 1100;
 function Index() {
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { hours, minutes, seconds } = useCountdown();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Echte Posts aus der DB laden (andere User, neueste zuerst)
+  const { data: dbTiles = [] } = useQuery({
+    queryKey: ["discovery", user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from("posts")
+        .select("id, media_path, profiles(handle)")
+        .neq("author_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (error || !data?.length) return [];
+      const withUrls = await Promise.all(
+        data.map(async (post) => {
+          const { data: urlData } = await supabase.storage
+            .from("moments")
+            .createSignedUrl(post.media_path, 3600);
+          return {
+            handle: (post.profiles as unknown as { handle: string }).handle,
+            videoUrl: urlData?.signedUrl ?? null,
+          };
+        }),
+      );
+      return withUrls.filter(
+        (t): t is { handle: string; videoUrl: string } => t.videoUrl !== null,
+      );
+    },
+    enabled: !!user,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnMount: true,
+  });
+
+  // Wenn echte Posts vorhanden sind, diese nehmen — sonst Demo-Daten
+  const activeTiles: Tile[] = dbTiles.length > 0 ? dbTiles : TILES;
 
   // Discovery zeigt nur Fremde (PRD §4.4): wem du folgst, verlässt den Feed.
   // Reaktiv auf den Follow-State — nicht am Mount eingefroren, damit das Verhalten
@@ -81,8 +168,8 @@ function Index() {
   const [exiting, setExiting] = useState<Set<string>>(() => new Set());
 
   const slides = useMemo(
-    () => buildSlides(TILES.filter((t) => !followed.has(t.handle) || exiting.has(t.handle))),
-    [followed, exiting]
+    () => buildSlides(activeTiles.filter((t) => !followed.has(t.handle) || exiting.has(t.handle))),
+    [activeTiles, followed, exiting]
   );
 
   // Nach dem Follow: Herz zeigen, dann die Kachel aus Discovery gleiten lassen.
@@ -137,12 +224,16 @@ function Index() {
               >
                 {slide.kind === "tile" ? (
                   <>
-                    <img
-                      src={slide.src}
-                      alt={slide.alt}
-                      className="w-full h-full object-cover"
-                      draggable={false}
-                    />
+                    {slide.videoUrl ? (
+                      <VideoTile src={slide.videoUrl} isActive={isActive} />
+                    ) : (
+                      <img
+                        src={slide.src}
+                        alt={slide.alt ?? ""}
+                        className="w-full h-full object-cover"
+                        draggable={false}
+                      />
+                    )}
                     {/* gradient ring overlay */}
                     <div
                       className="pointer-events-none absolute inset-0 rounded-[2rem]"
@@ -169,7 +260,7 @@ function Index() {
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
-                        <FollowButton handle={slide.handle} src={slide.src} onBurst={() => handleFollowed(slide.handle)} />
+                        <FollowButton handle={slide.handle} src={slide.src ?? null} onBurst={() => handleFollowed(slide.handle)} />
                       </div>
                     </div>
                   </>
@@ -242,6 +333,18 @@ function Index() {
       {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
       <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
         <div className="flex justify-end items-center gap-4 px-6 h-14 max-w-[600px] mx-auto">
+          {/* Dev/Test: simuliert den 08:00-Reset — setzt eigene DB-Follows auf abgelaufen */}
+          <button
+            onClick={() => void supabase.rpc("dev_expire_my_follows").then(() => {
+              reset();
+              void queryClient.invalidateQueries({ queryKey: ["connections-posts"] });
+            })}
+            className="flex items-center text-white/70 hover:text-white active:scale-95 transition-all drop-shadow-md"
+            aria-label="08:00-Reset simulieren"
+            title="08:00-Reset simulieren (Dev)"
+          >
+            <span className="material-symbols-outlined">alarm</span>
+          </button>
           {/* Dev/Test: setzt Follows + persistierten Stand auf den Demo-Ausgang zurück */}
           <button
             onClick={() => reset()}

@@ -1,4 +1,5 @@
 import { useFollow } from "@/lib/follow-context";
+import { supabase } from "@/lib/supabase/client";
 
 /**
  * Einheitlicher Folgen-Button für alle Feeds (Discovery, Story …).
@@ -10,21 +11,36 @@ export function FollowButton({
   onBurst,
 }: {
   handle: string;
-  src: string;
+  src: string | null;
   onBurst?: () => void;
 }) {
   const { isFollowing, follow } = useFollow();
   const following = isFollowing(handle);
 
-  const handleFollow = () => {
+  const handleFollow = async () => {
     if (following) return;
     follow({ handle, src });
     onBurst?.();
+
+    // Followee-Profil per Handle suchen und DB-Row schreiben
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("handle", handle)
+      .maybeSingle();
+    if (profile) {
+      const uid = (await supabase.auth.getUser()).data.user?.id;
+      // followed_at + expires_at: null reaktiviert auch abgelaufene Follows per upsert
+      await supabase.from("follows").upsert(
+        { follower_id: uid, followee_id: profile.id, followed_at: new Date().toISOString(), expires_at: null },
+        { onConflict: "follower_id,followee_id" },
+      );
+    }
   };
 
   return (
     <button
-      onClick={handleFollow}
+      onClick={() => void handleFollow()}
       className={`flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95 ${
         following
           ? "bg-white text-black"
