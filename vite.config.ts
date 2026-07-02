@@ -10,12 +10,23 @@ export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
   },
+  nitro: {
+    preset: "cloudflare-module",
+    output: { dir: "dist", serverDir: "dist/server", publicDir: "dist/client" },
+    cloudflare: { nodeCompat: true },
+  },
   vite: {
     server: {
       host: true,
       port: 3000,
       // ngrok-Tunnel: Vite blockiert sonst fremde Hosts mit 403
       allowedHosts: [".ngrok-free.app", ".ngrok.io", ".ngrok.app"],
+    },
+    // React 19 production build removes jsxDEV; force production JSX transform
+    // so builds use jsx/jsxs from react/jsx-runtime instead of jsxDEV.
+    esbuild: {
+      jsx: "automatic",
+      jsxDev: false,
     },
   },
 });

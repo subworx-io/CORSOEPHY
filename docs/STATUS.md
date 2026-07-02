@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand:** 18. Juni 2026
+**Stand:** 2. Juli 2026
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -9,64 +9,75 @@
 
 ## Wo wir stehen
 
-**Phase:** Beginn **Phase 0 — Backend-Fundament** (siehe `docs/ROADMAP.md`).
-**Insgesamt:** Klickbarer Frontend-Prototyp ohne Backend. Alle Daten kommen aus Mock-Konstanten, Follow-State lebt nur im React-Context und stirbt beim Reload.
+**Phase:** **Phase 0 — Backend-Fundament** (laufend, siehe `docs/ROADMAP.md`).
+**Insgesamt:** Supabase-Backend steht, Auth + Follow-Logik + täglicher Reset live. Cloudflare-Deployment aufgesetzt, aber **Client-Rendering noch gebrochen** — App bleibt auf Splash hängen.
+
+### ⚠️ Deployment-Problem offen
+- SSR gibt HTTP 200 mit korrrektem HTML zurück ✓
+- Client-JS lädt (`index-TM9Xe4Lp.js`, 571 kB) ✓
+- **App hängt nach Hydration auf dem Splash-Screen** — Nutzer sieht nur "Corso"-Logo, kein Login-Screen
+- Vermutliche Ursache: React 19 Production setzt `jsxDEV = void 0`; Patches für SSR und Client-Bundle wurden angewendet, aber App rendert trotzdem nicht weiter
+- **Nächster Debug-Schritt:** Browser-DevTools → Console öffnen auf `https://corso-app.pages.dev` und genauen JS-Fehler sehen; der konkrete Fehler ist noch unbekannt
 
 ### Existierende Screens (Routes in `src/routes/`)
 | Route | Screen | Stand |
 |---|---|---|
-| `index.tsx` | Discovery (Entdeckungs-Feed, vertikaler Swipe) | UI steht, Mock-Daten |
-| `story.tsx` | Stadt-Story (20:00-Ritual) | UI steht, 8 Mock-Clips, Swipe vertikal + Karten-Optik wie Discovery (PRD §5 nachgezogen) |
+| `index.tsx` | Discovery (Entdeckungs-Feed, vertikaler Swipe) | UI steht, Supabase-Follow-Logik live |
+| `story.tsx` | Stadt-Story (20:00-Ritual) | UI steht, Mock-Clips |
 | `record.tsx` | Aufnahme (echte Live-Kamera) | Kamera live; „Verwenden"-Upload noch disabled (kein Backend) |
 | `connections.tsx` | Verbindungen / verdienter Chat | Platzhalter |
 | `feedback.tsx` | Rücklauf (private Reichweite) | Platzhalter, Zahlen noch mock |
 
-### Noch nicht vorhanden
-Gesamtes Backend · echter Video-Upload/Storage · Auth/Onboarding · echte Rücklauf-Daten · Metrik-/Event-Tracking · Stadt-Story-Algorithmus · Push.
+---
+
+## Deployment
+
+**URL:** `https://corso-app.pages.dev` (Cloudflare Pages — läuft ohne MacBook)
+**Plattform:** Cloudflare Pages, Preset `cloudflare-module`, Worker-SSR mit Assets-Binding
+**Deploy-Befehl:**
+```bash
+bun run build
+npx wrangler pages deploy deploy --project-name corso-app --commit-dirty=true
+```
+**Hinweis:** `deploy/` wird manuell aus `dist/` zusammengebaut (Script: Schritt unten).
+**Wichtig:** Nach jedem `bun run build` die `deploy/` Verzeichnis neu aufbauen und `react.mjs`-Patch anwenden (Details: vorherige Kontext-Session).
+
+### Deploy-Skript (in Kürze: nächste Aufgabe)
+Noch kein Bash-Script für den Build-Deploy-Zyklus. Manuell:
+1. `bun run build`
+2. `deploy/` löschen + neu befüllen aus `dist/`
+3. `dist/server/_libs/react.mjs` patchen (`jsxDEV → jsx` Shim)
+4. `dist/server/wrangler.json` compat-date auf `2025-01-01` patchen
+5. `npx wrangler pages deploy deploy --project-name corso-app --commit-dirty=true`
 
 ---
 
-## Aktuell in Arbeit (uncommitted)
+## Backend-Bausteine (Phase 0)
 
-Auf Branch `main` liegen ungetestete/uncommittete Änderungen:
-- `src/hooks/use-camera.ts` — **neu**, `getUserMedia`-Hook (Live-Kamera-Pflicht, `MAX_RECORD_MS = 15s`, Front/Back-Kamera).
-- `src/routes/record.tsx` — Aufnahme-Screen auf den Kamera-Hook umgebaut.
-- `src/routes/story.tsx`, `src/routes/index.tsx` — Story-UX an Discovery angeglichen (vertikaler Karten-Feed).
-- `src/components/follow-button.tsx`, `src/components/heart-burst.tsx` — **neu**, geteilte Folgen-Button- und Herz-Burst-Bausteine (vorher in jedem Feed dupliziert).
-- `vite.config.ts` — Build-/Dev-Anpassung.
-
-**Follow-Flow konsistent gemacht (Discovery → „Ich folge"):**
-- `src/lib/follow-context.tsx` — Follow-State **persistiert jetzt in localStorage** (`corso.followed.v1`), überlebt Reload auf demselben Gerät. SSR-sicher (deterministischer Start, Laden erst nach Mount). ⚠️ **Kein geteilter Server** — zwei Handys sehen weiter NICHT denselben Stand. Das echte Backend (Phase 0) bleibt offen und braucht die Stack-Entscheidung mit dem Eigner.
-- `src/routes/index.tsx` — Discovery reagiert reaktiv auf den Follow-State statt auf ein am Mount eingefrorenes Set. Wem du folgst, **gleitet nach kurzer Herz-Animation aus Discovery** und lebt nur noch unter „Ich folge" (PRD §4.4). Behebt die alte Inkonsistenz „bleibt diese Session sichtbar, weg nach Navigation".
-
-> Vor neuem Feature-Bau: diese WIP-Änderungen sichten und committen (nur nach Rückfrage, siehe CLAUDE.md).
-
----
-
-## Nächster konkreter Schritt
-
-**Phase 0 — Backend-Fundament mit Supabase.** Stand der Bausteine:
 1. ✅ **Backend-Stack entschieden: Supabase** (Auth + Postgres + Storage + pg_cron).
-2. ✅ **Datenmodell** als Migration: `supabase/migrations/0001_init.sql` (profiles, prompts, posts, follows, nudges, city_story_slots, reach_snapshots) inkl. RLS + `corso_day()`-Helper + `my_reach()` (private Publikumsgröße ohne Identitäten). `.env.example` auf Supabase umgestellt.
-3. ✅ **Projekt CORSO angelegt** (ref `uuhrylkvwosflyypbdbj`), `.env` mit URL + anon + service_role gesetzt. ⚠️ service_role wurde im Chat geteilt → **rotieren** (Settings → API → Roll), danach `.env` updaten.
-4. ✅ **`@supabase/supabase-js` installiert** (via npm — `bun` nicht im PATH; `bun install` nachziehen für Lockfile-Sync) + Client-Gerüst: `src/lib/supabase/client.ts` (Browser, anon, RLS), `server.ts` (service_role, nur Server), `types.ts` (DB-Typen). Typecheck grün.
-5. ✅ **Supabase live eingerichtet** (via Management API): Migration eingespielt (verifiziert: 7 Tabellen, `corso_day`/`my_reach`, RLS auf allen, 16 Policies), Bucket `moments` (private) angelegt, Auth Site-URL + Redirect `http://localhost:3000` gesetzt, Email/Magic-Link aktiv. ⚠️ PAT zum Widerrufen offen; service_role rotieren.
-6. ✅ **Auth (Magic-Link) gebaut:** `src/lib/auth-context.tsx` (Session + Profil + Magic-Link), `src/components/auth-gate.tsx` (Splash → Login → Handle-Wahl → App), eingehängt in `__root.tsx`. SSR-sicher (Splash serverseitig, Session-Check nach Mount), Typecheck + Dev-Boot ohne Fehler verifiziert.
-   - `emailRedirectTo` nutzt jetzt `VITE_APP_URL` (mit `window.location.origin` als Fallback). Für iPhone-Tests: ngrok-URL in `.env` als `VITE_APP_URL` setzen + dieselbe URL in Supabase Dashboard → Auth → URL Configuration → Redirect URLs allowlisten.
-   - 📱 **ngrok-Tunnel (fürs iPhone):** flüchtige URL, ändert sich bei jedem Neustart — immer aktuell in `.env` halten.
-   - ⏳ **Noch zu testen:** echter Login-Klick auf dem iPhone (E-Mail → Magic-Link → Handle → App). Voraussetzung: `VITE_APP_URL` auf aktuelle ngrok-URL gesetzt + Supabase Dashboard konfiguriert (siehe Abschnitt unten).
-7. ⏳ Storage-RLS-Policies für `moments` (Upload/Read je eigene Objekte) → `0002_storage.sql`.
-8. ⏳ Video-Upload in Bucket `moments` (macht „Verwenden"-Button funktional).
-9. ⏳ 08:00-Reset als pg_cron-Job (Follow-Verfall, Discovery leeren, neuer Prompt).
-10. ⏳ Follow-Logik aus `src/lib/follow-context.tsx` ins Backend migrieren (Vertrag: `followFill`/`lastReset`/`canRenew` bleiben erhalten).
+2. ✅ **Datenmodell** (`0001_init.sql`): profiles, prompts, posts, follows, nudges, city_story_slots, reach_snapshots inkl. RLS + `corso_day()` + `my_reach()`.
+3. ✅ **Supabase-Projekt CORSO** (ref `uuhrylkvwosflyypbdbj`) live, URL + anon-Key in `.env`. ⚠️ service_role wurde im Chat geteilt → **rotieren** (Settings → API → Roll).
+4. ✅ **`@supabase/supabase-js` installiert** + Client: `src/lib/supabase/client.ts` (SSR-sicher).
+5. ✅ **Supabase eingerichtet**: Migration eingespielt, Bucket `moments`, Auth aktiviert, Redirect-URL `https://corso-app.pages.dev` in Supabase.
+6. ✅ **Auth (Magic-Link):** `src/lib/auth-context.tsx` + `src/components/auth-gate.tsx`, eingehängt in `__root.tsx`.
+7. ✅ **Follow-Verfall (08:00-Reset):** `supabase/migrations/0003_follows_expiry.sql` — `expires_at`-Spalte, Zwei-Reset-Regel, pg_cron (`expire-follows-daily` täglich 07:00 UTC = 09:00 Berlin), `dev_expire_my_follows()` als Test-Tool. Alarm-Button (🔗) im Discovery-Screen für manuelle Simulation.
+8. ⏳ Storage-RLS-Policies für `moments` (Upload/Read) → `0002_storage.sql`.
+9. ⏳ Video-Upload in Bucket `moments` (macht „Verwenden"-Button funktional).
+10. ⏳ Follow-Logik aus `src/lib/follow-context.tsx` vollständig ins Backend migrieren (Discovery-Feed aus echten Follows laden statt Mock).
+11. ⏳ **Deploy-Script automatisieren** (`scripts/deploy.sh`) — manueller Build-Patch-Deploy-Zyklus ist fehleranfällig.
 
-Akzeptanzkriterien für Phase 0 → `docs/ROADMAP.md`.
+---
+
+## Supabase / Cloudflare Redirect-URLs
+
+- Supabase Auth Redirect: `https://corso-app.pages.dev` (bereits gesetzt)
+- Für iPhone-Tests lokal: ngrok-URL in `.env` als `VITE_APP_URL` + in Supabase allowlisten
 
 ---
 
 ## Bekannte offene Entscheidungen, die jetzt relevant sind
 
-- **Auth-Methode:** Magic-Link (E-Mail) vs. Telefon-OTP. Default-Empfehlung für den Freundes-Pilot: **Magic-Link** (kein SMS-Provider/Kosten). Noch zu bestätigen.
+- **Auth-Methode:** Magic-Link (E-Mail) ist aktiv und empfohlen für Freundes-Pilot.
 - Stadt-Story-Größe/Frequenz bei kleinem Pilot (PRD #6) → blockt erst Phase 1.
 - Verbindungs-Trigger bei verfallenden Follows (PRD #8) → blockt erst Phase 3.
 

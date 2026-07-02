@@ -12,11 +12,13 @@ if (!url || !anonKey) {
   );
 }
 
+const isBrowser = typeof window !== "undefined";
+
 export const supabase = createClient(url, anonKey, {
   auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    // Magic-Link: Session aus dem Redirect-URL-Hash übernehmen (nur im Browser aktiv).
-    detectSessionInUrl: true,
+    // SSR-safe: localStorage und window.location sind im CF-Worker nicht verfügbar.
+    persistSession: isBrowser,
+    autoRefreshToken: isBrowser,
+    detectSessionInUrl: isBrowser,
   },
 });
