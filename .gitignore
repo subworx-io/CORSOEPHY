@@ -18,6 +18,10 @@ out/
 .nuxt/
 .output/
 
+# Cloudflare Pages deploy artifacts (aus dist/ zusammengebaut von scripts/deploy.sh)
+deploy/
+.wrangler/
+
 # Cache
 .cache/
 .turbo/

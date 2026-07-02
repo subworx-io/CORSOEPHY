@@ -3,8 +3,34 @@
 # Run from repo root: bash scripts/deploy.sh
 set -euo pipefail
 
-echo "▸ Build..."
-bun run build
+# WICHTIG: Produktions-Build erzwingen.
+# Die .env setzt NODE_ENV=development (für den Dev-Server). Ohne Override würde
+# der JSX-Transform (oxc/plugin-react) die Dev-Runtime nutzen und überall
+# jsxDEV(...) emittieren — während React als Produktion gebaut wird und jsxDEV
+# auf `void 0` setzt. Ergebnis: "(void 0) is not a function", die App crasht beim
+# Rendern einer Route. NODE_ENV=production behebt das an der Wurzel (kein Patch nötig).
+export NODE_ENV=production
+
+echo "▸ Build (NODE_ENV=production)..."
+# Build-Runner robust wählen: bun → npm → lokales vite.
+if command -v bun >/dev/null 2>&1; then
+  bun run build
+elif command -v npm >/dev/null 2>&1; then
+  npm run build
+elif [ -x ./node_modules/.bin/vite ]; then
+  ./node_modules/.bin/vite build
+else
+  echo "✗ Kein Build-Runner gefunden (bun/npm/vite). Abbruch." >&2
+  exit 1
+fi
+
+# Sicherheitsnetz: Wenn doch wieder jsxDEV im Client-Bundle landet, NICHT deployen.
+# (Würde bedeuten, dass der Produktions-Build-Fix oben nicht mehr greift.)
+if grep -rlq 'jsxDEV' dist/client/assets 2>/dev/null; then
+  echo "✗ jsxDEV im Client-Bundle gefunden — Produktions-Build hat nicht gegriffen. Abbruch." >&2
+  echo "  Prüfen: läuft der Build wirklich mit NODE_ENV=production? Ist der JSX-Transform prod?" >&2
+  exit 1
+fi
 
 echo "▸ Prepare deploy/"
 rm -rf deploy
@@ -28,45 +54,6 @@ echo '{"name":"corso-deploy","version":"1.0.0","sideEffects":true}' > deploy/pac
 cat > deploy/_routes.json << 'EOF'
 {"version":1,"include":["/*"],"exclude":["/assets/*","/favicon.ico","/manifest.json"]}
 EOF
-
-# Patch 1: react.mjs — jsxDEV = void 0 in React 19 production; shim to jsx
-cat > deploy/_libs/react.mjs << 'REACTEOF'
-import { t as __commonJSMin } from "../_runtime.mjs";
-import { i as require_jsx_runtime } from "./react+tanstack__react-query.mjs";
-var require_react_jsx_dev_runtime_production = /* @__PURE__ */ __commonJSMin(((exports) => {
-	exports.Fragment = Symbol.for("react.fragment");
-	var rt = require_jsx_runtime();
-	exports.jsxDEV = function(type, props, key) { return rt.jsx(type, props, key); };
-}));
-var require_jsx_dev_runtime = /* @__PURE__ */ __commonJSMin(((exports, module) => {
-	module.exports = require_react_jsx_dev_runtime_production();
-}));
-export { require_jsx_dev_runtime as t };
-REACTEOF
-
-# Patch 2: client bundle — React 19 production sets jsxDEV=void 0, but app uses jsxDEV.
-# Shim jsxDEV to call the production I.jsx (already used 75x in the same bundle).
-CLIENT_JS=$(ls deploy/assets/index-*.js 2>/dev/null | head -1)
-if [ -n "$CLIENT_JS" ]; then
-  node -e "
-  const fs = require('fs');
-  const f = process.argv[1];
-  const c = fs.readFileSync(f, 'utf8');
-  const patched = c.replace('e.jsxDEV=void 0', 'e.jsxDEV=function(t,n,r){return I.jsx(t,n,r)}');
-  if (c === patched) { console.error('Patch 2 target not found in ' + f); process.exit(1); }
-  fs.writeFileSync(f, patched);
-  console.log('Patch 2 applied to', f);
-  " "$CLIENT_JS"
-fi
-
-# Patch 4: wrangler.json compat-date must not be in the future
-WRANGLER_JSON=dist/server/wrangler.json
-node -e "
-const fs = require('fs');
-const cfg = JSON.parse(fs.readFileSync('$WRANGLER_JSON','utf8'));
-cfg.compatibility_date = '2025-01-01';
-fs.writeFileSync('$WRANGLER_JSON', JSON.stringify(cfg, null, 2));
-"
 
 echo "▸ Deploy to Cloudflare Pages..."
 npx wrangler pages deploy deploy --project-name corso-app --commit-dirty=true

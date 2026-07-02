@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand:** 2. Juli 2026
+**Stand:** 2. Juli 2026 (Deploy gefixt + SendGrid geprüft)
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -10,14 +10,14 @@
 ## Wo wir stehen
 
 **Phase:** **Phase 0 — Backend-Fundament** (laufend, siehe `docs/ROADMAP.md`).
-**Insgesamt:** Supabase-Backend steht, Auth + Follow-Logik + täglicher Reset live. Cloudflare-Deployment aufgesetzt, aber **Client-Rendering noch gebrochen** — App bleibt auf Splash hängen.
+**Insgesamt:** Supabase-Backend steht, Auth + Follow-Logik + täglicher Reset live. **Cloudflare-Deployment funktioniert vollständig** — der komplette Flow (Login → Magic-Link → Handle → alle 5 Screens) läuft live auf `https://corso-app.pages.dev`, extern testbar.
 
-### ⚠️ Deployment-Problem offen
-- SSR gibt HTTP 200 mit korrrektem HTML zurück ✓
-- Client-JS lädt (`index-TM9Xe4Lp.js`, 571 kB) ✓
-- **App hängt nach Hydration auf dem Splash-Screen** — Nutzer sieht nur "Corso"-Logo, kein Login-Screen
-- Vermutliche Ursache: React 19 Production setzt `jsxDEV = void 0`; Patches für SSR und Client-Bundle wurden angewendet, aber App rendert trotzdem nicht weiter
-- **Nächster Debug-Schritt:** Browser-DevTools → Console öffnen auf `https://corso-app.pages.dev` und genauen JS-Fehler sehen; der konkrete Fehler ist noch unbekannt
+### ✅ Deployment-Problem GELÖST (2. Juli)
+- **Wurzel-Ursache gefunden:** `.env` setzt `NODE_ENV=development`. Beim `vite build` ließ das den JSX-Transform (oxc/plugin-react in Vite 8) die **Dev-Runtime** nutzen → überall `jsxDEV(...)`-Aufrufe, während React als Produktion gebaut wird und `jsxDEV` auf `void 0` setzt. Ergebnis beim Rendern einer Route: `TypeError: (void 0) is not a function` → Fehler-Screen.
+- Die früheren Splash-/jsxDEV-Patches waren Flickwerk und deckten nur das Haupt-Bundle ab (deshalb kam man bis zum Login, aber jede echte Route crashte).
+- **Fix an der Wurzel:** `scripts/deploy.sh` erzwingt jetzt `NODE_ENV=production` für den Build. Damit wird gar kein `jsxDEV` mehr emittiert — **kein Patch mehr nötig**. `.env` bleibt unangetastet (NODE_ENV=development ist für den Dev-Server korrekt).
+- Zusätzlich: `deploy.sh` nutzt kein `bun` mehr (auf dieser Maschine nicht installiert) → robuste Erkennung bun→npm→lokales vite, plus Sicherheitsnetz das bei `jsxDEV` im Bundle den Deploy abbricht.
+- **End-to-end verifiziert im Browser** (2. Juli): Login-Screen → Magic-Link (Redirect-Allowlist ok) → Handle-Screen → Discovery + Story + Ich-folge + Aufnahme + Rücklauf rendern alle sauber, keine Konsolen-Fehler. Test-User danach wieder gelöscht.
 
 ### Existierende Screens (Routes in `src/routes/`)
 | Route | Screen | Stand |
@@ -32,23 +32,37 @@
 
 ## Deployment
 
-**URL:** `https://corso-app.pages.dev` (Cloudflare Pages — läuft ohne MacBook)
+**URL:** `https://corso-app.pages.dev` (Cloudflare Pages — läuft ohne MacBook, extern testbar)
 **Plattform:** Cloudflare Pages, Preset `cloudflare-module`, Worker-SSR mit Assets-Binding
-**Deploy-Befehl:**
+**Deploy-Befehl (der einzige, den du brauchst):**
 ```bash
-bun run build
-npx wrangler pages deploy deploy --project-name corso-app --commit-dirty=true
+bash scripts/deploy.sh
 ```
-**Hinweis:** `deploy/` wird manuell aus `dist/` zusammengebaut (Script: Schritt unten).
-**Wichtig:** Nach jedem `bun run build` die `deploy/` Verzeichnis neu aufbauen und `react.mjs`-Patch anwenden (Details: vorherige Kontext-Session).
+Das Script baut mit `NODE_ENV=production`, prüft dass kein `jsxDEV` im Bundle landet, baut `deploy/` aus `dist/` zusammen und deployt via Wrangler. **Keine manuellen Patches mehr.**
 
-### Deploy-Skript (in Kürze: nächste Aufgabe)
-Noch kein Bash-Script für den Build-Deploy-Zyklus. Manuell:
-1. `bun run build`
-2. `deploy/` löschen + neu befüllen aus `dist/`
-3. `dist/server/_libs/react.mjs` patchen (`jsxDEV → jsx` Shim)
-4. `dist/server/wrangler.json` compat-date auf `2025-01-01` patchen
-5. `npx wrangler pages deploy deploy --project-name corso-app --commit-dirty=true`
+**Voraussetzungen:** Wrangler eingeloggt (`npx wrangler whoami` → tools@subworx.io) und Node/npm vorhanden. `bun` ist optional (Script fällt auf npm/vite zurück).
+
+**Wichtig zum Testen nach Deploy:** Cloudflare-Edge + Browser cachen die alte HTML kurz. Ein frischer Besucher bekommt sofort die neuen Bundle-Hashes; beim eigenen Nachtesten ggf. hart neu laden.
+
+---
+
+## E-Mail-Versand (Magic-Link via SendGrid)
+
+**Stand (2. Juli): Supabase-seitig korrekt konfiguriert, Custom-SMTP über SendGrid aktiv.**
+Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
+
+| Feld | Wert |
+|---|---|
+| Custom SMTP | aktiv |
+| Host / Port | `smtp.sendgrid.net` : `587` (STARTTLS) |
+| SMTP-User | `apikey` (SendGrid-Konvention) |
+| SMTP-Pass | gesetzt (SendGrid-API-Key) |
+| Absendername | `Corso` |
+| Absender-/Admin-Mail | `dominik@subworx.io` |
+| Rate-Limit | 100 Mails/Stunde (Builtin wären nur ~4/h) |
+| Link-Gültigkeit | 3600 s (1 h) |
+
+⏳ **Noch nicht verifiziert: tatsächliche Zustellung.** Hängt an der **Absender-Verifizierung in SendGrid** — `dominik@subworx.io` muss dort als Single Sender verifiziert *oder* Domain `subworx.io` per DKIM authentifiziert sein, sonst blockt SendGrid (403). Schnell-Test: auf der Live-URL eigene Mail eintragen → „Login-Link schicken" → kommt sie an (Absender „Corso")? Kein Zustelltest durchgeführt (bewusst, um Rate-Limit nicht anzufassen).
 
 ---
 
@@ -56,7 +70,7 @@ Noch kein Bash-Script für den Build-Deploy-Zyklus. Manuell:
 
 1. ✅ **Backend-Stack entschieden: Supabase** (Auth + Postgres + Storage + pg_cron).
 2. ✅ **Datenmodell** (`0001_init.sql`): profiles, prompts, posts, follows, nudges, city_story_slots, reach_snapshots inkl. RLS + `corso_day()` + `my_reach()`.
-3. ✅ **Supabase-Projekt CORSO** (ref `uuhrylkvwosflyypbdbj`) live, URL + anon-Key in `.env`. ⚠️ service_role wurde im Chat geteilt → **rotieren** (Settings → API → Roll).
+3. ✅ **Supabase-Projekt CORSO** (ref `uuhrylkvwosflyypbdbj`) live, URL + anon-Key in `.env`. ⚠️ **Zu rotierende Secrets** (wurden im Chat geteilt): service_role-Key (Settings → API → Roll) **und** zwei Personal Access Tokens `sbp_9a4a…` / `sbp_2ab7…` (Account → Access Tokens → Revoke). PAT = Vollzugriff auf den ganzen Account.
 4. ✅ **`@supabase/supabase-js` installiert** + Client: `src/lib/supabase/client.ts` (SSR-sicher).
 5. ✅ **Supabase eingerichtet**: Migration eingespielt, Bucket `moments`, Auth aktiviert, Redirect-URL `https://corso-app.pages.dev` in Supabase.
 6. ✅ **Auth (Magic-Link):** `src/lib/auth-context.tsx` + `src/components/auth-gate.tsx`, eingehängt in `__root.tsx`.
@@ -64,14 +78,15 @@ Noch kein Bash-Script für den Build-Deploy-Zyklus. Manuell:
 8. ⏳ Storage-RLS-Policies für `moments` (Upload/Read) → `0002_storage.sql`.
 9. ⏳ Video-Upload in Bucket `moments` (macht „Verwenden"-Button funktional).
 10. ⏳ Follow-Logik aus `src/lib/follow-context.tsx` vollständig ins Backend migrieren (Discovery-Feed aus echten Follows laden statt Mock).
-11. ⏳ **Deploy-Script automatisieren** (`scripts/deploy.sh`) — manueller Build-Patch-Deploy-Zyklus ist fehleranfällig.
+11. ✅ **Deploy-Script automatisiert** (`scripts/deploy.sh`) — ein Befehl, Produktions-Build ohne jsxDEV-Crash, robuste Build-Runner-Erkennung, Sicherheitsnetz. Root-Cause (`NODE_ENV=development`) an der Wurzel behoben.
 
 ---
 
 ## Supabase / Cloudflare Redirect-URLs
 
-- Supabase Auth Redirect: `https://corso-app.pages.dev` (bereits gesetzt)
-- Für iPhone-Tests lokal: ngrok-URL in `.env` als `VITE_APP_URL` + in Supabase allowlisten
+- Supabase Site-URL: `https://corso-app.pages.dev`
+- Redirect-Allowlist (verifiziert 2. Juli): `https://corso-app.pages.dev/**`, `https://*.corso-app.pages.dev/**`, `https://*.ngrok-free.app/**`
+- Für iPhone-Tests lokal: ngrok-URL in `.env` als `VITE_APP_URL` — Allowlist deckt `*.ngrok-free.app` bereits ab
 
 ---
 
