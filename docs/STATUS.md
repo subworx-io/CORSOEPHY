@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand:** 2. Juli 2026 (Deploy gefixt + SendGrid geprüft)
+**Stand:** 7. Juli 2026 (Follow-Loop de-mockt + Upload live verifiziert; Login-Zustellung siehe E-Mail-Abschnitt)
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -22,11 +22,11 @@
 ### Existierende Screens (Routes in `src/routes/`)
 | Route | Screen | Stand |
 |---|---|---|
-| `index.tsx` | Discovery (Entdeckungs-Feed, vertikaler Swipe) | UI steht, Supabase-Follow-Logik live |
-| `story.tsx` | Stadt-Story (20:00-Ritual) | UI steht, Mock-Clips |
-| `record.tsx` | Aufnahme (echte Live-Kamera) | Kamera live; „Verwenden"-Upload noch disabled (kein Backend) |
-| `connections.tsx` | Verbindungen / verdienter Chat | Platzhalter |
-| `feedback.tsx` | Rücklauf (private Reichweite) | Platzhalter, Zahlen noch mock |
+| `index.tsx` | Discovery (Entdeckungs-Feed, vertikaler Swipe) | Echte Posts aus der DB; Follow schreibt in die DB; **kein Mock-Fallback mehr** (ehrlicher Leerzustand) |
+| `story.tsx` | Stadt-Story (20:00-Ritual) | UI steht, **noch Mock-Clips** (echte Auswahl/Trigger = Phase 1) |
+| `record.tsx` | Aufnahme (echte Live-Kamera) | Kamera live; „Verwenden"-Upload **funktional** (Backend 7. Juli verifiziert); UI-Flow noch nicht im echten Browser durchgeklickt |
+| `connections.tsx` | „Ich folge" / verdienter Chat | „Ich folge" aus **echtem Follow-Graph**; Anstupsen + Follow-Erneuern schreiben in die DB; verdienter Chat = Phase 3 |
+| `feedback.tsx` | Rücklauf (private Reichweite) | `my_reach()` echt; Pool-Zuschauer ausgeblendet (Phase 1) |
 
 ---
 
@@ -62,7 +62,47 @@ Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
 | Rate-Limit | 100 Mails/Stunde (Builtin wären nur ~4/h) |
 | Link-Gültigkeit | 3600 s (1 h) |
 
-⏳ **Noch nicht verifiziert: tatsächliche Zustellung.** Hängt an der **Absender-Verifizierung in SendGrid** — `dominik@subworx.io` muss dort als Single Sender verifiziert *oder* Domain `subworx.io` per DKIM authentifiziert sein, sonst blockt SendGrid (403). Schnell-Test: auf der Live-URL eigene Mail eintragen → „Login-Link schicken" → kommt sie an (Absender „Corso")? Kein Zustelltest durchgeführt (bewusst, um Rate-Limit nicht anzufassen).
+### ✅ ROOT CAUSE GEFUNDEN (7. Juli): Mails werden gesendet UND zugestellt — landen aber in Junk/Quarantäne (nicht Versand-, sondern Inbox-Placement-Problem)
+
+**Symptom:** „Login-Link-Mail kommt nicht an." User ab 2. Juli bleiben auf `confirmed: false`.
+
+**Verlauf der Diagnose (wichtig, weil eine Zwischenthese falsch war):**
+1. `POST /auth/v1/otp` (App-Pfad) → **HTTP 200**, kein 500/429 → Supabase übergibt sauber an SendGrid. Admin-`generate_link` liefert gültige Login-Links → Auth-Pipeline intakt.
+2. **Zwischenthese „Domain nicht authentifiziert" war FALSCH.** Erster `dig` suchte `s1/s2._domainkey` — der Account liegt aber in der **SendGrid-EU-Region**, Selektoren heißen `eus1/eus2._domainkey`. Die lösen sauber auf.
+3. Per SendGrid-API (v3, Read-Key) verifiziert:
+   - `subworx.io` (id 26670791, return-path `em9318`) → **valid=True, DKIM1/DKIM2/SPF alle valid** → DKIM `d=subworx.io`, **DMARC-aligned**. Domain-Auth ist korrekt.
+   - `mail.subworx.io` (id 30116392) → **valid=False** (halber, toter Auth-Versuch — aufräumen/löschen).
+   - Alle Suppression-Listen (bounces/blocks/spam/invalid) für alle Empfänger **leer**.
+   - **Email Activity Feed:** Magic-Link-Mails (Subjects „Your sign-in link" / „Confirm your email address" = Supabase-Templates) an `dominik@subworx.io` und `tools@subworx.io` → Status **`delivered`**. Empfänger-Server (M365) hat mit 250 OK angenommen.
+
+**Ursache:** Kein Versandfehler. Die Mail wird zugestellt, aber **nicht in den Posteingang, sondern in Junk/Quarantäne** einsortiert. `delivered` = angenommen, ≠ Posteingang. Klassiker bei **Microsoft 365**, wenn „von der eigenen Domain" (`dominik@subworx.io`) über einen externen Relay (SendGrid) an dieselbe M365-Domain gesendet wird → M365-Spoof-Intelligence quarantänisiert, obwohl DMARC passt.
+
+**Gmail-Test (7. Juli, `domanczok+2378@gmail.com`):** Status `delivered` → **im Spam gelandet.** Also NICHT nur ein M365-Eigendomain-Effekt — die echten Pilot-User (Gmail/GMX) sind betroffen.
+
+**Gmail-Hauptursache identifiziert:**
+- **Kein Link-Branding** (`GET /v3/whitelabel/links` = leer) + **Click-Tracking aktiv** → SendGrid schreibt den Login-Link auf einen **`*.sendgrid.net`-Redirect** um. Login-Link über fremde Tracking-Domain = starkes Gmail-Spam-Signal (Phishing-Muster).
+- Dazu die **englische Supabase-Default-Vorlage** (nackter Link, wenig Text).
+- Auth (DKIM/SPF/DMARC) + Reputation (100/100) sind tadellos → nicht die Ursache.
+
+**Fix-Optionen (2 Wege zum selben Ziel — den `sendgrid.net`-Redirect loswerden):**
+- **A) Tracking global aus** (kein DNS, sofort): Click-+Open-Tracking kontoweit abschalten → Login-Link bleibt die rohe `supabase.co/...`-URL. Sauberster Weg für Auth-Mails. Kosten: estateos/adkl-msi verlieren Klick-/Öffnungs-Statistik (senden weiter normal, kein Break).
+- **B) Link-Branding** `link.subworx.io` (braucht IONOS-DNS): behält estateos-Statistik, ersetzt nur die Redirect-Domain. Verifiziert (SendGrid-Doku + GitHub-Issue #5653): Root-Branding auf `subworx.io` greift NUR für exakte `@subworx.io`-Absender (Corso), NICHT für Subdomain `@estateos.subworx.io` → estateos + adkl-msi bleiben unberührt.
+- Hinweis: „Tracking nur für Corso aus" ist NICHT möglich (Tracking ist kontoweit; Supabase-SMTP kann keine per-Mail-Ausnahme setzen; Subuser = kein Zugriff/kalte IP; eigener Account = Overkill).
+
+**Ergänzend (unabhängig vom Link-Fix):**
+- **Deutsche Corso-Vorlage** → `supabase/templates/auth_email_de.html`, in Supabase Auth-Templates (Magic Link + Confirm signup) einfügen. Wirkt voll erst NACH dem Link-Fix (sonst wird auch der sichtbare Link umgeschrieben).
+- **M365 (nur eigene @subworx.io-Tests):** Safe-Sender / Tenant-Allow — betrifft echte User nicht.
+- **Aufräumen:** tote Whitelabel `mail.subworx.io` (valid=False) löschen.
+
+**AKTUELLER STAND (7. Juli, bewusst PAUSIERT — kein DNS-Appetit):**
+- Link-Branding-Eintrag in SendGrid **bereits angelegt** (id `5500551`, `subworx.io`/subdomain `link`, `default=false`, **`valid=false` = inert**). Ändert nichts, bis die 2 CNAMEs bei IONOS gesetzt + validiert werden. Jederzeit löschbar.
+- Ausstehende CNAMEs (nur für Weg B): `link.subworx.io → sendgrid.net` und `39222136.subworx.io → sendgrid.net`, danach `POST /whitelabel/links/5500551/validate`.
+- Tracking unverändert (an). Deutsche Vorlage geschrieben, aber **noch nicht** in Supabase eingespielt.
+- **Nächster Schritt, wenn wieder Bock:** Weg A (Tracking aus, kein DNS) ODER Weg B (CNAMEs) → dann Vorlage einspielen → Gmail-Test wiederholen.
+
+**Sofort-Entblocker (jederzeit, ohne Mail):** Login-Links per Admin-API (`POST /auth/v1/admin/generate_link`, service_role) generieren und `action_link` direkt an User geben (z. B. WhatsApp/Signal) — umgeht die Mail komplett. Für den Freundes-Pilot völlig ausreichend.
+
+**Bestätigung (optional):** SendGrid → Activity Feed zeigt pro Mail „Delivered / Dropped / Blocked / Deferred" — die Grundwahrheit, was Microsoft mit der Mail gemacht hat.
 
 ---
 
@@ -75,9 +115,9 @@ Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
 5. ✅ **Supabase eingerichtet**: Migration eingespielt, Bucket `moments`, Auth aktiviert, Redirect-URL `https://corso-app.pages.dev` in Supabase.
 6. ✅ **Auth (Magic-Link):** `src/lib/auth-context.tsx` + `src/components/auth-gate.tsx`, eingehängt in `__root.tsx`.
 7. ✅ **Follow-Verfall (08:00-Reset):** `supabase/migrations/0003_follows_expiry.sql` — `expires_at`-Spalte, Zwei-Reset-Regel, pg_cron (`expire-follows-daily` täglich 07:00 UTC = 09:00 Berlin), `dev_expire_my_follows()` als Test-Tool. Alarm-Button (🔗) im Discovery-Screen für manuelle Simulation.
-8. ⏳ Storage-RLS-Policies für `moments` (Upload/Read) → `0002_storage.sql`.
-9. ⏳ Video-Upload in Bucket `moments` (macht „Verwenden"-Button funktional).
-10. ⏳ Follow-Logik aus `src/lib/follow-context.tsx` vollständig ins Backend migrieren (Discovery-Feed aus echten Follows laden statt Mock).
+8. ✅ **Storage-RLS-Policies** für `moments` (Upload/Read/Delete own) → `0002_storage.sql` **live angewendet** — 7. Juli end-to-end mit Wegwerf-User verifiziert (Upload in eigenen Ordner, Read authenticated).
+9. ✅ **Video-Upload** in Bucket `moments` (`src/lib/supabase/upload.ts`): Upload → `posts`-Insert → signierte Read-URL laufen unter RLS durch (7. Juli verifiziert). ⏳ Rest: UI-Flow Kamera→MediaRecorder→Upload noch nicht im echten Browser durchgeklickt.
+10. ✅ **Follow-Loop de-mockt** (7. Juli): `follow-context.tsx` lädt aktive Follows (`expires_at is null`) + Handles + heutige Anstupser aus der DB statt aus localStorage-Seeds; `follow()`/`renew()`/`nudge()` schreiben in die DB (DB-Write zentralisiert, aus `FollowButton` entfernt). Fake-Seeds **und** Fake-Discovery-Fallback (`TILES`) entfernt → Discovery + „Ich folge" zeigen nur echte Daten, sonst ehrlicher Leerzustand. Zwei-User-Follow-Loop (Follow-Write, Graph-Read, Nudge-Write) unter RLS verifiziert. `connections.tsx`: „Moment heute?" hängt jetzt am echten heutigen Video → Anstups-/Leerzustand wieder erreichbar.
 11. ✅ **Deploy-Script automatisiert** (`scripts/deploy.sh`) — ein Befehl, Produktions-Build ohne jsxDEV-Crash, robuste Build-Runner-Erkennung, Sicherheitsnetz. Root-Cause (`NODE_ENV=development`) an der Wurzel behoben.
 
 ---
@@ -92,7 +132,7 @@ Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
 
 ## Bekannte offene Entscheidungen, die jetzt relevant sind
 
-- **Auth-Methode:** Magic-Link (E-Mail) ist aktiv und empfohlen für Freundes-Pilot.
+- **Auth-Methode:** Magic-Link (E-Mail) ist aktiv. ⚠️ **Zustell-Vorbehalt:** die Login-Mail landet aktuell im Spam/Junk (SendGrid-`sendgrid.net`-Redirect + engl. Default-Vorlage — Details + Fix-Optionen im E-Mail-Abschnitt oben). Für den Freundes-Pilot bis dahin **Admin-Login-Links** manuell verteilen.
 - Stadt-Story-Größe/Frequenz bei kleinem Pilot (PRD #6) → blockt erst Phase 1.
 - Verbindungs-Trigger bei verfallenden Follows (PRD #8) → blockt erst Phase 3.
 

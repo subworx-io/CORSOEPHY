@@ -10,10 +10,10 @@
 
 ## Aktueller Stand (Ausgangspunkt)
 
-Klickbarer Frontend-Prototyp (TanStack Start, mobile-first, PWA-fähig). 5 von 10 PRD-Screens existieren. Kein Backend — alle Daten aus Mock-Konstanten, Follow-State lebt nur im React-Context (stirbt beim Reload).
+Klickbarer Frontend-Prototyp (TanStack Start, mobile-first, PWA-fähig). 5 von 10 PRD-Screens existieren. **Backend-Fundament steht** (Supabase): Auth, Posts/Upload, Follows/Nudges und 08:00-Reset sind serverseitig. Stand 7. Juli ist der **Follow-Loop de-mockt** — Discovery/„Ich folge" nur noch echte DB-Daten, keine localStorage-Seeds mehr.
 
-**Steht solide (leitplanken-treu):** Discovery, Stadt-Story (UI), Aufnahme (echte Live-Kamera), Ich-folge mit verfallendem Herz.
-**Fehlt:** gesamtes Backend, echter Video-Upload, Onboarding, Rücklauf-Daten, Verbindungs-/Chat-Screen, Metrik-Tracking.
+**Steht solide (leitplanken-treu):** Discovery (echte Posts), Aufnahme (Live-Kamera + Upload), Ich-folge (echter Follow-Graph, verfallendes Herz).
+**Noch Mock/offen:** Stadt-Story-Auswahl (noch 8 Mock-Clips), Onboarding-Login-Zustellung, Rücklauf-Pool-Zahlen, verdienter Chat, Metrik-Tracking.
 
 > Tagesaktueller Detail-Stand (WIP, uncommitted Änderungen, nächster konkreter Schritt) → `docs/STATUS.md`.
 
@@ -45,10 +45,12 @@ Klickbarer Frontend-Prototyp (TanStack Start, mobile-first, PWA-fähig). 5 von 1
 - Follow-Logik vom React-Context ins Backend migrieren (24h-Verfall, 08:00-Reset, `canRenew`).
 
 **Akzeptanzkriterien:**
-- [ ] Zwei verschiedene Handys sehen denselben geteilten Zustand.
-- [ ] Ein hochgeladener Clip erscheint auf einem anderen Gerät in der Discovery.
-- [ ] Follow überlebt App-Reload.
-- [ ] Um 08:00 verfallen Follows serverseitig, ohne dass ein Client offen sein muss.
+- [x] Zwei verschiedene Handys sehen denselben geteilten Zustand. *(Datenebene 7. Juli verifiziert: Follows/Posts/Nudges serverseitig, kein localStorage mehr. Realer Zwei-Geräte-Test steht noch aus — hängt an der Login-Zustellung, siehe STATUS.)*
+- [x] Ein hochgeladener Clip erscheint auf einem anderen Gerät in der Discovery. *(7. Juli: Upload + `posts`-Insert unter RLS verifiziert; Discovery lädt echte Posts, Mock-Fallback entfernt.)*
+- [x] Follow überlebt App-Reload. *(7. Juli: `follow-context` lädt aktive Follows aus der DB statt aus Seeds/localStorage.)*
+- [x] Um 08:00 verfallen Follows serverseitig, ohne dass ein Client offen sein muss. *(pg_cron `expire-follows-daily`, `0003_follows_expiry.sql`.)*
+
+**Offen in Phase 0:** UI-Flow der Aufnahme (Kamera→Upload) im echten Browser durchklicken; realer Zwei-Geräte-Test sobald Login-Mails zugestellt werden.
 
 **Bewusst NICHT in Phase 0:** ID-Verifizierung, Push, Stadt-Story-Algorithmus, Chat.
 

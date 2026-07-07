@@ -1,0 +1,37 @@
+<!--
+  Corso — Auth-E-Mail (Deutsch), deliverability-freundlich.
+  Verwendung in Supabase → Auth → Email Templates:
+    • Slot "Magic Link"     → Betreff: Dein Login-Link für Corso
+    • Slot "Confirm signup" → Betreff: Willkommen bei Corso – bestätige deine Anmeldung
+  Beide Slots nutzen denselben Body unten. Variable {{ .ConfirmationURL }} = Login-/Bestätigungslink.
+  Hinweis: Solange SendGrid-Click-Tracking aktiv ist, wird {{ .ConfirmationURL }} (Button UND
+  sichtbarer Link) auf einen Redirect umgeschrieben. Erst mit Link-Branding zeigt das eine
+  saubere link.subworx.io-URL statt sendgrid.net.
+-->
+<div style="margin:0;padding:0;background:#0a0a0a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0a;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:420px;background:#141414;border-radius:16px;padding:36px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+          <tr><td style="font-size:22px;font-weight:600;color:#ffffff;letter-spacing:-0.02em;padding-bottom:6px;">Corso</td></tr>
+          <tr><td style="font-size:14px;color:#a3a3a3;padding-bottom:28px;">Deine Stadt. Jeden Abend.</td></tr>
+          <tr><td style="font-size:16px;color:#ffffff;line-height:1.55;padding-bottom:24px;">
+            Tippe auf den Button, um dich bei Corso einzuloggen. Der Link gilt eine Stunde und funktioniert nur auf diesem Gerät.
+          </td></tr>
+          <tr><td style="padding-bottom:24px;">
+            <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#ffffff;color:#000000;text-decoration:none;font-size:16px;font-weight:600;padding:14px 28px;border-radius:12px;">Jetzt einloggen</a>
+          </td></tr>
+          <tr><td style="font-size:13px;color:#a3a3a3;line-height:1.55;padding-bottom:8px;">
+            Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:
+          </td></tr>
+          <tr><td style="font-size:13px;color:#8ab4f8;word-break:break-all;padding-bottom:28px;">
+            {{ .ConfirmationURL }}
+          </td></tr>
+          <tr><td style="font-size:12px;color:#666666;line-height:1.55;border-top:1px solid #262626;padding-top:20px;">
+            Du bekommst diese Mail, weil sich jemand mit deiner Adresse bei Corso einloggen wollte. Warst das nicht du, ignoriere sie einfach.
+          </td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</div>
