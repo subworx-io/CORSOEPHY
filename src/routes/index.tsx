@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PORTRAITS } from "@/assets/portraits";
 import skylineUrl from "@/assets/duesseldorf-skyline.jpg";
+import { Link } from "@tanstack/react-router";
 import { useFollow } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { FollowButton } from "@/components/follow-button";
@@ -25,7 +25,8 @@ export const Route = createFileRoute("/")({
 type Tile = { handle: string; src?: string; alt?: string; videoUrl?: string };
 type CountdownSlide = { kind: "countdown" };
 type TileSlide = { kind: "tile" } & Tile;
-type Slide = CountdownSlide | TileSlide;
+type EmptySlide = { kind: "empty" };
+type Slide = CountdownSlide | TileSlide | EmptySlide;
 
 // Stadt-Story ist jeden Tag um 20:00 — Countdown läuft auf die nächste 20:00 und rollt danach automatisch weiter
 function nextStoryTarget(now: number) {
@@ -49,19 +50,6 @@ function useCountdown() {
 }
 
 const pad = (n: number) => n.toString().padStart(2, "0");
-
-// Discovery zeigt immer neue, unbekannte Personen aus der Stadt — kein Overlap mit "ich folge"
-const TILES: Tile[] = [
-  { handle: "@felix.rhein",   src: PORTRAITS.felixRhein,   alt: "Black-and-white street portrait of a man with beard and sunglasses." },
-  { handle: "@mia.galerie",   src: PORTRAITS.miaGalerie,   alt: "Black-and-white street portrait of a woman walking in the city." },
-  { handle: "@jan.motor",     src: PORTRAITS.jannisLux,    alt: "1960s retro motorsport fashion editorial." },
-  { handle: "@clara.mondo",   src: PORTRAITS.claraMondo,   alt: "Black-and-white portrait of a woman sitting on a curb." },
-  { handle: "@paul.altstadt", src: PORTRAITS.paulAltstadt, alt: "Black-and-white night portrait of a man on a city street." },
-  { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    alt: "Close-up editorial portrait with braids and feathered collar." },
-  { handle: "@david.bruecke", src: PORTRAITS.davidArch,    alt: "Black-and-white street portrait of a man with beard and aviator sunglasses." },
-  { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     alt: "Editorial portrait grid of a young man in studio light." },
-  { handle: "@leo.see",       src: PORTRAITS.leoWild,      alt: "Atmospheric sepia-toned portrait in a foggy field." },
-];
 
 function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
@@ -111,7 +99,9 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
 
 const buildSlides = (tiles: Tile[]): Slide[] => [
   { kind: "countdown" },
-  ...tiles.map((t) => ({ kind: "tile" as const, ...t })),
+  ...(tiles.length > 0
+    ? tiles.map((t) => ({ kind: "tile" as const, ...t }))
+    : [{ kind: "empty" as const }]),
 ];
 
 // Dauer, die eine gerade gefolgte Kachel noch sichtbar bleibt: Herz-Burst (700ms) + Wegblenden.
@@ -156,8 +146,8 @@ function Index() {
     refetchOnMount: true,
   });
 
-  // Wenn echte Posts vorhanden sind, diese nehmen — sonst Demo-Daten
-  const activeTiles: Tile[] = dbTiles.length > 0 ? dbTiles : TILES;
+  // Nur echte Posts aus der Stadt — kein Demo-Fallback mehr (F&F-Pilot: echt statt Fake).
+  const activeTiles: Tile[] = dbTiles;
 
   // Discovery zeigt nur Fremde (PRD §4.4): wem du folgst, verlässt den Feed.
   // Reaktiv auf den Follow-State — nicht am Mount eingefroren, damit das Verhalten
@@ -199,7 +189,7 @@ function Index() {
 
         return (
           <div
-            key={slide.kind === "countdown" ? "__countdown" : slide.handle}
+            key={slide.kind === "tile" ? slide.handle : slide.kind}
             ref={slideRef(i)}
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
@@ -264,7 +254,7 @@ function Index() {
                       </div>
                     </div>
                   </>
-                ) : (
+                ) : slide.kind === "countdown" ? (
                   <div
                     className="w-full h-full flex flex-col items-center justify-center text-white relative"
                     style={{
@@ -310,6 +300,32 @@ function Index() {
                       <span className="material-symbols-outlined animate-bounce text-[28px]">keyboard_arrow_up</span>
                       <span className="text-[11px] tracking-widest uppercase font-medium">Swipe</span>
                     </div>
+                  </div>
+                ) : (
+                  // Kein echter Moment in der Stadt heute — ehrlicher Leerzustand statt Fake-Kacheln.
+                  <div
+                    className="w-full h-full flex flex-col items-center justify-center gap-5 px-8 text-center text-white relative"
+                    style={{
+                      background:
+                        "radial-gradient(circle at 50% 35%, rgba(255,255,255,0.05), transparent 65%), linear-gradient(160deg, #141414 0%, #080808 100%)",
+                    }}
+                  >
+                    <div className="w-20 h-20 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center">
+                      <span className="material-symbols-outlined text-white/30 text-[36px]">group</span>
+                    </div>
+                    <div>
+                      <p className="text-white text-lg font-semibold tracking-tight">Heute war noch niemand draußen</p>
+                      <p className="mt-2 text-white/40 text-sm leading-snug max-w-[16rem] mx-auto">
+                        Sei die erste Person in der Stadt — nimm deinen Moment auf.
+                      </p>
+                    </div>
+                    <Link
+                      to="/record"
+                      className="mt-1 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black active:scale-[0.99] transition-transform"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">videocam</span>
+                      Moment aufnehmen
+                    </Link>
                   </div>
                 )}
               </div>

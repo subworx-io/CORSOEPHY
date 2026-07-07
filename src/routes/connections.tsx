@@ -5,6 +5,7 @@ import {
   useFollow,
   followFill,
   canRenew,
+  lastReset,
   type FollowedPerson,
 } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
@@ -84,7 +85,10 @@ function PersonSlide({
     setMuted(v.muted);
   }
 
-  const hasMedia = !!videoUrl || (person.src !== null);
+  // „Moment heute?" hängt am echten heutigen Video (videoUrl wird nur für Posts seit dem
+  // letzten 08:00-Reset geladen), nicht mehr am Demo-Portrait — sonst wäre der Anstups-/
+  // Leerzustand nie erreichbar.
+  const hasMomentToday = !!videoUrl;
 
   return (
     <div
@@ -152,7 +156,7 @@ function PersonSlide({
         )}
 
         {/* Bottom overlay — Handle links, Aktions-Pills rechts (Layout wie Discovery/Story) */}
-        <div className={`absolute bottom-0 left-0 right-0 p-5 ${hasMedia ? "bg-gradient-to-t from-black/80 via-black/30 to-transparent" : ""}`}>
+        <div className={`absolute bottom-0 left-0 right-0 p-5 ${hasMomentToday ? "bg-gradient-to-t from-black/80 via-black/30 to-transparent" : ""}`}>
           <div className="flex items-end justify-between gap-3">
             <span className="min-w-0 truncate text-white text-lg font-semibold tracking-tight drop-shadow-md">
               {person.handle}
@@ -160,7 +164,7 @@ function PersonSlide({
 
             <div className="flex items-center gap-2 flex-wrap justify-end">
               {/* Anstupsen nur, wenn heute noch kein Video vorhanden (PRD 4.5) */}
-              {!hasMedia && (
+              {!hasMomentToday && (
                 <button
                   onClick={() => nudge(person.handle)}
                   disabled={person.nudged}
@@ -218,10 +222,14 @@ function ConnectionsPage() {
       if (!profiles?.length) return {};
 
       const authorIds = profiles.map((p) => p.id);
+      // Nur der heutige Moment zählt (seit dem letzten 08:00-Reset) — sonst würde ein alter
+      // Clip als „Moment heute" durchgehen und den Anstups-Zustand fälschlich unterdrücken.
+      const sinceReset = new Date(lastReset(Date.now())).toISOString();
       const { data: posts } = await supabase
         .from("posts")
         .select("media_path, author_id")
         .in("author_id", authorIds)
+        .gte("created_at", sinceReset)
         .order("created_at", { ascending: false });
       if (!posts?.length) return {};
 

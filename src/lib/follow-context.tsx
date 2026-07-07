@@ -1,29 +1,27 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { PORTRAITS } from "@/assets/portraits";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase/client";
-
-// Persistenz-Schlüssel: Follow-State überlebt Reload auf demselben Gerät.
-// (Kein geteilter Server — das ist Phase 0 und braucht eine Architektur-Entscheidung mit dem Eigner.)
-const STORAGE_KEY = "corso.followed.v1";
+import { useAuth } from "@/lib/auth-context";
 
 export interface FollowedPerson {
   handle: string;
+  // Profil-ID des Followees (für DB-Ops). Bei optimistischem Follow evtl. kurz undefined,
+  // bis der nächste DB-Reload sie nachträgt.
+  id?: string;
+  // Portrait nur für die Demo-Story-Handles; echte User haben keins → Video wird separat geladen.
   src: string | null;
   // Zeitpunkt des letzten (Re-)Follows in ms — Basis für das verfallende Herz
   followedAt: number;
-  // Hat die Person heute schon einen Moment gepostet? (unabhängig vom Follow-Status)
-  hasPostedToday: boolean;
-  // Hat der User die Person heute angestupst?
+  // Hat der User die Person heute (seit dem letzten 08:00-Reset) schon angestupst?
   nudged: boolean;
 }
 
 interface FollowContextType {
   followed: Map<string, FollowedPerson>;
   isFollowing: (handle: string) => boolean;
-  follow: (person: Pick<FollowedPerson, "handle" | "src">) => void;
+  follow: (person: { handle: string; src?: string | null }) => void;
   renew: (handle: string) => void;
   nudge: (handle: string) => void;
-  // Dev/Test: App auf den Demo-Ausgangszustand zurücksetzen (löscht den persistierten Stand).
+  // Dev/Test: den lokalen Stand aus der DB neu laden (verwirft optimistische Änderungen).
   reset: () => void;
 }
 
@@ -72,137 +70,179 @@ export function canRenew(followedAt: number, now: number) {
 
 const FollowContext = createContext<FollowContextType | null>(null);
 
-// Demo-Seeds relativ zum letzten 08:00-Reset, damit die Glas-Stände unter der
-// Raster-Logik deterministisch sind (sonst je nach Uhrzeit sofort abgelaufen).
-const NOW = Date.now();
-const H = 60 * 60 * 1000;
-const LAST_RESET = lastReset(NOW);
-
-const INITIAL_FOLLOWED: FollowedPerson[] = [
-  // heute (nach dem Reset) gefolgt → volles Glas, „folgst du heute"
-  { handle: "@lena.rhein",    src: PORTRAITS.saraSound,    followedAt: NOW,                hasPostedToday: true,  nudged: false },
-  // gestern gefolgt → Entscheidungstag, Glas läuft seit 08:00 leer, erneuerbar
-  { handle: "@felix.rhein",   src: PORTRAITS.felixRhein,   followedAt: LAST_RESET - 3 * H, hasPostedToday: true,  nudged: false },
-  // gestern gefolgt, heute noch kein Moment → leerer State, Glas läuft trotzdem leer
-  { handle: "@nina.medien",   src: PORTRAITS.ninaPure,     followedAt: LAST_RESET - 6 * H, hasPostedToday: false, nudged: false },
-  // gerade eben (re)folgt → volles Glas
-  { handle: "@leo.see",       src: PORTRAITS.leoWild,      followedAt: NOW,                hasPostedToday: true,  nudged: false },
-];
+// Followee-Profil per Handle nachschlagen (für optimistisch gefolgte Personen ohne id).
+async function profileIdByHandle(handle: string): Promise<string | null> {
+  const { data } = await supabase.from("profiles").select("id").eq("handle", handle).maybeSingle();
+  return data?.id ?? null;
+}
 
 export function FollowProvider({ children }: { children: ReactNode }) {
-  // SSR-sicher: Start immer deterministisch aus INITIAL_FOLLOWED (gleicher Server- & Client-
-  // Render → keine Hydration-Mismatch). Der echte Stand aus localStorage wird erst nach dem
-  // Mount geladen (siehe useEffect unten).
-  const [followed, setFollowed] = useState<Map<string, FollowedPerson>>(
-    () => new Map(INITIAL_FOLLOWED.map((p) => [p.handle, p]))
-  );
-  const [hydrated, setHydrated] = useState(false);
+  const { user } = useAuth();
+  // Quelle der Wahrheit ist die DB. Start leer (SSR-sicher, keine Hydration-Mismatch),
+  // echte Follows werden nach dem Mount / Login geladen.
+  const [followed, setFollowed] = useState<Map<string, FollowedPerson>>(() => new Map());
 
-  // Einmaliges Laden des persistierten Stands (nur Client).
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const arr = JSON.parse(raw) as FollowedPerson[];
-        if (Array.isArray(arr)) {
-          setFollowed(new Map(arr.map((p) => [p.handle, p])));
-        }
-      }
-    } catch {
-      // localStorage nicht verfügbar / korrupt → Demo-Seed bleibt stehen
+  // Aktive Follows (+ Handles, +heutige Anstupser) aus der DB laden.
+  const load = useCallback(async () => {
+    if (!user) {
+      setFollowed(new Map());
+      return;
     }
-    setHydrated(true);
-  }, []);
-
-  // Persistieren bei jeder Änderung — aber erst nachdem geladen wurde,
-  // sonst überschreibt der Demo-Seed den echten Stand beim ersten Render.
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(followed.values())));
-    } catch {
-      // Schreiben fehlgeschlagen (z.B. privater Modus) → still ignorieren
+    // Aktive Follows: expires_at is null (der Cron/Reset markiert Abgelaufene).
+    const { data: rows } = await supabase
+      .from("follows")
+      .select("followed_at, followee_id")
+      .eq("follower_id", user.id)
+      .is("expires_at", null);
+    if (!rows?.length) {
+      setFollowed(new Map());
+      return;
     }
-  }, [followed, hydrated]);
 
-  // Abgelaufene Follows am 2. Reset entfernen (PRD 4.3: „Person A verschwindet").
-  // Läuft nach der Hydration einmal sofort und danach minütlich.
+    const followeeIds = rows.map((r) => r.followee_id);
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, handle")
+      .in("id", followeeIds);
+
+    // Anstupser seit dem letzten 08:00-Reset → markiert „heute angestupst".
+    const sinceReset = new Date(lastReset(Date.now())).toISOString();
+    const { data: myNudges } = await supabase
+      .from("nudges")
+      .select("nudged_id")
+      .eq("nudger_id", user.id)
+      .gte("created_at", sinceReset);
+    const nudgedSet = new Set((myNudges ?? []).map((n) => n.nudged_id));
+
+    const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
+    const next = new Map<string, FollowedPerson>();
+    for (const r of rows) {
+      const prof = byId.get(r.followee_id);
+      if (!prof) continue;
+      next.set(prof.handle, {
+        handle: prof.handle,
+        id: prof.id,
+        src: null,
+        followedAt: new Date(r.followed_at).getTime(),
+        nudged: nudgedSet.has(prof.id),
+      });
+    }
+    setFollowed(next);
+  }, [user]);
+
+  // Bei Login / User-Wechsel neu laden.
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Am 2. Reset abgelaufene Follows sofort ausblenden (visuelle Sofortwirkung, bevor
+  // der tägliche Cron expires_at setzt). DB bleibt Quelle der Wahrheit.
   useEffect(() => {
     const prune = () =>
       setFollowed((prev) => {
         const now = Date.now();
         let changed = false;
-        const next = new Map(prev);
+        const nextMap = new Map(prev);
         for (const [handle, p] of prev) {
           if (isExpired(p.followedAt, now)) {
-            next.delete(handle);
+            nextMap.delete(handle);
             changed = true;
           }
         }
-        return changed ? next : prev;
+        return changed ? nextMap : prev;
       });
     prune();
     const id = setInterval(prune, 60_000);
     return () => clearInterval(id);
-  }, [hydrated]);
+  }, []);
 
   const isFollowing = (handle: string) => followed.has(handle);
 
-  const follow = (person: Pick<FollowedPerson, "handle" | "src">) => {
-    setFollowed((prev) => {
-      if (prev.has(person.handle)) return prev;
-      // Neu gefolgte Person stammt aus Discovery/Stadt-Story → hat heute gepostet, Herz voll
-      return new Map(prev).set(person.handle, {
-        ...person,
-        followedAt: Date.now(),
-        hasPostedToday: true,
-        nudged: false,
+  // Folgen: optimistisch lokal einfügen, dann in die DB schreiben und reconcilen.
+  const follow = useCallback(
+    (person: { handle: string; src?: string | null }) => {
+      setFollowed((prev) => {
+        if (prev.has(person.handle)) return prev;
+        return new Map(prev).set(person.handle, {
+          handle: person.handle,
+          src: person.src ?? null,
+          followedAt: Date.now(),
+          nudged: false,
+        });
       });
-    });
-  };
+      void (async () => {
+        if (!user) return;
+        const followeeId = await profileIdByHandle(person.handle);
+        if (!followeeId) return; // Demo-/Story-Handle ohne echtes Profil → bleibt optimistisch
+        await supabase.from("follows").upsert(
+          {
+            follower_id: user.id,
+            followee_id: followeeId,
+            followed_at: new Date().toISOString(),
+            expires_at: null,
+          },
+          { onConflict: "follower_id,followee_id" },
+        );
+        await load();
+      })();
+    },
+    [user, load],
+  );
 
-  // Follow erneuern → Herz füllt wieder auf (followedAt zurücksetzen) + DB-Sync
-  const renew = (handle: string) => {
-    setFollowed((prev) => {
-      const person = prev.get(handle);
-      if (!person) return prev;
-      return new Map(prev).set(handle, { ...person, followedAt: Date.now() });
-    });
-    // DB: expires_at zurücksetzen, followed_at aktualisieren (fire-and-forget)
-    void (async () => {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("handle", handle)
-        .maybeSingle();
-      if (!profile) return;
-      const uid = (await supabase.auth.getUser()).data.user?.id;
-      if (!uid) return;
-      await supabase.from("follows").upsert(
-        { follower_id: uid, followee_id: profile.id, followed_at: new Date().toISOString(), expires_at: null },
-        { onConflict: "follower_id,followee_id" },
-      );
-    })();
-  };
+  // Follow erneuern → Herz füllt wieder auf (followedAt zurücksetzen) + DB-Sync.
+  const renew = useCallback(
+    (handle: string) => {
+      setFollowed((prev) => {
+        const person = prev.get(handle);
+        if (!person) return prev;
+        return new Map(prev).set(handle, { ...person, followedAt: Date.now() });
+      });
+      void (async () => {
+        if (!user) return;
+        const followeeId = await profileIdByHandle(handle);
+        if (!followeeId) return;
+        await supabase.from("follows").upsert(
+          {
+            follower_id: user.id,
+            followee_id: followeeId,
+            followed_at: new Date().toISOString(),
+            expires_at: null,
+          },
+          { onConflict: "follower_id,followee_id" },
+        );
+        await load();
+      })();
+    },
+    [user, load],
+  );
 
-  const nudge = (handle: string) => {
-    setFollowed((prev) => {
-      const person = prev.get(handle);
-      if (!person || person.nudged) return prev;
-      return new Map(prev).set(handle, { ...person, nudged: true });
-    });
-  };
+  // Anstupsen: optimistisch markieren + DB-Row (idempotent pro Tag über unique-Constraint).
+  const nudge = useCallback(
+    (handle: string) => {
+      setFollowed((prev) => {
+        const person = prev.get(handle);
+        if (!person || person.nudged) return prev;
+        return new Map(prev).set(handle, { ...person, nudged: true });
+      });
+      void (async () => {
+        if (!user) return;
+        const followeeId = await profileIdByHandle(handle);
+        if (!followeeId) return;
+        await supabase
+          .from("nudges")
+          .upsert(
+            { nudger_id: user.id, nudged_id: followeeId },
+            { onConflict: "nudger_id,nudged_id,nudge_date" },
+          );
+      })();
+    },
+    [user],
+  );
 
-  // Zurück auf den Demo-Ausgangszustand. localStorage-Persistenz wird durch den
-  // setState anschließend automatisch mit dem Seed überschrieben.
-  const reset = () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // localStorage nicht verfügbar → egal, der State-Reset unten reicht
-    }
-    setFollowed(new Map(INITIAL_FOLLOWED.map((p) => [p.handle, p])));
-  };
+  // Dev/Test: aus der DB neu laden (z.B. nach dem simulierten 08:00-Reset).
+  const reset = useCallback(() => {
+    void load();
+  }, [load]);
 
   return (
     <FollowContext.Provider value={{ followed, isFollowing, follow, renew, nudge, reset }}>
