@@ -40,6 +40,15 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      // ⚠️ PILOT-PROVISORIUM: E-Mail-freie Einladungs-Links (Freundes-Pilot).
+      // /invite/<token> serverseitig einlösen (service_role bleibt im Worker),
+      // bevor die normale SSR-Auslieferung greift. Siehe src/lib/invites/server.ts.
+      const url = new URL(request.url);
+      if (url.pathname.startsWith("/invite/")) {
+        const { redeemInvite } = await import("./lib/invites/server");
+        return await redeemInvite(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

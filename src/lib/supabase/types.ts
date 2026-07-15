@@ -5,12 +5,14 @@ export interface Profile {
   id: string; // = auth.users.id
   handle: string; // @handle, 1 Gesicht = 1 Handle
   city: string;
+  display_name: string | null; // frei editierbarer Anzeigename (optional); Identität bleibt der @handle
+  push_enabled: boolean; // Push-Präferenz — nur gespeichert, Push-Logik folgt später
   created_at: string;
 }
 
 export interface Prompt {
   id: string;
-  prompt_date: string; // Corso-Tag (date)
+  active_date: string | null; // Corso-Tag, an dem der Prompt „dran" war; NULL = noch nie benutzt (Kandidat)
   text: string;
   created_at: string;
 }
@@ -46,6 +48,7 @@ export interface Nudge {
 export interface CityStorySlot {
   id: string;
   story_date: string;
+  city: string; // Ziehung pro Stadt (Pilot: Düsseldorf)
   post_id: string;
   slot: number; // 0..7
   created_at: string;
@@ -58,4 +61,21 @@ export interface ReachSnapshot {
   follower_count: number;
   pool_viewers: number;
   created_at: string;
+}
+
+export interface PostView {
+  id: string;
+  post_id: string;
+  viewer_id: string;
+  created_at: string;
+}
+
+// Rückgabe von my_feedback() — die einzige (private) Lese-Oberfläche des Rücklaufs.
+// Deltas sind null, solange es kein Gestern gibt (has_yesterday = false).
+export interface MyFeedback {
+  publikum: number;
+  publikum_delta: number | null;
+  zuschauer: number;
+  zuschauer_delta: number | null;
+  has_yesterday: boolean;
 }

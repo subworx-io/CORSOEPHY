@@ -1,0 +1,10 @@
+# Corso — Freundesliste für Einladungs-Links (PILOT-PROVISORIUM)
+#
+# Kopier diese Datei nach  scripts/friends.txt  und trag deine Freunde ein.
+# Pro Zeile:  Name, email@beispiel.de
+# Zeilen mit # werden ignoriert.
+#
+# Beispiel:
+Lisa Meyer, lisa@example.com
+Tom Becker, tom.becker@gmail.com
+Nina Vogt, nina.vogt@gmx.de

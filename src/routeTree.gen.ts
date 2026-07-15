@@ -9,15 +9,30 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as StoryEmptyLabRouteImport } from './routes/story-empty-lab'
 import { Route as StoryRouteImport } from './routes/story'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RecordRouteImport } from './routes/record'
+import { Route as ImpressumRouteImport } from './routes/impressum'
 import { Route as FeedbackRouteImport } from './routes/feedback'
+import { Route as DatenschutzRouteImport } from './routes/datenschutz'
 import { Route as ConnectionsRouteImport } from './routes/connections'
+import { Route as AgbRouteImport } from './routes/agb'
 import { Route as IndexRouteImport } from './routes/index'
 
+const StoryEmptyLabRoute = StoryEmptyLabRouteImport.update({
+  id: '/story-empty-lab',
+  path: '/story-empty-lab',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StoryRoute = StoryRouteImport.update({
   id: '/story',
   path: '/story',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RecordRoute = RecordRouteImport.update({
@@ -25,14 +40,29 @@ const RecordRoute = RecordRouteImport.update({
   path: '/record',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ImpressumRoute = ImpressumRouteImport.update({
+  id: '/impressum',
+  path: '/impressum',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FeedbackRoute = FeedbackRouteImport.update({
   id: '/feedback',
   path: '/feedback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DatenschutzRoute = DatenschutzRouteImport.update({
+  id: '/datenschutz',
+  path: '/datenschutz',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectionsRoute = ConnectionsRouteImport.update({
   id: '/connections',
   path: '/connections',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgbRoute = AgbRouteImport.update({
+  id: '/agb',
+  path: '/agb',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -43,49 +73,114 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/agb': typeof AgbRoute
   '/connections': typeof ConnectionsRoute
+  '/datenschutz': typeof DatenschutzRoute
   '/feedback': typeof FeedbackRoute
+  '/impressum': typeof ImpressumRoute
   '/record': typeof RecordRoute
+  '/settings': typeof SettingsRoute
   '/story': typeof StoryRoute
+  '/story-empty-lab': typeof StoryEmptyLabRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/agb': typeof AgbRoute
   '/connections': typeof ConnectionsRoute
+  '/datenschutz': typeof DatenschutzRoute
   '/feedback': typeof FeedbackRoute
+  '/impressum': typeof ImpressumRoute
   '/record': typeof RecordRoute
+  '/settings': typeof SettingsRoute
   '/story': typeof StoryRoute
+  '/story-empty-lab': typeof StoryEmptyLabRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/agb': typeof AgbRoute
   '/connections': typeof ConnectionsRoute
+  '/datenschutz': typeof DatenschutzRoute
   '/feedback': typeof FeedbackRoute
+  '/impressum': typeof ImpressumRoute
   '/record': typeof RecordRoute
+  '/settings': typeof SettingsRoute
   '/story': typeof StoryRoute
+  '/story-empty-lab': typeof StoryEmptyLabRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/connections' | '/feedback' | '/record' | '/story'
+  fullPaths:
+    | '/'
+    | '/agb'
+    | '/connections'
+    | '/datenschutz'
+    | '/feedback'
+    | '/impressum'
+    | '/record'
+    | '/settings'
+    | '/story'
+    | '/story-empty-lab'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/connections' | '/feedback' | '/record' | '/story'
-  id: '__root__' | '/' | '/connections' | '/feedback' | '/record' | '/story'
+  to:
+    | '/'
+    | '/agb'
+    | '/connections'
+    | '/datenschutz'
+    | '/feedback'
+    | '/impressum'
+    | '/record'
+    | '/settings'
+    | '/story'
+    | '/story-empty-lab'
+  id:
+    | '__root__'
+    | '/'
+    | '/agb'
+    | '/connections'
+    | '/datenschutz'
+    | '/feedback'
+    | '/impressum'
+    | '/record'
+    | '/settings'
+    | '/story'
+    | '/story-empty-lab'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AgbRoute: typeof AgbRoute
   ConnectionsRoute: typeof ConnectionsRoute
+  DatenschutzRoute: typeof DatenschutzRoute
   FeedbackRoute: typeof FeedbackRoute
+  ImpressumRoute: typeof ImpressumRoute
   RecordRoute: typeof RecordRoute
+  SettingsRoute: typeof SettingsRoute
   StoryRoute: typeof StoryRoute
+  StoryEmptyLabRoute: typeof StoryEmptyLabRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/story-empty-lab': {
+      id: '/story-empty-lab'
+      path: '/story-empty-lab'
+      fullPath: '/story-empty-lab'
+      preLoaderRoute: typeof StoryEmptyLabRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/story': {
       id: '/story'
       path: '/story'
       fullPath: '/story'
       preLoaderRoute: typeof StoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/record': {
@@ -95,6 +190,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RecordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/impressum': {
+      id: '/impressum'
+      path: '/impressum'
+      fullPath: '/impressum'
+      preLoaderRoute: typeof ImpressumRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/feedback': {
       id: '/feedback'
       path: '/feedback'
@@ -102,11 +204,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FeedbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/datenschutz': {
+      id: '/datenschutz'
+      path: '/datenschutz'
+      fullPath: '/datenschutz'
+      preLoaderRoute: typeof DatenschutzRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connections': {
       id: '/connections'
       path: '/connections'
       fullPath: '/connections'
       preLoaderRoute: typeof ConnectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agb': {
+      id: '/agb'
+      path: '/agb'
+      fullPath: '/agb'
+      preLoaderRoute: typeof AgbRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -121,10 +237,15 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AgbRoute: AgbRoute,
   ConnectionsRoute: ConnectionsRoute,
+  DatenschutzRoute: DatenschutzRoute,
   FeedbackRoute: FeedbackRoute,
+  ImpressumRoute: ImpressumRoute,
   RecordRoute: RecordRoute,
+  SettingsRoute: SettingsRoute,
   StoryRoute: StoryRoute,
+  StoryEmptyLabRoute: StoryEmptyLabRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,0 +1,14 @@
+-- ⚠️ VERALTET — NICHT MEHR AUSFÜHREN.
+--
+-- Diese Datei enthielt die 50 alten, introspektiven Prompts („Was hast du heute
+-- losgelassen?" …). Die wurden am 16. Juli 2026 abgelöst: zu „heavy" für den
+-- öffentlichen Stadt-Feed. Ein erneutes Ausführen würde sie wieder AKTIV
+-- einspielen → nicht tun.
+--
+-- Neue Quelle der Wahrheit (leichte, kategorisierte Prompts + Rotation):
+--   supabase/migrations/0011_prompts_categories.sql  (Kategorien, Historie, Rotation)
+--   supabase/migrations/0012_seed_prompts_v2.sql      (40 neue Prompts mit Kategorie)
+--   supabase/migrations/0013_active_date_lru.sql      (active_date = LRU-Marker)
+--
+-- Inhalt bewusst entfernt, damit ein versehentlicher Re-Run nichts anrichtet.
+select 1 where false;

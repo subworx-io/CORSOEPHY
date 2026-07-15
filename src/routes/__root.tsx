@@ -9,6 +9,8 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { DevMenu } from "../components/dev-menu";
+import { Toaster } from "../components/ui/sonner";
 
 const TABS = [
   { to: "/" as const, label: "Discovery", icon: "explore" },
@@ -48,6 +50,8 @@ function BottomNav() {
             </Link>
           );
         })}
+        {/* Nur für den Dev-Admin sichtbar (rendert sonst null) */}
+        <DevMenu />
       </div>
     </nav>
   );
@@ -58,6 +62,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { FollowProvider } from "../lib/follow-context";
 import { AuthProvider } from "../lib/auth-context";
 import { AuthGate } from "../components/auth-gate";
+import { DailyPromptSplash } from "../components/daily-prompt-splash";
 
 function NotFoundComponent() {
   return (
@@ -197,7 +202,9 @@ function RootComponent() {
             <div className="h-dvh bg-neutral-950 overflow-hidden">
               <Outlet />
               <BottomNav />
+              <Toaster />
             </div>
+            <DailyPromptSplash />
           </FollowProvider>
         </AuthGate>
       </AuthProvider>

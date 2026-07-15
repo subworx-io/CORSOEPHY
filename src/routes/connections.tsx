@@ -11,6 +11,7 @@ import {
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { recordView } from "@/lib/record-view";
 
 export const Route = createFileRoute("/connections")({
   head: () => ({
@@ -233,14 +234,14 @@ function ConnectionsPage() {
       const sinceReset = new Date(lastReset(Date.now())).toISOString();
       const { data: posts } = await supabase
         .from("posts")
-        .select("media_path, author_id")
+        .select("id, media_path, author_id")
         .in("author_id", authorIds)
         .gte("created_at", sinceReset)
         .order("created_at", { ascending: false });
       if (!posts?.length) return {};
 
-      // Eine signierte URL pro Author (neuester Post)
-      const result: Record<string, string> = {};
+      // Eine signierte URL + Post-ID pro Author (neuester Post)
+      const result: Record<string, { url: string; postId: string }> = {};
       const seen = new Set<string>();
       for (const post of posts) {
         if (seen.has(post.author_id)) continue;
@@ -250,7 +251,7 @@ function ConnectionsPage() {
         const { data: urlData } = await supabase.storage
           .from("moments")
           .createSignedUrl(post.media_path, 3600);
-        if (urlData?.signedUrl) result[profile.handle] = urlData.signedUrl;
+        if (urlData?.signedUrl) result[profile.handle] = { url: urlData.signedUrl, postId: post.id };
       }
       return result;
     },
@@ -258,6 +259,13 @@ function ConnectionsPage() {
     staleTime: 0,
     refetchOnMount: true,
   });
+
+  // Ansicht verbuchen, sobald der Moment einer gefolgten Person aktiv wird
+  // (Follower-Ansichten zählen ebenfalls als „Zuschauer").
+  const activeHandle = people[currentIndex]?.handle;
+  useEffect(() => {
+    if (activeHandle) recordView(videosByHandle[activeHandle]?.postId);
+  }, [activeHandle, videosByHandle]);
 
   if (people.length === 0) {
     return (
@@ -287,7 +295,7 @@ function ConnectionsPage() {
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
           >
-            <PersonSlide person={person} now={now} videoUrl={videosByHandle[person.handle]} isActive={isActive} />
+            <PersonSlide person={person} now={now} videoUrl={videosByHandle[person.handle]?.url} isActive={isActive} />
           </div>
         );
       })}

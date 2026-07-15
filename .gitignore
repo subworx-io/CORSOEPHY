@@ -54,3 +54,6 @@ Thumbs.db
 *.pem
 .vercel
 .netlify
+
+# Freundesliste für Einladungs-Links (echte E-Mails, nicht committen)
+scripts/friends.txt

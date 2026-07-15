@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import skylineUrl from "@/assets/duesseldorf-skyline.jpg";
 import { Link } from "@tanstack/react-router";
 import { useFollow } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
@@ -9,6 +8,7 @@ import { FollowButton } from "@/components/follow-button";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { recordView } from "@/lib/record-view";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -22,34 +22,10 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type Tile = { handle: string; src?: string; alt?: string; videoUrl?: string };
-type CountdownSlide = { kind: "countdown" };
+type Tile = { handle: string; src?: string; alt?: string; videoUrl?: string; postId?: string };
 type TileSlide = { kind: "tile" } & Tile;
 type EmptySlide = { kind: "empty" };
-type Slide = CountdownSlide | TileSlide | EmptySlide;
-
-// Stadt-Story ist jeden Tag um 20:00 — Countdown läuft auf die nächste 20:00 und rollt danach automatisch weiter
-function nextStoryTarget(now: number) {
-  const target = new Date(now);
-  target.setHours(20, 0, 0, 0);
-  if (now >= target.getTime()) target.setDate(target.getDate() + 1);
-  return target.getTime();
-}
-
-function useCountdown() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-  const diff = Math.max(0, nextStoryTarget(now) - now);
-  const hours = Math.floor(diff / 3600000);
-  const minutes = Math.floor((diff % 3600000) / 60000);
-  const seconds = Math.floor((diff % 60000) / 1000);
-  return { hours, minutes, seconds };
-}
-
-const pad = (n: number) => n.toString().padStart(2, "0");
+type Slide = TileSlide | EmptySlide;
 
 function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
@@ -97,19 +73,18 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
   );
 }
 
-const buildSlides = (tiles: Tile[]): Slide[] => [
-  { kind: "countdown" },
-  ...(tiles.length > 0
+// Discovery startet direkt beim ersten Moment — der 20:00-Countdown lebt jetzt
+// auf dem Story-Screen (dort gehört er hin: er zählt auf die Stadt-Story).
+const buildSlides = (tiles: Tile[]): Slide[] =>
+  tiles.length > 0
     ? tiles.map((t) => ({ kind: "tile" as const, ...t }))
-    : [{ kind: "empty" as const }]),
-];
+    : [{ kind: "empty" as const }];
 
 // Dauer, die eine gerade gefolgte Kachel noch sichtbar bleibt: Herz-Burst (700ms) + Wegblenden.
 const EXIT_MS = 1100;
 
 function Index() {
   const { burstHandle, triggerBurst } = useHeartBurst();
-  const { hours, minutes, seconds } = useCountdown();
   const { user } = useAuth();
 
   // Echte Posts aus der DB laden (andere User, neueste zuerst)
@@ -132,11 +107,12 @@ function Index() {
           return {
             handle: (post.profiles as unknown as { handle: string }).handle,
             videoUrl: urlData?.signedUrl ?? null,
+            postId: post.id,
           };
         }),
       );
       return withUrls.filter(
-        (t): t is { handle: string; videoUrl: string } => t.videoUrl !== null,
+        (t): t is { handle: string; videoUrl: string; postId: string } => t.videoUrl !== null,
       );
     },
     enabled: !!user,
@@ -176,6 +152,12 @@ function Index() {
   };
 
   const { currentIndex, slideRef } = useSnapScroll({ count: slides.length, axis: "y" });
+
+  // Ansicht verbuchen, sobald ein fremder Clip aktiv wird (Datenquelle „Zuschauer").
+  useEffect(() => {
+    const active = slides[currentIndex];
+    if (active?.kind === "tile") recordView(active.postId);
+  }, [currentIndex, slides]);
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
@@ -253,53 +235,6 @@ function Index() {
                       </div>
                     </div>
                   </>
-                ) : slide.kind === "countdown" ? (
-                  <div
-                    className="w-full h-full flex flex-col items-center justify-center text-white relative"
-                    style={{
-                      background:
-                        "radial-gradient(circle at 30% 20%, rgba(255,255,255,0.08), transparent 60%), radial-gradient(circle at 70% 80%, rgba(255,255,255,0.04), transparent 55%), linear-gradient(160deg, #111 0%, #050505 100%)",
-                    }}
-                  >
-                    {/* Düsseldorf-Skyline als dezenter Backdrop (PRD-fern, reine Atmosphäre) */}
-                    <img
-                      src={skylineUrl}
-                      alt=""
-                      aria-hidden
-                      className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"
-                      draggable={false}
-                    />
-                    {/* Radial-Overlay hält den Countdown in der Mitte lesbar */}
-                    <div
-                      className="pointer-events-none absolute inset-0"
-                      style={{
-                        background:
-                          "radial-gradient(circle at 50% 45%, rgba(5,5,5,0.85) 0%, rgba(5,5,5,0.55) 35%, transparent 70%)",
-                      }}
-                    />
-                    <div className="relative z-10 text-[11px] uppercase tracking-[0.4em] text-white/50 mb-6 font-medium">
-                      Corso — Stadt-Story um 20:00
-                    </div>
-                    <div className="relative z-10 flex items-end gap-3 tabular-nums">
-                      {[
-                        { v: pad(hours), l: "Std" },
-                        { v: pad(minutes), l: "Min" },
-                        { v: pad(seconds), l: "Sek" },
-                      ].map((u, idx) => (
-                        <div key={u.l} className="flex items-end gap-3">
-                          <div className="flex flex-col items-center">
-                            <span className="text-5xl font-semibold tracking-tight">{u.v}</span>
-                            <span className="text-[10px] uppercase tracking-[0.25em] text-white/40 mt-2 font-medium">{u.l}</span>
-                          </div>
-                          {idx < 2 && <span className="text-3xl font-semibold text-white/30 pb-6">:</span>}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="absolute bottom-8 left-0 right-0 z-10 flex flex-col items-center gap-2 text-white/40">
-                      <span className="material-symbols-outlined animate-bounce text-[28px]">keyboard_arrow_up</span>
-                      <span className="text-[11px] tracking-widest uppercase font-medium">Swipe</span>
-                    </div>
-                  </div>
                 ) : (
                   // Kein echter Moment in der Stadt heute — ehrlicher Leerzustand statt Fake-Kacheln.
                   <div
@@ -348,9 +283,13 @@ function Index() {
       {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
       <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
         <div className="flex justify-end items-center gap-4 px-6 h-14 max-w-[600px] mx-auto">
-          <button className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md" aria-label="Einstellungen">
+          <Link
+            to="/settings"
+            className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md"
+            aria-label="Einstellungen"
+          >
             <span className="material-symbols-outlined">settings</span>
-          </button>
+          </Link>
         </div>
       </header>
 

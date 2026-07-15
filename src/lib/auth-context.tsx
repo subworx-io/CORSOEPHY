@@ -20,6 +20,11 @@ interface AuthContextType {
   signInWithMagicLink: (email: string) => Promise<{ error: string | null }>;
   // Profil (Handle) nach erstem Login anlegen — 1 Gesicht = 1 Handle
   createProfile: (handle: string) => Promise<{ error: string | null }>;
+  // Eigene Profilfelder ändern (Anzeigename, Push-Präferenz). Aktualisiert auch
+  // den lokalen State, damit der Screen konsistent bleibt und Reload übersteht.
+  updateProfile: (
+    fields: Partial<Pick<Profile, "display_name" | "push_enabled">>,
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -98,6 +103,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session],
   );
 
+  const updateProfile = useCallback(
+    async (fields: Partial<Pick<Profile, "display_name" | "push_enabled">>) => {
+      if (!session?.user) return { error: "Nicht eingeloggt." };
+      const { data, error } = await supabase
+        .from("profiles")
+        .update(fields)
+        .eq("id", session.user.id)
+        .select("*")
+        .single();
+      if (error) return { error: error.message };
+      setProfile(data as Profile);
+      return { error: null };
+    },
+    [session],
+  );
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setProfile(null);
@@ -112,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         signInWithMagicLink,
         createProfile,
+        updateProfile,
         signOut,
       }}
     >

@@ -1,5 +1,24 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
+
+// ⚠️ PILOT-PROVISORIUM: Meldungen für fehlgeschlagenes Einlösen eines Einladungs-Links
+// (E-Mail-freier Freundes-Pilot). Die Einlöse-Route leitet bei Fehlern auf
+// /?invite_error=<code> zurück. Siehe src/lib/invites/server.ts.
+const INVITE_ERRORS: Record<string, string> = {
+  invalid: "Dieser Einladungs-Link ist ungültig.",
+  expired: "Dieser Einladungs-Link ist abgelaufen. Bitte Maxim um einen neuen.",
+  used: "Dieser Einladungs-Link wurde bereits benutzt.",
+  error: "Beim Einlösen ist etwas schiefgelaufen. Bitte versuch es später noch einmal.",
+};
+
+function useInviteError(): string | null {
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("invite_error");
+    if (code && INVITE_ERRORS[code]) setMsg(INVITE_ERRORS[code]);
+  }, []);
+  return msg;
+}
 
 /**
  * Auth-Gate: entscheidet, was der Nutzer sieht.
@@ -38,6 +57,7 @@ function LoginScreen() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [error, setError] = useState<string | null>(null);
+  const inviteError = useInviteError();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -68,6 +88,12 @@ function LoginScreen() {
     <Screen>
       <h1 className="text-3xl font-semibold tracking-tight">Corso</h1>
       <p className="mt-2 text-sm text-white/60">Deine Stadt. Jeden Abend.</p>
+
+      {inviteError && (
+        <div className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+          {inviteError}
+        </div>
+      )}
 
       <form onSubmit={submit} className="mt-8 space-y-3">
         <input

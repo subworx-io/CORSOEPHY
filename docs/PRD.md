@@ -56,14 +56,20 @@ Dating ist der **Ausgang**, nicht der Eingang. Diese Reihenfolge prägt jede Ent
 - Foto oder vertikales Video.
 - 🔒 **LEITPLANKE: Live-Kamera-Pflicht, kein Galerie-Upload.**
 - Mehrere Takes, **kein Schnitt, keine Filter, keine Beauty.**
-- Täglicher Prompt zielt auf Emotion, nicht Dokumentation. ≥50 % gesichts-optional.
+- Täglicher Prompt ist leicht, konkret und filmbar — LeiCharakter statt Tiefe, nie Hausaufgabe/Therapie. ≥50 % gesichts-optional.
 - **Clip-Lebensdauer: bis zum nächsten 08:00-Uhr-Reset** (max. ~24 h).
 
 ### 4.2 Der tägliche Prompt
-- Jeden Tag um **08:00 Uhr** erscheint ein neuer Prompt.
+- Jeden Tag um **08:00 Uhr** erscheint ein neuer Prompt, stadtweit identisch und für den ganzen Corso-Tag eingefroren.
 - Gleichzeitig mit dem Reset aller Follows (siehe 4.3).
 - Jeder kann darauf mit einem Foto oder Video antworten.
 - Posts sind ab dem Moment des Uploads in der Discovery sichtbar.
+- **Ton (Anti-Test):** „Würde ich das entspannt an einem normalen Dienstagabend vor 500 Fremden aus meiner Stadt zeigen, ohne lange zu überlegen?" Wenn nein → zu heavy. Passeggiata statt Beichte.
+- **Drei Hebel (Kategorien) mit Rotations-Gewichtung ~40 / 40 / 20:**
+  - `zeig` — die Antwort liegt in der Welt, nicht im Kopf („Zeig, wo du gerade sitzt.")
+  - `augenzwinkern` — frech, selbstironisch, lebensfroh („Beweise, dass du gerade nichts Produktives tust.")
+  - `funken` — ein bisschen Persönlichkeit, ohne Tiefe zu erzwingen („Dein Guilty Pleasure, zu dem du stehst.")
+- **Auswahl:** Prompts liegen pflegbar in der DB (`prompts`-Tabelle, `category` + `active`), **nicht hartcodiert**. Der Tages-Prompt wird gewichtet gezogen, **nie zweimal am Folgetag**, und in `daily_prompt` (Tag → Prompt) protokolliert — Grundlage, um im Pilot zu messen, welche Prompts viele Clips treiben. Technik: siehe `docs/STATUS.md` + Migrationen `0011`–`0013`.
 
 ### 4.3 Das Follow-System (verfallendes Publikum)
 
