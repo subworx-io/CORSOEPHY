@@ -173,6 +173,10 @@ export function useCamera() {
       const blob = new Blob(chunksRef.current, { type: mimeType || "video/mp4" });
       const url = URL.createObjectURL(blob);
       recordedUrlRef.current = url;
+      // Live-Stream beenden: Mic zu (sonst Echo/Rückkopplung bei der Wiedergabe)
+      // und srcObject freigeben, damit das <video> die Aufnahme (src) abspielt
+      // statt weiter das Live-Bild zu zeigen (srcObject hätte Vorrang vor src).
+      stopStream();
       setRecordedUrl(url);
       setRecordedBlob(blob);
       setStatus("recorded");
@@ -188,20 +192,17 @@ export function useCamera() {
       setElapsedMs(elapsed);
       if (elapsed >= MAX_RECORD_MS) stopRecording();
     }, 100);
-  }, [revokeRecorded, stopRecording]);
+  }, [revokeRecorded, stopRecording, stopStream]);
 
   // Verwirft den Clip und kehrt zur Live-Preview zurück.
+  // Der Live-Stream wurde beim Aufnahme-Stopp beendet → Kamera neu starten.
   const retake = useCallback(() => {
     revokeRecorded();
     setRecordedUrl(null);
     setRecordedBlob(null);
     setElapsedMs(0);
-    if (videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
-    }
-    setStatus(streamRef.current ? "live" : "idle");
-  }, [revokeRecorded]);
+    void start();
+  }, [revokeRecorded, start]);
 
   const switchCamera = useCallback(() => {
     void start(facingMode === "user" ? "environment" : "user");
