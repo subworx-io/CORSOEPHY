@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import skylineUrl from "@/assets/duesseldorf-skyline.jpg";
 import { Link } from "@tanstack/react-router";
 import { useFollow } from "@/lib/follow-context";
@@ -111,7 +111,6 @@ function Index() {
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { hours, minutes, seconds } = useCountdown();
   const { user } = useAuth();
-  const queryClient = useQueryClient();
 
   // Echte Posts aus der DB laden (andere User, neueste zuerst)
   const { data: dbTiles = [] } = useQuery({
@@ -152,7 +151,7 @@ function Index() {
   // Discovery zeigt nur Fremde (PRD §4.4): wem du folgst, verlässt den Feed.
   // Reaktiv auf den Follow-State — nicht am Mount eingefroren, damit das Verhalten
   // überall gleich ist (kein "bleibt diese Session, weg nach Navigation"-Zufall mehr).
-  const { followed, reset } = useFollow();
+  const { followed } = useFollow();
   // `exiting` hält eine gerade gefolgte Kachel kurz im Feed, damit sie sichtbar
   // rausgleiten kann, statt unter dem Finger zu verschwinden.
   const [exiting, setExiting] = useState<Set<string>>(() => new Set());
@@ -349,27 +348,6 @@ function Index() {
       {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
       <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
         <div className="flex justify-end items-center gap-4 px-6 h-14 max-w-[600px] mx-auto">
-          {/* Dev/Test: simuliert den 08:00-Reset — setzt eigene DB-Follows auf abgelaufen */}
-          <button
-            onClick={() => void supabase.rpc("dev_expire_my_follows").then(() => {
-              reset();
-              void queryClient.invalidateQueries({ queryKey: ["connections-posts"] });
-            })}
-            className="flex items-center text-white/70 hover:text-white active:scale-95 transition-all drop-shadow-md"
-            aria-label="08:00-Reset simulieren"
-            title="08:00-Reset simulieren (Dev)"
-          >
-            <span className="material-symbols-outlined">alarm</span>
-          </button>
-          {/* Dev/Test: setzt Follows + persistierten Stand auf den Demo-Ausgang zurück */}
-          <button
-            onClick={() => reset()}
-            className="flex items-center text-white/70 hover:text-white active:scale-95 transition-all drop-shadow-md"
-            aria-label="App zurücksetzen"
-            title="App zurücksetzen"
-          >
-            <span className="material-symbols-outlined">restart_alt</span>
-          </button>
           <button className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md" aria-label="Einstellungen">
             <span className="material-symbols-outlined">settings</span>
           </button>
