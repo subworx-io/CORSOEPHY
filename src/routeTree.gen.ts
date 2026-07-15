@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as StoryLabRouteImport } from './routes/story-lab'
 import { Route as StoryRouteImport } from './routes/story'
 import { Route as RecordRouteImport } from './routes/record'
 import { Route as FeedbackRouteImport } from './routes/feedback'
 import { Route as ConnectionsRouteImport } from './routes/connections'
 import { Route as IndexRouteImport } from './routes/index'
 
+const StoryLabRoute = StoryLabRouteImport.update({
+  id: '/story-lab',
+  path: '/story-lab',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StoryRoute = StoryRouteImport.update({
   id: '/story',
   path: '/story',
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/feedback': typeof FeedbackRoute
   '/record': typeof RecordRoute
   '/story': typeof StoryRoute
+  '/story-lab': typeof StoryLabRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/feedback': typeof FeedbackRoute
   '/record': typeof RecordRoute
   '/story': typeof StoryRoute
+  '/story-lab': typeof StoryLabRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,27 @@ export interface FileRoutesById {
   '/feedback': typeof FeedbackRoute
   '/record': typeof RecordRoute
   '/story': typeof StoryRoute
+  '/story-lab': typeof StoryLabRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/connections' | '/feedback' | '/record' | '/story'
+  fullPaths:
+    | '/'
+    | '/connections'
+    | '/feedback'
+    | '/record'
+    | '/story'
+    | '/story-lab'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/connections' | '/feedback' | '/record' | '/story'
-  id: '__root__' | '/' | '/connections' | '/feedback' | '/record' | '/story'
+  to: '/' | '/connections' | '/feedback' | '/record' | '/story' | '/story-lab'
+  id:
+    | '__root__'
+    | '/'
+    | '/connections'
+    | '/feedback'
+    | '/record'
+    | '/story'
+    | '/story-lab'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,10 +99,18 @@ export interface RootRouteChildren {
   FeedbackRoute: typeof FeedbackRoute
   RecordRoute: typeof RecordRoute
   StoryRoute: typeof StoryRoute
+  StoryLabRoute: typeof StoryLabRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/story-lab': {
+      id: '/story-lab'
+      path: '/story-lab'
+      fullPath: '/story-lab'
+      preLoaderRoute: typeof StoryLabRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/story': {
       id: '/story'
       path: '/story'
@@ -125,6 +155,7 @@ const rootRouteChildren: RootRouteChildren = {
   FeedbackRoute: FeedbackRoute,
   RecordRoute: RecordRoute,
   StoryRoute: StoryRoute,
+  StoryLabRoute: StoryLabRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
