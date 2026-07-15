@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand:** 7. Juli 2026 (Follow-Loop de-mockt + Upload live verifiziert; Login-Zustellung siehe E-Mail-Abschnitt)
+**Stand:** 15. Juli 2026 (Aufnahme-UI-Flow im echten Browser end-to-end verifiziert + Login-Mails landen jetzt im Posteingang → Phase 0 vollständig durch)
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -22,10 +22,10 @@
 ### Existierende Screens (Routes in `src/routes/`)
 | Route | Screen | Stand |
 |---|---|---|
-| `index.tsx` | Discovery (Entdeckungs-Feed, vertikaler Swipe) | Echte Posts aus der DB; Follow schreibt in die DB; **kein Mock-Fallback mehr** (ehrlicher Leerzustand) |
-| `story.tsx` | Stadt-Story (20:00-Ritual) | UI steht, **noch Mock-Clips** (echte Auswahl/Trigger = Phase 1) |
-| `record.tsx` | Aufnahme (echte Live-Kamera) | Kamera live; „Verwenden"-Upload **funktional** (Backend 7. Juli verifiziert); UI-Flow noch nicht im echten Browser durchgeklickt |
-| `connections.tsx` | „Ich folge" / verdienter Chat | „Ich folge" aus **echtem Follow-Graph**; Anstupsen + Follow-Erneuern schreiben in die DB; verdienter Chat = Phase 3 |
+| `index.tsx` | Discovery (Entdeckungs-Feed, vertikaler Swipe) | Echte Posts aus der DB; Follow schreibt in die DB; **kein Mock-Fallback mehr** (ehrlicher Leerzustand). **Ziel = langer Scroll-Feed** (Entscheidung 15. Juli, siehe Abschnitt unten): Infinite Scroll, heute zuerst + ältere als Nachschub (interim), Endzustand nur heute. **Noch offen:** aktuell hartes `limit 20` ohne Pagination/Tages-Ordering. |
+| `story.tsx` | Stadt-Story (20:00-Ritual) | **De-mockt (15. Juli):** liest die stadtweit eingefrorene Auswahl aus `city_story_slots`; serverseitige gewichtete Zufallsziehung um 20:00 via pg_cron. Kein Mock mehr. |
+| `record.tsx` | Aufnahme (echte Live-Kamera) | Kamera live; „Verwenden"-Upload **funktional**; **UI-Flow im echten Browser end-to-end verifiziert (15. Juli): aufnehmen → hochladen → erscheint bei anderen in Discovery**. **Echo-Fix:** beim Aufnahme-Stopp wird der Live-Stream beendet (Mic zu, `srcObject` frei) → die Vorschau spielt die echte Aufnahme statt weiter das Live-Bild mit Rückkopplung. |
+| `connections.tsx` | „Ich folge" / verdienter Chat | „Ich folge" aus **echtem Follow-Graph**; Anstupsen + Follow-Erneuern schreiben in die DB; **Entfolgen** per Tippen auf „folgst du heute" (`unfollow()` markiert `expires_at = now()`) → Person taucht wieder in Discovery auf; verdienter Chat = Phase 3 |
 | `feedback.tsx` | Rücklauf (private Reichweite) | `my_reach()` echt; Pool-Zuschauer ausgeblendet (Phase 1) |
 
 ---
@@ -62,7 +62,13 @@ Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
 | Rate-Limit | 100 Mails/Stunde (Builtin wären nur ~4/h) |
 | Link-Gültigkeit | 3600 s (1 h) |
 
-### ✅ ROOT CAUSE GEFUNDEN (7. Juli): Mails werden gesendet UND zugestellt — landen aber in Junk/Quarantäne (nicht Versand-, sondern Inbox-Placement-Problem)
+### ✅ GELÖST (15. Juli): Login-Mails landen jetzt im Posteingang (nicht mehr Spam/Junk)
+
+Der Spam-Placement-Blocker ist behoben — Login-Mails kommen im Posteingang an. Damit können echte Pilot-User sich selbst per Magic-Link einloggen; die Admin-Login-Links als Workaround sind nicht mehr nötig (bleiben als Notfall-Option verfügbar). Der genaue Fix-Weg (Tracking aus / Link-Branding / Vorlage) wurde nicht protokolliert. Die Diagnose-Historie unten bleibt als Referenz stehen, falls das Problem wiederkehrt.
+
+---
+
+### 🔍 Diagnose-Historie (7. Juli, jetzt erledigt): Mails wurden gesendet UND zugestellt — landeten aber in Junk/Quarantäne (Inbox-Placement, kein Versandproblem)
 
 **Symptom:** „Login-Link-Mail kommt nicht an." User ab 2. Juli bleiben auf `confirmed: false`.
 
@@ -106,6 +112,32 @@ Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
 
 ---
 
+## Discovery-Feed — Umfang & Verhalten (Entscheidung 15. Juli)
+
+**Vision:** Discovery ist ein **langer Scroll-Feed**, der ein ausgedehntes Scrollverhalten etabliert — nicht ein knappes Kartendeck. Umfang = alle Momente des Tages aus deiner Area.
+
+- **Reihenfolge jetzt (Interim, dünner Pilot):** **heute zuerst, dann ältere Momente als Nachschub.** Bewusst KEIN harter Tagesfilter, weil „nur heute" bei kleiner Nutzerbasis den Feed leer wirken lässt.
+- **Endzustand (fertige App):** **nur heutiger Corso-Tag** (`prompt_date = corso_day(now())`).
+- **Area:** = **ganze Stadt Düsseldorf** (Pilot) → alle User in Düsseldorf, Area-Filter vorerst No-Op. Feinere Area (Stadtteil/Radius) bewusst NICHT jetzt.
+- **Laden:** **Infinite Scroll** — erst ~20, beim Erreichen des Endes die nächsten 20 nachladen (`range()`/`useInfiniteQuery`), nicht alles buffern.
+- **Bestehende Regeln bleiben:** eigene Posts via `author_id ≠ auth.uid()` aus; gefolgte Personen verlassen den Feed.
+
+**Aktueller Code-Stand (`src/routes/index.tsx`):** hartes `limit 20, order by created_at desc`, KEIN `prompt_date`-Filter, KEINE Pagination. **Noch nicht gebaut:** Infinite Scroll + „heute zuerst"-Ordering. Der Endzustand-Filter (`= heute`) kommt bewusst erst später. Nicht ungefragt auf „nur heute" eingrenzen.
+
+---
+
+## Follower-Zahl-Privatsphäre (RLS-Audit, 15. Juli)
+
+**Kern-Leitplanke:** 🔒 die private Publikums-/Follower-Zahl ist serverseitig nur für den Nutzer selbst lesbar. Audit-Ergebnis: **Architektur ist korrekt** (keine Neubau nötig, Follows waren schon DB-basiert, kein localStorage mehr).
+
+- **Schutz-Mechanik:** `follows`-SELECT-Policy `follower_id = auth.uid()` (niemand sieht, wer IHM folgt) + `my_reach()` (SECURITY DEFINER, zählt nur `auth.uid()`, kein Parameter) + `reach_snapshots` `read_own`. Über keinen Pfad (direkter Select, `count:exact`, Join, RPC, roher REST) kommt B an A's Zahl.
+- **Live gegen anon geprüft (kein Secret, nur anon-Key):** `follows`, `reach_snapshots`, `profiles`, `nudges`, `city_story_slots`, `connections` → alle `count=0` für Unauthentifizierte. RLS ist überall aktiv. Test: `scripts/security-test-follows.mjs` (Layer 1 grün).
+- **Eine Looseness gefunden + gehärtet (live, 15. Juli):** `my_reach()` war für anon ausführbar (lieferte harmlos `0`). Migration `0004_reach_grant_hardening.sql` **angewendet** (via Management-API) → revoke public/anon, nur authenticated, + expliziter `auth.uid() is null → 0`-Guard. Verifiziert: anon bekommt jetzt `permission denied for function my_reach`. `proacl` enthält kein `anon` mehr.
+- **Bewusst NICHT geändert:** `follows_update_own` — das Zurücksetzen von `expires_at` ist der legitime `renew()`-Pfad; eine Policy dagegen würde Erneuern brechen und ist keine Privatsphäre-Frage.
+- ✅ **Zwei-User-Beweis erbracht (residue-frei, in-DB via simulierte JWT-Claims, alles zurückgerollt):** A hat 1 aktiven Follower → Angreifer B zählt via `followee_id=A` **0**, B's `my_reach`=B's eigene (0), A's `my_reach`=**1**, A's direkte Followerliste **0**. B bekommt A's Zahl über keinen Pfad. Reproduzierbar: `scripts/security-test-follows.mjs` (Layer 1 anon) + In-DB-Simulation.
+
+---
+
 ## Backend-Bausteine (Phase 0)
 
 1. ✅ **Backend-Stack entschieden: Supabase** (Auth + Postgres + Storage + pg_cron).
@@ -114,9 +146,9 @@ Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
 4. ✅ **`@supabase/supabase-js` installiert** + Client: `src/lib/supabase/client.ts` (SSR-sicher).
 5. ✅ **Supabase eingerichtet**: Migration eingespielt, Bucket `moments`, Auth aktiviert, Redirect-URL `https://corso-app.pages.dev` in Supabase.
 6. ✅ **Auth (Magic-Link):** `src/lib/auth-context.tsx` + `src/components/auth-gate.tsx`, eingehängt in `__root.tsx`.
-7. ✅ **Follow-Verfall (08:00-Reset):** `supabase/migrations/0003_follows_expiry.sql` — `expires_at`-Spalte, Zwei-Reset-Regel, pg_cron (`expire-follows-daily` täglich 07:00 UTC = 09:00 Berlin), `dev_expire_my_follows()` als Test-Tool. Alarm-Button (🔗) im Discovery-Screen für manuelle Simulation.
+7. ✅ **Follow-Verfall (08:00-Reset):** `supabase/migrations/0003_follows_expiry.sql` — `expires_at`-Spalte, Zwei-Reset-Regel, pg_cron (`expire-follows-daily` täglich 07:00 UTC = 09:00 Berlin), `dev_expire_my_follows()` als Test-Tool. Die Dev-Buttons (Alarm = Reset simulieren, Restart = App zurücksetzen) sind aus der Discovery-Topbar **entfernt** — manuelle Simulation läuft über das Admin-Dev-Menü (`dev_menu_*` RPC) bzw. direkt per SQL.
 8. ✅ **Storage-RLS-Policies** für `moments` (Upload/Read/Delete own) → `0002_storage.sql` **live angewendet** — 7. Juli end-to-end mit Wegwerf-User verifiziert (Upload in eigenen Ordner, Read authenticated).
-9. ✅ **Video-Upload** in Bucket `moments` (`src/lib/supabase/upload.ts`): Upload → `posts`-Insert → signierte Read-URL laufen unter RLS durch (7. Juli verifiziert). ⏳ Rest: UI-Flow Kamera→MediaRecorder→Upload noch nicht im echten Browser durchgeklickt.
+9. ✅ **Video-Upload** in Bucket `moments` (`src/lib/supabase/upload.ts`): Upload → `posts`-Insert → signierte Read-URL laufen unter RLS durch. **UI-Flow Kamera→MediaRecorder→Upload am 15. Juli im echten Browser end-to-end verifiziert — aufgenommener Clip erscheint bei anderen Usern in Discovery.**
 10. ✅ **Follow-Loop de-mockt** (7. Juli): `follow-context.tsx` lädt aktive Follows (`expires_at is null`) + Handles + heutige Anstupser aus der DB statt aus localStorage-Seeds; `follow()`/`renew()`/`nudge()` schreiben in die DB (DB-Write zentralisiert, aus `FollowButton` entfernt). Fake-Seeds **und** Fake-Discovery-Fallback (`TILES`) entfernt → Discovery + „Ich folge" zeigen nur echte Daten, sonst ehrlicher Leerzustand. Zwei-User-Follow-Loop (Follow-Write, Graph-Read, Nudge-Write) unter RLS verifiziert. `connections.tsx`: „Moment heute?" hängt jetzt am echten heutigen Video → Anstups-/Leerzustand wieder erreichbar.
 11. ✅ **Deploy-Script automatisiert** (`scripts/deploy.sh`) — ein Befehl, Produktions-Build ohne jsxDEV-Crash, robuste Build-Runner-Erkennung, Sicherheitsnetz. Root-Cause (`NODE_ENV=development`) an der Wurzel behoben.
 
@@ -130,10 +162,28 @@ Ausgelesen per Management API (`GET /v1/projects/{ref}/config/auth`):
 
 ---
 
+## Stadt-Story-Ziehung (Phase 1, 15. Juli) — de-mockt & live
+
+Die 20:00-Stadt-Story ist von 8 Mock-Standbildern auf eine **echte, serverseitige, gewichtete Zufallsziehung** umgestellt. Migration `0005_city_story_draw.sql` (**live angewendet** per Management API).
+
+- **Kandidaten (serverseitig gefiltert):** Posts von heute (`prompt_date = corso_day()`) **mit** `city_story_consent = true`, Autor in der Zielstadt. 🔒 Consent wird in der SQL-Funktion erzwungen, nicht im Client.
+- **Gewicht je Clip:** `w = 1 + ln(1 + aktive_follower)`. Neuling (0 Follower) → `w = 1.0` (reale Grundchance); 50 Follower → `w ≈ 4.9`. Log = abnehmender Grenznutzen, keine Rangliste. Ziehung ohne Zurücklegen (Efraimidis-Spirakis: `random()^(1/w)`, 8 größte gewinnen). 🔒 Follower-Zahl wird **inline** gezählt, verlässt die Funktion nie → kein Leak.
+- **Verifiziert (Monte-Carlo 2000×):** Neuling mit 0 Followern wird an ~36 % der Tage gezogen; „Whale" mit 800 Followern an 95 % — trotz 800× Follower nur ~2,6× die Chance. Echte Pipeline-Ziehung: 2 von 3 Nuller-Neulingen landeten in der Auswahl.
+- **Eingefroren & stadtweit identisch:** `draw_city_story(city, force)` schreibt 8 Slots nach `city_story_slots` (jetzt mit `city`-Spalte). `force=false` ist idempotent (deckt „Cron doppelt gelaufen" ab). Alle Clients lesen dieselben Slots.
+- **Zeit:** pg_cron `city-story-draw-summer` (18:00 UTC) + `city-story-draw-winter` (19:00 UTC); `run_city_story_draw()` prüft selbst `= 20 Uhr Berlin` und no-opt sonst → DST-sicher exakt 20:00.
+- **Frontend:** `story.tsx` liest `city_story_slots` für heutigen Corso-Tag + Stadt, signierte Video-URLs, gleiche UX wie Discovery. 🔒 **Keine Follower-/Reaktions-Zahlen sichtbar** — Query selektiert keine Zahlen, nur Handle + Ort. Leerzustand statt Fake, wenn (noch) keine Story.
+- **Dev-Werkzeuge (nur Test):** manueller Trigger `select draw_city_story('Düsseldorf', true);`; Seed `select dev_seed_city_story('{0,0,1,3,8,20,60,150}');`; Aufräumen `select dev_clear_city_story_test();`. Testdaten nach Verifikation wieder entfernt (DB sauber).
+- **In-App-Dev-Menü (`0006_dev_admin_controls.sql` + `src/components/dev-menu.tsx`):** Ribbon-Button (Terminal-Icon, amber) **nur für `dominik@subworx.io`** sichtbar; Drawer mit 5 Aktionen (Story ziehen / Story zurücksetzen / meine Follows verfallen / Fake-Clips seeden / Fake-Daten löschen), jede mit Bestätigungs-Schritt. Aktionen laufen über Admin-gegatete RPC-Wrapper `dev_menu_*` (`is_dev_admin()` prüft die E-Mail serverseitig).
+- **🔒 Security-Fix (wichtig):** Supabase-Default-Grants hatten die Roh-Funktionen aus 0005 (`draw_city_story`, `dev_seed_city_story`, `dev_clear_city_story_test`, `run_city_story_draw`, `expire_follows`) faktisch für **jeden** `authenticated`/`anon` aufrufbar gemacht (mein `revoke from public` griff nicht gegen die expliziten Rollen-Grants). 0006 sperrt `execute` für anon/authenticated zu — nur postgres/service_role (intern/Cron) + die Admin-Wrapper rufen sie noch auf. Verifiziert via `has_function_privilege`.
+- **Zukunftssicher:** Ziehung läuft pro Stadt (`profiles.city`); real nur Düsseldorf aktiv, keine Migration nötig für weitere Städte.
+- ⏳ **Noch nicht live getestet im Browser** (Deploy + echter 20:00-Lauf mit echten einwilligenden Posts steht aus).
+
+---
+
 ## Bekannte offene Entscheidungen, die jetzt relevant sind
 
-- **Auth-Methode:** Magic-Link (E-Mail) ist aktiv. ⚠️ **Zustell-Vorbehalt:** die Login-Mail landet aktuell im Spam/Junk (SendGrid-`sendgrid.net`-Redirect + engl. Default-Vorlage — Details + Fix-Optionen im E-Mail-Abschnitt oben). Für den Freundes-Pilot bis dahin **Admin-Login-Links** manuell verteilen.
-- Stadt-Story-Größe/Frequenz bei kleinem Pilot (PRD #6) → blockt erst Phase 1.
+- **Auth-Methode:** Magic-Link (E-Mail) ist aktiv und **zugestellt** — die Login-Mail landet seit 15. Juli im Posteingang (Spam-Problem behoben, Details im E-Mail-Abschnitt oben). Admin-Login-Links bleiben als Notfall-Option verfügbar, sind aber nicht mehr nötig.
+- ~~Stadt-Story-Größe/Frequenz bei kleinem Pilot (PRD #6)~~ → **ENTSCHIEDEN (15. Juli):** Story läuft immer mit so vielen einwilligenden Clips wie da sind (max. 8, kein Mindest-Schwellwert); kein Fake-Auffüllen. Moderation im Freundes-Pilot bewusst ohne Sperr-Modell.
 - Verbindungs-Trigger bei verfallenden Follows (PRD #8) → blockt erst Phase 3.
 
 ---
