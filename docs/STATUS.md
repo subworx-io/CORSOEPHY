@@ -12,6 +12,13 @@
 **Phase:** **Phase 0 — Backend-Fundament** (laufend, siehe `docs/ROADMAP.md`).
 **Insgesamt:** Supabase-Backend steht, Auth + Follow-Logik + täglicher Reset live. **Cloudflare-Deployment funktioniert vollständig** — der komplette Flow (Login → Magic-Link → Handle → alle 5 Screens) läuft live auf `https://corso-app.pages.dev`, extern testbar.
 
+**Letzte UI-Politur (deployed):**
+- **Aufnahme-Echo behoben** — beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme (keine Rückkopplung mehr).
+- **Entfolgen** in „Ich folge" — Tippen auf „folgst du heute" beendet den Follow, die Person taucht wieder in Discovery auf.
+- **Dev-Buttons aus der Discovery-Topbar entfernt** (Reset simulieren / App zurücksetzen) — Simulation nur noch über das Admin-Dev-Menü.
+
+> ⚠️ **Großer unkommittierter Feature-Batch im Working Tree** (parallel entstanden, noch nicht committet): Prompt-aus-DB (`get_today_prompt`, `src/lib/prompts/`, `daily-prompt-splash.tsx`), Admin-Dev-Menü (`dev-menu.tsx`), `corso-day.ts`, Story-Änderungen, Migrationen `0006`–`0008` + `supabase/seed/`. Die DB-Migrationen sind **live angewendet**, der Frontend-Teil ist aber **noch nicht deployed/committet**. Vor dem nächsten Deploy: `SUPABASE_SERVICE_ROLE_KEY` als Cloudflare-Worker-Secret prüfen (Prompt-Server-Action braucht ihn).
+
 ### ✅ Deployment-Problem GELÖST (2. Juli)
 - **Wurzel-Ursache gefunden:** `.env` setzt `NODE_ENV=development`. Beim `vite build` ließ das den JSX-Transform (oxc/plugin-react in Vite 8) die **Dev-Runtime** nutzen → überall `jsxDEV(...)`-Aufrufe, während React als Produktion gebaut wird und `jsxDEV` auf `void 0` setzt. Ergebnis beim Rendern einer Route: `TypeError: (void 0) is not a function` → Fehler-Screen.
 - Die früheren Splash-/jsxDEV-Patches waren Flickwerk und deckten nur das Haupt-Bundle ab (deshalb kam man bis zum Login, aber jede echte Route crashte).
@@ -24,7 +31,7 @@
 |---|---|---|
 | `index.tsx` | Discovery (Entdeckungs-Feed, vertikaler Swipe) | Echte Posts aus der DB; Follow schreibt in die DB; **kein Mock-Fallback mehr** (ehrlicher Leerzustand). **Ziel = langer Scroll-Feed** (Entscheidung 15. Juli, siehe Abschnitt unten): Infinite Scroll, heute zuerst + ältere als Nachschub (interim), Endzustand nur heute. **Noch offen:** aktuell hartes `limit 20` ohne Pagination/Tages-Ordering. |
 | `story.tsx` | Stadt-Story (20:00-Ritual) | **De-mockt (15. Juli):** liest die stadtweit eingefrorene Auswahl aus `city_story_slots`; serverseitige gewichtete Zufallsziehung um 20:00 via pg_cron. Kein Mock mehr. |
-| `record.tsx` | Aufnahme (echte Live-Kamera) | Kamera live; „Verwenden"-Upload **funktional**; **UI-Flow im echten Browser end-to-end verifiziert (15. Juli): aufnehmen → hochladen → erscheint bei anderen in Discovery**. **Echo-Fix:** beim Aufnahme-Stopp wird der Live-Stream beendet (Mic zu, `srcObject` frei) → die Vorschau spielt die echte Aufnahme statt weiter das Live-Bild mit Rückkopplung. |
+| `record.tsx` | Aufnahme (echte Live-Kamera) | Kamera live; „Verwenden"-Upload **funktional**; **UI-Flow im echten Browser end-to-end verifiziert (15. Juli): aufnehmen → hochladen → erscheint bei anderen in Discovery**. **Echo-Fix:** beim Aufnahme-Stopp wird der Live-Stream beendet (Mic zu, `srcObject` frei) → die Vorschau spielt die echte Aufnahme statt weiter das Live-Bild mit Rückkopplung. **Prompt aus der DB (15. Juli):** nicht mehr hartcodiert — Tages-Prompt kommt aus `get_today_prompt()`, subtiles Overlay oben im Kamerabild + große Überschrift vor dem Start. |
 | `connections.tsx` | „Ich folge" / verdienter Chat | „Ich folge" aus **echtem Follow-Graph**; Anstupsen + Follow-Erneuern schreiben in die DB; **Entfolgen** per Tippen auf „folgst du heute" (`unfollow()` markiert `expires_at = now()`) → Person taucht wieder in Discovery auf; verdienter Chat = Phase 3 |
 | `feedback.tsx` | Rücklauf (private Reichweite) | `my_reach()` echt; Pool-Zuschauer ausgeblendet (Phase 1) |
 
@@ -123,6 +130,18 @@ Der Spam-Placement-Blocker ist behoben — Login-Mails kommen im Posteingang an.
 - **Bestehende Regeln bleiben:** eigene Posts via `author_id ≠ auth.uid()` aus; gefolgte Personen verlassen den Feed.
 
 **Aktueller Code-Stand (`src/routes/index.tsx`):** hartes `limit 20, order by created_at desc`, KEIN `prompt_date`-Filter, KEINE Pagination. **Noch nicht gebaut:** Infinite Scroll + „heute zuerst"-Ordering. Der Endzustand-Filter (`= heute`) kommt bewusst erst später. Nicht ungefragt auf „nur heute" eingrenzen.
+
+---
+
+## Täglicher Prompt aus der DB (15. Juli)
+
+Der Tages-Prompt (PRD §4.2) kommt jetzt aus der DB statt hartcodiert.
+
+- **Migration `0008_prompts_active_date.sql` (live angewendet):** bestehende `prompts`-Tabelle per ALTER umgebaut (`prompt_date` → `active_date`, nullable). RLS unverändert korrekt (read-only für authenticated, Schreiben nur service_role).
+- **`get_today_prompt()`** (SECURITY DEFINER, atomar mit Advisory-Lock): gibt den Prompt für `corso_day()` zurück; ist noch keiner gesetzt, zieht sie zufällig einen Kandidaten (`active_date IS NULL` oder älter als 90 Tage), setzt dessen `active_date` auf heute. Nur `service_role` darf ausführen (anon/authenticated explizit entzogen).
+- **Seed:** 50 emotionale Prompts (`supabase/seed/prompts.sql`, idempotent) — live eingespielt, 0 datiert.
+- **Frontend:** Server-Action `getTodayPrompt` (`src/lib/prompts/`, nutzt `supabaseAdmin` server-only — 0 Leaks im Client-Bundle verifiziert), geteilter Query-Hook `useTodayPrompt` (ein Call für Splash + Kamera). `DailyPromptSplash` (Vollbild, 3 s auto-aus, localStorage `corso_last_prompt_seen` = Corso-Tag). Kamera-Overlay in `record.tsx` aus demselben Cache.
+- **⚠️ Betrieb:** Die Server-Action braucht `SUPABASE_SERVICE_ROLE_KEY` im Server-Env. In Produktion (Cloudflare) muss der als Worker-Secret gesetzt sein — sonst liefert der Prompt-Call einen Fehler. Bislang gab es keine Server-Function → Secret evtl. noch nicht gesetzt (prüfen vor Deploy).
 
 ---
 
