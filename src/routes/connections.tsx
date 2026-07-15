@@ -65,7 +65,7 @@ function PersonSlide({
   videoUrl?: string;
   isActive: boolean;
 }) {
-  const { renew, nudge } = useFollow();
+  const { renew, unfollow, nudge } = useFollow();
   const fill = followFill(person.followedAt, now);
   const renewable = canRenew(person.followedAt, now);
   const [muted, setMuted] = useState(true);
@@ -182,10 +182,16 @@ function PersonSlide({
                   follow erneuern
                 </button>
               ) : (
-                <div className={`${PILL} ${PILL_SOLID}`}>
-                  <GlassHeart fill={fill} className="text-[16px]" />
-                  folgst du heute
-                </div>
+                // Tippen beendet den Follow → Person verlässt „Ich folge" und
+                // taucht wieder in Discovery auf (PRD 4.4).
+                <button onClick={() => unfollow(person.handle)} className={`${PILL} ${PILL_SOLID} group`}>
+                  <GlassHeart fill={fill} className="text-[16px] group-active:hidden" />
+                  <span className="material-symbols-outlined text-[16px] leading-none hidden group-active:inline">
+                    heart_broken
+                  </span>
+                  <span className="group-active:hidden">folgst du heute</span>
+                  <span className="hidden group-active:inline">entfolgen</span>
+                </button>
               )}
             </div>
           </div>

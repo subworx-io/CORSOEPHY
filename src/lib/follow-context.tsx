@@ -19,6 +19,8 @@ interface FollowContextType {
   followed: Map<string, FollowedPerson>;
   isFollowing: (handle: string) => boolean;
   follow: (person: { handle: string; src?: string | null }) => void;
+  // Follow sofort beenden → Person fällt aus „Ich folge" und taucht wieder in Discovery auf.
+  unfollow: (handle: string) => void;
   renew: (handle: string) => void;
   nudge: (handle: string) => void;
   // Dev/Test: den lokalen Stand aus der DB neu laden (verwirft optimistische Änderungen).
@@ -189,6 +191,34 @@ export function FollowProvider({ children }: { children: ReactNode }) {
     [user, load],
   );
 
+  // Entfolgen: optimistisch aus „Ich folge" entfernen, dann in der DB als abgelaufen
+  // markieren (expires_at = now(), Verfall markieren statt löschen — wie der Cron).
+  // Danach erscheint die Person wieder in Discovery (dort reaktiv über `followed`).
+  const unfollow = useCallback(
+    (handle: string) => {
+      let removed: FollowedPerson | undefined;
+      setFollowed((prev) => {
+        if (!prev.has(handle)) return prev;
+        removed = prev.get(handle);
+        const next = new Map(prev);
+        next.delete(handle);
+        return next;
+      });
+      void (async () => {
+        if (!user) return;
+        const followeeId = removed?.id ?? (await profileIdByHandle(handle));
+        if (!followeeId) return;
+        await supabase
+          .from("follows")
+          .update({ expires_at: new Date().toISOString() })
+          .eq("follower_id", user.id)
+          .eq("followee_id", followeeId)
+          .is("expires_at", null);
+      })();
+    },
+    [user],
+  );
+
   // Follow erneuern → Herz füllt wieder auf (followedAt zurücksetzen) + DB-Sync.
   const renew = useCallback(
     (handle: string) => {
@@ -245,7 +275,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   }, [load]);
 
   return (
-    <FollowContext.Provider value={{ followed, isFollowing, follow, renew, nudge, reset }}>
+    <FollowContext.Provider value={{ followed, isFollowing, follow, unfollow, renew, nudge, reset }}>
       {children}
     </FollowContext.Provider>
   );
