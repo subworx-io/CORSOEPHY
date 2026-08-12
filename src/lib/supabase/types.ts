@@ -10,10 +10,24 @@ export interface Profile {
   created_at: string;
 }
 
+// Hebel-Kategorien der Prompt-Rotation (0011_prompts_categories.sql), gewichtet ~40/40/20.
+export type PromptCategory = "zeig" | "augenzwinkern" | "funken";
+
 export interface Prompt {
   id: string;
-  active_date: string | null; // Corso-Tag, an dem der Prompt „dran" war; NULL = noch nie benutzt (Kandidat)
+  active_date: string | null; // seit 0013 nur noch LRU-Marker („zuletzt gelaufen"), NICHT der Tages-Schlüssel
   text: string;
+  category: PromptCategory | null; // NULL = Alt-Prompt, wird nie gezogen
+  active: boolean; // aus der Rotation genommen ohne Löschen (Audit bleibt heil)
+  created_at: string;
+}
+
+// Kanonische Historie: welcher Prompt lief an welchem Corso-Tag (genau eine Zeile pro Tag).
+// Die einzige verlässliche Quelle, um einem Post seinen Prompt zuzuordnen.
+export interface DailyPrompt {
+  corso_day: string;
+  prompt_id: string;
+  category: PromptCategory | null;
   created_at: string;
 }
 

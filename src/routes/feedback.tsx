@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { corsoDay } from "@/lib/corso-day";
 import type { MyFeedback } from "@/lib/supabase/types";
 
 export const Route = createFileRoute("/feedback")({
@@ -23,6 +24,28 @@ interface FeedbackData {
   videoUrl: string | null;
   cityStoryConsent: boolean;
   postedAt: string | null;
+  // Der Prompt, zu dem dieser Moment entstanden ist. null, wenn für den Tag
+  // keine Historie existiert (Posts von vor der daily_prompt-Einführung) —
+  // dann lieber nichts zeigen als den falschen Prompt.
+  promptText: string | null;
+  promptDate: string | null;
+}
+
+// Label über dem Prompt. Der Rücklauf zeigt den NEUESTEN eigenen Moment — der ist
+// meist von heute, kann aber älter sein, wenn man heute noch nicht gepostet hat.
+function promptDayLabel(promptDate: string): string {
+  const today = corsoDay();
+  if (promptDate === today) return "Heute";
+
+  const d = new Date(`${today}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  if (promptDate === d.toISOString().slice(0, 10)) return "Gestern";
+
+  return new Date(`${promptDate}T12:00:00Z`).toLocaleDateString("de-DE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
 }
 
 function FeedbackPage() {
@@ -46,7 +69,7 @@ function FeedbackPage() {
       // Dein aktueller Moment als Hintergrund (neuester eigener Post).
       const { data: post } = await supabase
         .from("posts")
-        .select("media_path, city_story_consent, created_at")
+        .select("media_path, city_story_consent, created_at, prompt_date")
         .eq("author_id", user.id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -60,11 +83,30 @@ function FeedbackPage() {
         videoUrl = urlData?.signedUrl ?? null;
       }
 
+      // Welcher Prompt lief an dem Corso-Tag dieses Moments? daily_prompt ist die
+      // kanonische Historie (eine Zeile pro Tag, siehe 0011_prompts_categories.sql).
+      // Bewusst KEIN Rückfall auf prompts.active_date — das ist seit 0013 nur noch
+      // ein LRU-Marker und würde hier den falschen Prompt anzeigen.
+      let promptText: string | null = null;
+      if (post?.prompt_date) {
+        const { data: dp } = await supabase
+          .from("daily_prompt")
+          .select("prompts (text)")
+          .eq("corso_day", post.prompt_date)
+          .maybeSingle();
+        const joined = (dp as { prompts?: { text?: string } | { text?: string }[] } | null)
+          ?.prompts;
+        const row = Array.isArray(joined) ? joined[0] : joined;
+        promptText = row?.text ?? null;
+      }
+
       return {
         feedback,
         videoUrl,
         cityStoryConsent: post?.city_story_consent ?? false,
         postedAt: post?.created_at ?? null,
+        promptText,
+        promptDate: post?.prompt_date ?? null,
       };
     },
     enabled: !!user,
@@ -157,12 +199,24 @@ function FeedbackPage() {
         paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
       }}
     >
-      {/* Kopf */}
-      <div className="px-5 mb-4 flex items-baseline justify-between">
-        <span className="text-[11px] uppercase tracking-[0.4em] text-white/40 font-medium">
-          Rücklauf
-        </span>
-        {postedAt && <span className="text-xs text-white/30">{postedAt} Uhr</span>}
+      {/* Kopf — Rücklauf + der Prompt, zu dem dieser Moment entstanden ist */}
+      <div className="px-5 mb-4">
+        <div className="flex items-baseline justify-between">
+          <span className="text-[11px] uppercase tracking-[0.4em] text-white/40 font-medium">
+            Rücklauf
+          </span>
+          {postedAt && <span className="text-xs text-white/30">{postedAt} Uhr</span>}
+        </div>
+        {data.promptText && data.promptDate && (
+          <div className="mt-3">
+            <div className="font-serif text-[13px] italic text-white/45">
+              {promptDayLabel(data.promptDate)}
+            </div>
+            <h1 className="mt-0.5 font-serif text-[22px] font-medium leading-[1.2] tracking-[-0.01em] text-white/90">
+              {data.promptText}
+            </h1>
+          </div>
+        )}
       </div>
 
       {/* Moment als Hintergrund, Zahlen als ruhiges Overlay unten */}
