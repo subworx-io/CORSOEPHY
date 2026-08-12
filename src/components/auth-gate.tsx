@@ -45,9 +45,26 @@ function Screen({ children }: { children: ReactNode }) {
 }
 
 function Splash() {
+  // Letzte Rückfalllinie: Der Splash darf nie eine Sackgasse sein. Dauert er
+  // ungewöhnlich lange, bekommt der Nutzer einen sichtbaren Ausweg statt eines
+  // stummen schwarzen Screens.
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setStuck(true), 10_000);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
-    <div className="flex h-dvh items-center justify-center bg-neutral-950">
+    <div className="flex h-dvh flex-col items-center justify-center gap-6 bg-neutral-950">
       <span className="text-2xl font-semibold tracking-tight text-white/90">Corso</span>
+      {stuck && (
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded-full border border-white/15 px-4 py-2 text-xs text-white/60 transition-colors hover:text-white/90"
+        >
+          Neu laden
+        </button>
+      )}
     </div>
   );
 }

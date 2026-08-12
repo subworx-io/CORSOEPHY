@@ -30,6 +30,27 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Notbremse für die initiale Session-Prüfung. Hängt sie (Netz weg, Token-Refresh
+// blockiert, Auth-Lock von einem anderen Tab gehalten), soll der Splash nicht
+// ewig stehen bleiben — nach dieser Zeit geht es ohne Session weiter (Login).
+const SESSION_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("auth: session check timed out")), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function fetchProfile(userId: string): Promise<Profile | null> {
   const { data } = await supabase
     .from("profiles")
@@ -46,25 +67,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // neutralen Splash → keine Hydration-Mismatch. Die echte Session wird erst
   // nach dem Mount aus dem Storage / der URL geladen.
   const [loading, setLoading] = useState(true);
+  // true, während für eine frische Session das Profil noch geholt wird. Verhindert,
+  // dass der Handle-Screen kurz aufblitzt, bevor das Profil da ist.
+  const [profilePending, setProfilePending] = useState(false);
 
   useEffect(() => {
     let active = true;
+    // Für welchen User zuletzt ein Profil angefordert wurde — so überschreibt eine
+    // langsame Antwort nicht den inzwischen gewechselten User.
+    let pendingUserId: string | null = null;
+
+    async function syncProfile(userId: string | null) {
+      pendingUserId = userId;
+      if (!userId) {
+        setProfile(null);
+        return;
+      }
+      setProfilePending(true);
+      try {
+        const next = await fetchProfile(userId);
+        if (!active || pendingUserId !== userId) return;
+        setProfile(next);
+      } finally {
+        if (active && pendingUserId === userId) setProfilePending(false);
+      }
+    }
 
     // Initiale Session (übernimmt auch den Magic-Link-Hash aus der URL).
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!active) return;
-      setSession(data.session);
-      if (data.session?.user) {
-        setProfile(await fetchProfile(data.session.user.id));
+    // Der Splash hängt an diesem einen Aufruf — er MUSS unter allen Umständen
+    // enden, sonst kommt man nur per Reload in die App.
+    void (async () => {
+      try {
+        const { data } = await withTimeout(supabase.auth.getSession(), SESSION_TIMEOUT_MS);
+        if (!active) return;
+        setSession(data.session);
+        await syncProfile(data.session?.user?.id ?? null);
+      } catch (err) {
+        // Bewusst weich: lieber der Login-Screen als ein Splash ohne Ausweg.
+        console.error("[auth] Initiale Session-Prüfung fehlgeschlagen:", err);
+      } finally {
+        if (active) setLoading(false);
       }
-      setLoading(false);
-    });
+    })();
 
     // Auf Login/Logout reagieren.
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, next) => {
+    // ⚠️ Dieser Callback MUSS synchron bleiben. supabase-js ruft ihn auf, während
+    // der interne Auth-Lock gehalten wird; ein `await` auf einen weiteren
+    // Supabase-Aufruf (hier: Profil laden) verklemmt sich mit genau diesem Lock.
+    // Das ließ die App beim ersten Aufruf im Splash hängen. Profil deshalb erst
+    // im nächsten Tick laden — außerhalb des Locks.
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
       if (!active) return;
       setSession(next);
-      setProfile(next?.user ? await fetchProfile(next.user.id) : null);
+      setTimeout(() => {
+        if (active) void syncProfile(next?.user?.id ?? null);
+      }, 0);
     });
 
     return () => {
@@ -130,7 +187,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         user: session?.user ?? null,
         profile,
-        loading,
+        // Splash auch, solange für eine Session das Profil noch unterwegs ist —
+        // sonst blitzt der Handle-Screen bei bestehendem Profil kurz auf.
+        // Beim Hintergrund-Refresh (Profil schon da) bleibt es aus.
+        loading: loading || (!!session && !profile && profilePending),
         signInWithMagicLink,
         createProfile,
         updateProfile,
