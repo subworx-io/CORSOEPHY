@@ -151,16 +151,28 @@ function Index() {
     }, EXIT_MS);
   };
 
-  const { currentIndex, slideRef } = useSnapScroll({ count: slides.length, axis: "y" });
+  const { currentIndex, slideRef, containerRef } = useSnapScroll({
+    count: slides.length,
+    axis: "y",
+  });
 
   // Ansicht verbuchen, sobald ein fremder Clip aktiv wird (Datenquelle „Zuschauer").
+  // Kurze Verweil-Schwelle: der aktive Index wechselt jetzt schon beim Überqueren
+  // der Hälfte (damit das Video sofort spielt). Ohne die Schwelle würde jeder Clip,
+  // an dem man nur vorbeizieht, als Zuschauer zählen — die Zahl ist Kill-Metrik.
   useEffect(() => {
     const active = slides[currentIndex];
-    if (active?.kind === "tile") recordView(active.postId);
+    if (active?.kind !== "tile") return;
+    const t = setTimeout(() => recordView(active.postId), 500);
+    return () => clearTimeout(t);
   }, [currentIndex, slides]);
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
+    <div
+      ref={containerRef}
+      className="relative h-dvh w-full overflow-hidden bg-neutral-950"
+      style={{ touchAction: "none" }}
+    >
       {/* Slides */}
       {slides.map((slide, i) => {
         const offset = i - currentIndex;

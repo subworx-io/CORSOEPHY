@@ -68,6 +68,10 @@ export function DailyPromptSplash() {
       style={{
         opacity: phase === "fading" ? 0 : 1,
         transition: `opacity ${FADE_MS}ms ease`,
+        // Der Splash liegt über dem Feed. Ohne das löst ein Wisch darauf noch das
+        // native Seiten-Scrollen aus (Browser-Leiste fährt ein) — der Feed darunter
+        // ist davon nichts bekannt und wirkt danach verrutscht.
+        touchAction: "none",
       }}
       aria-hidden
     >

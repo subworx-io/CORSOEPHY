@@ -31,11 +31,30 @@ export function useSnapScroll({
   const rafRef = useRef(0);
   // Stabile Callback-Refs pro Slide-Index — verhindert React-Re-Registration bei Re-Render
   const callbacksRef = useRef<((el: HTMLElement | null) => void)[]>([]);
+  // Der Feed-Container. Die Gesten-Listener hängen aus Robustheitsgründen weiter am
+  // window (der Container kann später mounten), werden aber darauf eingegrenzt, ob
+  // die Geste IM Container beginnt. Ohne das steuert jeder Wisch irgendwo auf der
+  // Seite den Feed — auch einer auf einem Overlay darüber (Tages-Prompt-Splash).
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const getDim = useCallback(
-    () => (axis === "y" ? window.innerHeight : window.innerWidth),
-    [axis]
-  );
+  // Geste zählt nur, wenn sie im Feed beginnt. Kein Container gesetzt → wie bisher.
+  const isInsideContainer = useCallback((target: EventTarget | null) => {
+    const el = containerRef.current;
+    if (!el) return true;
+    return target instanceof Node && el.contains(target);
+  }, []);
+
+  // Maß aus dem Container, nicht aus window.innerHeight: der Container ist `h-dvh`
+  // und folgt damit der ein-/ausfahrenden Browser-Leiste auf dem Handy. innerHeight
+  // driftet dagegen auseinander → Slides säßen um die Leistenhöhe versetzt.
+  const getDim = useCallback(() => {
+    const el = containerRef.current;
+    if (el) {
+      const measured = axis === "y" ? el.clientHeight : el.clientWidth;
+      if (measured > 0) return measured;
+    }
+    return axis === "y" ? window.innerHeight : window.innerWidth;
+  }, [axis]);
 
   const applyPos = useCallback(
     (pos: number) => {
@@ -52,16 +71,35 @@ export function useSnapScroll({
     [axis, getDim]
   );
 
+  // Aktiven Index übernehmen. Bewusst SOFORT und nicht erst am Ende der
+  // Snap-Animation: `currentIndex` steuert, welches Video spielt (isActive).
+  // Wurde er erst am Animationsende gesetzt, lief während des ganzen Wischens
+  // noch der alte Moment weiter, während der neue eingefroren stehenblieb.
+  const commitIndex = useCallback((idx: number) => {
+    if (indexRef.current === idx) return;
+    indexRef.current = idx;
+    fireHaptic();
+    setCurrentIndex(idx);
+  }, []);
+
+  const clampIndex = useCallback(
+    (idx: number) => Math.max(0, Math.min(count - 1, idx)),
+    [count]
+  );
+
   // Animation zum nächsten Einrastpunkt mit easeOutCubic
   const snapTo = useCallback(
     (rawIdx: number) => {
-      const targetIdx = Math.max(0, Math.min(count - 1, rawIdx));
+      const targetIdx = clampIndex(rawIdx);
       const dim = getDim();
       const startPos = posRef.current;
       const targetPos = targetIdx * dim;
       const startTime = performance.now();
 
       cancelAnimationFrame(rafRef.current);
+      // Ziel sofort aktiv schalten — das Video des Ziel-Slides startet mit der
+      // Bewegung, nicht erst 380 ms später.
+      commitIndex(targetIdx);
 
       const animate = (now: number) => {
         const t = Math.min((now - startTime) / SNAP_MS, 1);
@@ -73,17 +111,12 @@ export function useSnapScroll({
         } else {
           posRef.current = targetPos;
           applyPos(targetPos);
-          if (indexRef.current !== targetIdx) {
-            fireHaptic();
-          }
-          indexRef.current = targetIdx;
-          setCurrentIndex(targetIdx);
         }
       };
 
       rafRef.current = requestAnimationFrame(animate);
     },
-    [count, getDim, applyPos]
+    [clampIndex, getDim, applyPos, commitIndex]
   );
 
   // Initiale Positionen setzen wenn count sich ändert (z.B. neue Slides in Connections)
@@ -92,14 +125,25 @@ export function useSnapScroll({
     applyPos(posRef.current);
   }, [count, getDim, applyPos]);
 
-  // Fenstergröße-Änderung (z.B. Orientierung)
+  // Größenänderung: Orientierung, aber vor allem die ein-/ausfahrende Browser-Leiste
+  // auf dem Handy. Der ResizeObserver am Container erwischt das zuverlässiger als
+  // `resize` am window, weil `h-dvh` sich ändert, ohne dass window feuern muss.
   useEffect(() => {
     const onResize = () => {
       posRef.current = indexRef.current * getDim();
       applyPos(posRef.current);
     };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+
+    const el = containerRef.current;
+    const observer =
+      el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+    observer?.observe(el!);
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer?.disconnect();
+    };
   }, [getDim, applyPos]);
 
   // Touch: Finger folgt direkt, Velocity-Projektion beim Loslassen
@@ -115,6 +159,12 @@ export function useSnapScroll({
       axis === "y" ? e.changedTouches[0].clientY : e.changedTouches[0].clientX;
 
     const onStart = (e: TouchEvent) => {
+      // Nur Gesten, die im Feed beginnen. Ein Wisch auf einem Overlay darüber
+      // (z.B. dem Tages-Prompt-Splash) darf den Feed nicht fernsteuern.
+      if (!isInsideContainer(e.target)) {
+        gestureActive = false;
+        return;
+      }
       cancelAnimationFrame(rafRef.current);
       gestureActive = true;
       startTouchPos = getPos(e);
@@ -135,6 +185,9 @@ export function useSnapScroll({
       // Bild folgt Finger in Echtzeit
       posRef.current = startWorldPos + (startTouchPos - cur);
       applyPos(posRef.current);
+      // Aktiven Slide schon beim Überqueren der Hälfte wechseln — der Moment,
+      // auf den man zieht, spielt dann bereits, statt eingefroren zu warten.
+      commitIndex(clampIndex(Math.round(posRef.current / getDim())));
     };
 
     const onEnd = (e: TouchEvent) => {
@@ -173,13 +226,14 @@ export function useSnapScroll({
       window.removeEventListener("touchend", onEnd);
       window.removeEventListener("touchcancel", onCancel);
     };
-  }, [axis, getDim, applyPos, snapTo]);
+  }, [axis, getDim, applyPos, snapTo, isInsideContainer, commitIndex, clampIndex]);
 
   // Trackpad / Mausrad
   useEffect(() => {
     let snapId: ReturnType<typeof setTimeout> | null = null;
 
     const onWheel = (e: WheelEvent) => {
+      if (!isInsideContainer(e.target)) return;
       e.preventDefault();
       cancelAnimationFrame(rafRef.current);
       const delta = axis === "x" ? e.deltaX || e.deltaY : e.deltaY;
@@ -198,7 +252,7 @@ export function useSnapScroll({
       window.removeEventListener("wheel", onWheel);
       if (snapId) clearTimeout(snapId);
     };
-  }, [axis, getDim, applyPos, snapTo]);
+  }, [axis, getDim, applyPos, snapTo, isInsideContainer]);
 
   // Maus-Drag horizontal für Stadt-Story auf Desktop
   useEffect(() => {
@@ -213,6 +267,7 @@ export function useSnapScroll({
     };
     const onDown = (e: MouseEvent) => {
       if (Date.now() - lastTouchEnd < 600) return;
+      if (!isInsideContainer(e.target)) return;
       cancelAnimationFrame(rafRef.current);
       startX = e.clientX;
       startWorldPos = posRef.current;
@@ -243,7 +298,7 @@ export function useSnapScroll({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [axis, getDim, applyPos, snapTo]);
+  }, [axis, getDim, applyPos, snapTo, isInsideContainer]);
 
   // Stabile Callback-Ref-Factory — React ruft den Callback nicht erneut auf bei Re-Render
   const slideRef = useCallback(
@@ -265,5 +320,5 @@ export function useSnapScroll({
     [axis, getDim]
   );
 
-  return { currentIndex, slideRef };
+  return { currentIndex, slideRef, containerRef };
 }

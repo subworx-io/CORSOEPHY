@@ -163,12 +163,19 @@ function StoryPage() {
     refetchOnWindowFocus: true,
   });
 
-  const { currentIndex, slideRef } = useSnapScroll({ count: clips.length, axis: "y" });
+  const { currentIndex, slideRef, containerRef } = useSnapScroll({
+    count: clips.length,
+    axis: "y",
+  });
   const { burstHandle, triggerBurst } = useHeartBurst();
 
   // Ansicht verbuchen, sobald ein Story-Clip aktiv wird (Datenquelle „Zuschauer").
+  // Kurze Verweil-Schwelle — siehe Begründung in index.tsx (Zuschauer = Kill-Metrik).
   useEffect(() => {
-    recordView(clips[currentIndex]?.postId);
+    const postId = clips[currentIndex]?.postId;
+    if (!postId) return;
+    const t = setTimeout(() => recordView(postId), 500);
+    return () => clearTimeout(t);
   }, [currentIndex, clips]);
 
   // Noch keine Story (vor 20:00 oder heute kein einwilligender Clip): ehrlicher
@@ -178,7 +185,11 @@ function StoryPage() {
   }
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
+    <div
+      ref={containerRef}
+      className="relative h-dvh w-full overflow-hidden bg-neutral-950"
+      style={{ touchAction: "none" }}
+    >
       {clips.map((c, i) => {
         const offset = i - currentIndex;
         const isActive = offset === 0;

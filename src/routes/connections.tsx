@@ -206,7 +206,10 @@ function ConnectionsPage() {
   const { followed } = useFollow();
   const { user } = useAuth();
   const people = Array.from(followed.values());
-  const { currentIndex, slideRef } = useSnapScroll({ count: people.length, axis: "y" });
+  const { currentIndex, slideRef, containerRef } = useSnapScroll({
+    count: people.length,
+    axis: "y",
+  });
 
   // Live-Ticker: lässt die Herzen über die Zeit sichtbar an Fülle verlieren
   const [now, setNow] = useState(() => Date.now());
@@ -262,9 +265,13 @@ function ConnectionsPage() {
 
   // Ansicht verbuchen, sobald der Moment einer gefolgten Person aktiv wird
   // (Follower-Ansichten zählen ebenfalls als „Zuschauer").
+  // Kurze Verweil-Schwelle — siehe Begründung in index.tsx (Zuschauer = Kill-Metrik).
   const activeHandle = people[currentIndex]?.handle;
   useEffect(() => {
-    if (activeHandle) recordView(videosByHandle[activeHandle]?.postId);
+    const postId = activeHandle ? videosByHandle[activeHandle]?.postId : undefined;
+    if (!postId) return;
+    const t = setTimeout(() => recordView(postId), 500);
+    return () => clearTimeout(t);
   }, [activeHandle, videosByHandle]);
 
   if (people.length === 0) {
@@ -282,7 +289,11 @@ function ConnectionsPage() {
   }
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950" style={{ touchAction: "none" }}>
+    <div
+      ref={containerRef}
+      className="relative h-dvh w-full overflow-hidden bg-neutral-950"
+      style={{ touchAction: "none" }}
+    >
       {people.map((person, i) => {
         const offset = i - currentIndex;
         const isActive = offset === 0;

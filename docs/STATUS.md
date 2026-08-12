@@ -9,6 +9,34 @@
 
 ---
 
+## 12. August — Scroll-Verhalten in Discovery/Story/Ich-folge repariert
+
+**Symptom:** Beim Hochwischen wurde kurz noch der bisherige Moment als aktiver gezeigt, bevor er verschwand und der neue kam; der neue wirkte dabei „eingefroren". Zusätzlich beim allerersten Aufruf am Tag ein verrutschtes/klemmendes Scrollen, das sich nach einem Reload gab.
+
+**Ursache 1 — aktiver Index lief der Geste hinterher (`use-snap-scroll.ts`).** `setCurrentIndex()` wurde erst im `else`-Zweig am **Ende** der 380-ms-Snap-Animation gesetzt. `currentIndex` steuert aber `isActive` → welches Video spielt. Während des ganzen Wischens plus Snap lief also noch der alte Moment, während der Ziel-Moment pausiert (= eingefroren) danebenstand. **Fix:** neuer `commitIndex()`, der sofort greift — beim Überqueren der Hälfte während des Wischens (`onMove`) und beim Start von `snapTo`, nicht erst am Ende.
+
+**Ursache 2 — Gesten-Listener hingen global am `window`.** `<DailyPromptSplash/>` ist in `__root.tsx` ein **Geschwister** des Feed-Containers und liegt als `fixed inset-0 z-[100]` darüber (3,5 s, **einmal pro Corso-Tag**). Jeder Wisch darauf steuerte den Feed darunter fern; der Splash selbst blieb stehen. Erklärt exakt „nur beim ersten Aufruf" und „weg nach Reload" — der Splash schreibt seinen localStorage-Merker sofort beim Anzeigen, ein Reload zeigt ihn also nie wieder. **Fix:** neuer `containerRef` aus dem Hook, in allen drei Screens am Feed-Container; Touch/Wheel/Maus-Gesten werden ignoriert, wenn sie außerhalb beginnen. Splash zusätzlich auf `touch-action: none` (verhinderte sonst natives Seiten-Scrollen).
+
+**Ursache 3 (mit erledigt) — Maß aus `window.innerHeight`,** während das Layout `h-dvh` nutzt. Auf dem Handy driften die zwei beim Ein-/Ausfahren der Browser-Leiste auseinander → Slides sitzen um die Leistenhöhe versetzt. **Fix:** Maß aus `containerRef.clientHeight`, plus `ResizeObserver` am Container (erwischt `dvh`-Änderungen zuverlässiger als `resize` am window).
+
+**Nebenwirkung bewusst abgefangen:** Der aktive Index wechselt jetzt früher, also feuerte `recordView` auch für Clips, an denen man nur vorbeizieht — „Zuschauer" ist Kill-Metrik. Deshalb in allen drei Screens eine **500-ms-Verweil-Schwelle** vor dem Verbuchen (`clearTimeout` im Cleanup). Vorbeiziehen zählt damit nicht mehr, Landen weiterhin schon.
+
+⚠️ **Nicht auf einem echten Handy verifiziert** (kein Browser-Tool in der Session) — Typecheck + Build grün, Ursachen 1–3 sind im Code belegt. Offene Restspur, falls es weiter ruckelt: Discovery lädt bis zu 20 `<video>`-Elemente gleichzeitig mit Standard-`preload` — auf Mobilfunk potenziell zäh.
+
+---
+
+## 12. August — Splash-Hänger behoben + Prompt im Rücklauf
+
+**1. Bug: App hing beim ersten Aufruf im „Corso"-Splash** (nur Reload half, auf MacBook wie Mobile). Ursache in `src/lib/auth-context.tsx`, zwei Defekte:
+- `supabase.auth.getSession()` hatte **kein `.catch()` und keinen Timeout** — die einzige Stelle, die `loading` aufhebt. Jede Rejection (Netz, Token-Refresh, Storage) = Splash für immer.
+- Der `onAuthStateChange`-Callback war **`async` und lud darin das Profil** (wieder ein Supabase-Aufruf). supabase-js ruft den Callback auf, **während der interne Auth-Lock gehalten wird** → Verklemmung mit dem parallelen `getSession()`. Von Supabase ausdrücklich als Anti-Pattern dokumentiert. Erklärt, warum es nur beim *ersten* Aufruf auftrat: da ist der Token meist abgelaufen und muss per Netz erneuert werden — genau der Pfad, der den Lock hält.
+
+**Fix:** Callback synchron, Profil-Laden per `setTimeout(…, 0)` außerhalb des Locks; `try/catch` + 8-s-Timeout um die initiale Session-Prüfung (im Fehlerfall Login statt Sackgasse); neuer `profilePending`-State verhindert Aufblitzen des Handle-Screens; `pendingUserId` als Race-Schutz. `Splash` zeigt nach 10 s einen „Neu laden"-Button als letzte Rückfalllinie. **Deployed & live** (im Bundle verifiziert). ⚠️ Der echte Beweis braucht einen Aufruf **>1 h nach dem letzten Login** (Token-Lebensdauer) — bis dahin nicht abschließend bestätigt.
+
+**2. Rücklauf zeigt jetzt den Prompt, zu dem der Moment entstand** (`feedback.tsx`). Auflösung über `posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text` — `daily_prompt` ist die kanonische Historie. **Bewusst KEIN Rückfall auf `prompts.active_date`**: das ist seit `0013` nur ein LRU-Marker und würde den falschen Prompt zeigen. Ohne Historie wird nichts angezeigt statt etwas Falsches. Darstellung im Editorial-Stil des Aufnahme-Screens (System-Serif, Kursiv-Label) im Kopf über dem Video, mit tagesabhängigem Label „Heute" / „Gestern" / Datum (der Rücklauf zeigt den *neuesten* Moment, der nicht zwingend von heute ist). Gegen die Live-DB verifiziert: PostgREST-Embed funktioniert, **alle** vorhandenen Post-Tage haben Prompt-Historie. Nebenbei die handgepflegten Typen in `supabase/types.ts` nachgezogen (`Prompt.category`/`.active`, neu `DailyPrompt`) — die hingen seit `0011` hinterher.
+
+---
+
 ## Wo wir stehen
 
 **Phase:** **Phase 0 — Backend-Fundament** (laufend, siehe `docs/ROADMAP.md`).
