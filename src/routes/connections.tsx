@@ -11,6 +11,7 @@ import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
+import { MomentMenu } from "@/components/moment-menu";
 import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { MomentPrompt } from "@/components/moment-prompt";
 
@@ -60,12 +61,14 @@ function PersonSlide({
   person,
   now,
   videoUrl,
+  postId,
   prompt,
   isActive,
 }: {
   person: FollowedPerson;
   now: number;
   videoUrl?: string;
+  postId?: string;
   // Prompt des Moments (null, wenn für den Tag keine Historie existiert).
   prompt?: { text: string; date: string } | null;
   isActive: boolean;
@@ -109,6 +112,16 @@ function PersonSlide({
           boxShadow: "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
         }}
       >
+        {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+        {person.id && (
+          <div className="absolute top-4 right-4 z-20">
+            <MomentMenu
+              reportedUserId={person.id}
+              reportedPostId={postId ?? null}
+              handle={person.handle}
+            />
+          </div>
+        )}
         {videoUrl ? (
           <>
             <video
@@ -331,6 +344,7 @@ function ConnectionsPage() {
               person={person}
               now={now}
               videoUrl={videosByHandle[person.handle]?.url}
+              postId={videosByHandle[person.handle]?.postId}
               prompt={videosByHandle[person.handle]?.prompt}
               isActive={isActive}
             />

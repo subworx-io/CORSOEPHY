@@ -9,6 +9,8 @@ import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
+import { useCityMomentCounts } from "@/lib/city/use-city-moment-counts";
+import { MomentMenu } from "@/components/moment-menu";
 import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { MomentPrompt } from "@/components/moment-prompt";
 
@@ -30,6 +32,7 @@ type Tile = {
   alt?: string;
   videoUrl?: string;
   postId?: string;
+  authorId?: string;
   // Der Prompt, zu dem dieser Moment entstanden ist. Der Feed reicht über die
   // Zyklus-Grenze (21:00) hinaus — ein Moment lebt 24h ab Post, die Kacheln
   // gehören also zu zwei Prompts. null = keine Historie für den Tag → nichts zeigen.
@@ -105,6 +108,9 @@ function Index() {
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { user } = useAuth();
 
+  // Dezenter Gemeinschafts-Zähler: wachsendes Stimmungsbild der Stadt (Momente heute/gestern).
+  const { data: cityCounts } = useCityMomentCounts();
+
   // Echte Posts aus der DB laden: nur LEBENDE Momente (jeder Moment lebt 24h ab
   // seinem Post), neueste zuerst, seitenweise nachgeladen. Kein hartes Limit mehr —
   // der Feed scrollt endlos durch den lebenden Topf.
@@ -121,7 +127,7 @@ function Index() {
       const from = (pageParam as number) * PAGE_SIZE;
       const { data, error } = await supabase
         .from("posts")
-        .select("id, media_path, prompt_date, profiles(handle)")
+        .select("id, author_id, media_path, prompt_date, profiles(handle)")
         .neq("author_id", user.id)
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false })
@@ -139,6 +145,7 @@ function Index() {
             handle: (post.profiles as unknown as { handle: string }).handle,
             videoUrl: urlData.signedUrl,
             postId: post.id,
+            authorId: post.author_id,
             promptDate: post.prompt_date,
             promptText: promptsByDate[post.prompt_date] ?? null,
           };
@@ -267,6 +274,16 @@ function Index() {
                         mixBlendMode: "overlay",
                       }}
                     />
+                    {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+                    {slide.authorId && (
+                      <div className="absolute top-4 right-4 z-20">
+                        <MomentMenu
+                          reportedUserId={slide.authorId}
+                          reportedPostId={slide.postId ?? null}
+                          handle={slide.handle}
+                        />
+                      </div>
+                    )}
                     {/* Zu welchem Prompt ist dieser Moment entstanden? */}
                     {slide.promptText && (
                       <MomentPrompt text={slide.promptText} date={slide.promptDate} />
@@ -339,7 +356,18 @@ function Index() {
 
       {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
       <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
-        <div className="flex justify-end items-center gap-4 px-6 h-14 max-w-[600px] mx-auto">
+        <div className="flex justify-between items-start gap-4 px-6 pt-3 min-h-14 max-w-[600px] mx-auto">
+          {/* Gemeinschafts-Zähler — dezentes Stimmungsbild, fängt keine Swipe-Gesten ab */}
+          {cityCounts ? (
+            <div className="pointer-events-none select-none drop-shadow-md leading-tight">
+              <p className="text-white/80 text-sm font-semibold tracking-tight">
+                {cityCounts.today} {cityCounts.today === 1 ? "Moment" : "Momente"} heute in Düsseldorf
+              </p>
+              <p className="text-white/40 text-xs mt-0.5">gestern: {cityCounts.yesterday}</p>
+            </div>
+          ) : (
+            <span />
+          )}
           <Link
             to="/settings"
             className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md"

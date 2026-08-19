@@ -10,6 +10,7 @@ import { recordView } from "@/lib/record-view";
 import { corsoDay, nextCycleStart } from "@/lib/corso-day";
 import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { MomentPrompt } from "@/components/moment-prompt";
+import { MomentMenu } from "@/components/moment-menu";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
@@ -54,6 +55,7 @@ interface StoryRow {
   handle: string;
   media_path: string;
   post_id: string;
+  author_id: string;
   prompt_date: string | null;
 }
 
@@ -62,6 +64,7 @@ interface StoryClip {
   handle: string;
   videoUrl: string;
   postId: string;
+  authorId: string;
   // Der Prompt, zu dem dieser Moment entstand. In der Story ist das für alle
   // Slots derselbe Tag — trotzdem pro Clip aufgelöst, damit die Anzeige an der
   // Historie hängt und nicht an einer Annahme.
@@ -145,6 +148,7 @@ function StoryPage() {
             handle: row.handle,
             videoUrl: urlData.signedUrl,
             postId: row.post_id,
+            authorId: row.author_id,
             promptDate: row.prompt_date ?? null,
             promptText: row.prompt_date ? (promptsByDate[row.prompt_date] ?? null) : null,
           };
@@ -223,6 +227,14 @@ function StoryPage() {
                   }}
                 />
 
+                {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+                <div className="absolute top-4 right-4 z-20">
+                  <MomentMenu
+                    reportedUserId={c.authorId}
+                    reportedPostId={c.postId}
+                    handle={c.handle}
+                  />
+                </div>
                 {/* Zu welchem Prompt ist dieser Moment entstanden? */}
                 {c.promptText && <MomentPrompt text={c.promptText} date={c.promptDate} />}
 

@@ -90,6 +90,25 @@ export interface PostView {
   created_at: string;
 }
 
+// Melde-Gründe (0016_report_block.sql, reports.reason check). reports selbst wird nie
+// clientseitig gelesen (write-only via report_content()) → kein Interface nötig.
+export type ReportReason = "inappropriate" | "harassment" | "spam" | "other";
+
+// Block-Zeile (0016). Nur der Blocker liest eigene Zeilen (RLS blocks_read_own).
+export interface Block {
+  id: string;
+  blocker_id: string;
+  blocked_id: string;
+  created_at: string;
+}
+
+// Rückgabe von city_moment_counts() — aggregierte Stadt-Zahl (Momente heute/gestern),
+// Kalendertag in Europe/Berlin. Öffentliches Stimmungsbild, keine personenbezogene Zahl.
+export interface CityMomentCounts {
+  today: number;
+  yesterday: number;
+}
+
 // Rückgabe von my_feedback() — die einzige (private) Lese-Oberfläche des Rücklaufs.
 // Deltas sind null, solange es kein Gestern gibt (has_yesterday = false).
 export interface MyFeedback {
