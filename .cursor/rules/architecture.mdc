@@ -22,9 +22,9 @@ Jede Datei in `src/routes/` wird automatisch zur Route:
 | `__root.tsx` | Layout | BottomNav, QueryClientProvider, Error Boundaries |
 | `index.tsx` | `/` | Discovery-Screen — vertikaler Swipe durch Nutzer-Tiles + Countdown |
 | `record.tsx` | `/record` | Aufnahme — Live-Kamera + Tages-Prompt |
-| `story.tsx` | `/story` | Stadt-Story — **vertikaler** Swipe (UX wie Discovery, PRD 4.6 §5), 20:00-Ritual |
+| `story.tsx` | `/story` | Stadt-Story — **vertikaler** Swipe (UX wie Discovery, PRD §4.6), 21:00-Ritual |
 | `story-empty-lab.tsx` | `/story-empty-lab` | Empty-/Loading-States der Story (isoliert, Demo-Daten) |
-| `connections.tsx` | `/connections` | Verbindungen + verdienter Chat ("Korso") |
+| `connections.tsx` | `/connections` | „Ich folge" + verdienter Chat (Chat = Phase 3) |
 | `feedback.tsx` | `/feedback` | Rücklauf — morgendliche Reichweite (privat) |
 | `settings.tsx` | `/settings` | Einstellungen |
 | `impressum.tsx` · `datenschutz.tsx` · `agb.tsx` | `/impressum` … | Rechtstexte |
@@ -76,7 +76,7 @@ Route Component
 ## Navigation
 
 BottomNav in `__root.tsx` mit 5 Tabs:
-Discovery → Story → Aufnahme → Korso (Connections) → Rücklauf (Feedback)
+Discovery → Story → Aufnahme → Ich folge (Connections) → Rücklauf (Feedback)
 
 ## Was noch fehlt (Stand: Pilot-Phase)
 

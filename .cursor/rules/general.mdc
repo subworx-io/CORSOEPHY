@@ -8,7 +8,7 @@ alwaysApply: true
 ## Sprache
 - Alle Antworten, Erklärungen und Kommentare im Chat: **Deutsch**
 - Code (Variablen, Funktionen, Klassen): **Englisch**
-- Commit-Messages: **Englisch**
+- Commit-Messages: **Deutsch**, Conventional Commits (`feat:`, `fix:`, `chore:` …)
 
 ## Code-Stil (via `.prettierrc` erzwungen — bei Zweifel gilt Prettier)
 - Einrückung: 2 Spaces

@@ -2,7 +2,7 @@
 
 **Lokale Stadtbeobachtungs-App mit Dating-Ausgang.**
 
-Jeden Abend geht deine Stadt gemeinsam spazieren: rohe, ungeschnittene Video-Momente echter Menschen aus deiner Umgebung. Um 20:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden. Wer dort gefällt, gewinnt Publikum — aber dieses Publikum verfällt täglich um 08:00 Uhr, wenn man nicht nachliefert.
+Jeden Abend geht deine Stadt gemeinsam spazieren: rohe, ungeschnittene Video-Momente echter Menschen aus deiner Umgebung. Um 21:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden — zeitgleich startet der neue Prompt. Wer dort gefällt, gewinnt Publikum — aber jeder Follow verfällt 24 Stunden nach dem Follow, wenn man nicht nachliefert.
 
 > Dating ist der Ausgang, nicht der Eingang.
 
@@ -49,9 +49,9 @@ Details → `.cursor/rules/stack.mdc`
 | Route | Screen |
 |---|---|
 | `/` | Discovery — vertikaler Swipe durch Stadtmomente |
-| `/story` | Stadt-Story — 20:00 Ritual, vertikaler Swipe (UX wie Discovery) |
+| `/story` | Stadt-Story — 21:00 Ritual, vertikaler Swipe (UX wie Discovery) |
 | `/record` | Aufnahme — Live-Kamera + Tages-Prompt |
-| `/connections` | Korso — Verbindungen + verdienter Chat |
+| `/connections` | „Ich folge" — gefolgte Personen + verdienter Chat (Phase 3) |
 | `/feedback` | Rücklauf — morgendliche Reichweite (privat) |
 
 ## Dokumentation

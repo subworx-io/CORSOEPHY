@@ -55,7 +55,7 @@ alwaysApply: true
 
 ## Verbotene Patterns
 
-- ❌ Kein `<input type="file">` — Korso erlaubt nur Live-Kamera (WebRTC)
+- ❌ Kein `<input type="file">` — Corso erlaubt nur Live-Kamera (WebRTC)
 - ❌ Keine Follower-Zahlen / Publikumsgröße sichtbar für andere Nutzer
 - ❌ Kein globaler Store (Redux, Zustand) ohne Absprache
 - ❌ Keine neuen Libraries ohne Rückfrage (`bun add` immer erst fragen)

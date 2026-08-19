@@ -3,7 +3,7 @@
 ## Was wird hier gebaut
 
 **Corso** ist eine lokale Stadtbeobachtungs-App mit Dating-Ausgang.
-Jeden Abend "geht deine Stadt gemeinsam spazieren": rohe, ungeschnittene Video-Momente echter Menschen aus der Umgebung. Um 20:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden. Publikum verfällt nach 24 Stunden wenn man nicht nachliefert.
+Jeden Abend "geht deine Stadt gemeinsam spazieren": rohe, ungeschnittene Video-Momente echter Menschen aus der Umgebung. Um 21:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden — zeitgleich startet der neue Prompt. Publikum verfällt 24 Stunden nach dem Follow, wenn man nicht nachliefert.
 
 **Pilot:** Düsseldorf, **PWA** (kein Telegram, keine native App). Zwei Schritte: zuerst gratis Freundes-Pilot (20–30 Freunde, misst ob der Loop zieht), danach zahlender Fremden-Pilot (60–100 Mitglieder, €9/Monat, 4–6 Wochen).
 **Eigner:** Maxim.
@@ -22,7 +22,7 @@ Regel: keine `[ENTSCHEIDUNG OFFEN]` stillschweigend treffen, keine 🔒 LEITPLAN
 ## Setup & Befehle
 
 ```bash
-bun install                 # Abhängigkeiten
+bun install                  # Abhängigkeiten
 cp .env.example .env         # .env mit echten Werten befüllen (siehe .env.example)
 bun run dev                  # Dev-Server (http://localhost:3000)
 bun run dev:mobile           # Dev-Server + ngrok für iPhone-/Kamera-Tests (HTTPS)
@@ -31,17 +31,19 @@ bun run preview              # Build lokal vorschauen
 bun run lint                 # ESLint
 bun run format               # Prettier (semi: true, double quotes, printWidth 100)
 node scripts/db-apply.mjs    # Supabase-Migrationen aus supabase/migrations/ anwenden
+bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 ```
 
 - **Live-Kamera braucht HTTPS** — auf dem Handy nur über `dev:mobile` (ngrok) testbar, nicht über `http://<lan-ip>`.
-- Test-Framework ist noch nicht konfiguriert. Es gibt Security-Smoke-Tests unter `scripts/security-test-*.mjs`.
+- Kein Unit-/E2E-Framework konfiguriert. Vorhanden sind Security-Smoke-Tests: `scripts/security-test-*.mjs`.
 
 ### Kern-Mechaniken (nicht verhandelbar)
 - 🔒 Live-Kamera-Pflicht — kein Galerie-Upload, keine Filter
 - 🔒 Follower-Zahlen sind für andere unsichtbar
 - 🔒 Kein Publikums-Verfall durch Zahlung verlängerbar
 - 🔒 Einwilligung pro Clip ob Stadt-Story-fähig
-- Verfallendes Publikum: Follow = 24h, danach aktiver Re-Entscheid
+- Verfallendes Publikum: Follow = 24h **ab dem Follow** (individuelle Uhr pro Datensatz, kein stadtweiter Reset), danach aktiver Re-Entscheid; Erneuern ab 12h möglich
+- Moment = 24h ab dem Post, danach überall weg; genau ein lebender Moment pro Person
 - Verdienter Chat: erst nach 3–4 gegenseitigen Clip-Austauschen
 
 ## Stack
@@ -54,52 +56,74 @@ node scripts/db-apply.mjs    # Supabase-Migrationen aus supabase/migrations/ anw
 - **Forms:** React Hook Form + Zod
 - **Icons:** Material Symbols Outlined (Google Fonts)
 - **Charts:** Recharts
-- **Backend:** Supabase (Auth + Postgres + Storage + Cron) — Client/Server unter `src/lib/supabase/`, Schema in `supabase/migrations/`
 - **Sprache:** TypeScript (strict)
 - **Package manager:** Bun
+- **Backend:** **Supabase** — Auth (Magic-Link), Postgres mit RLS, Storage (Bucket `moments`), pg_cron für die Zeit-Rituale. Migrationen liegen als nummerierte SQL-Dateien in `supabase/migrations/`.
+- **Deployment:** **Cloudflare Pages** (Worker-SSR), live auf `https://corso-app.pages.dev`. Einziger Befehl: `bash scripts/deploy.sh`.
 
-> Stand: Das Supabase-Backend ist integriert (Auth, RLS, Follows-Verfall, Stadt-Story-Ziehung, Media-Upload). Reine Demo-Daten leben nur noch in `city-backdrop.tsx` und `story-empty-lab.tsx`.
+### Wichtige Backend-Prinzipien
+- **Leitplanken werden serverseitig erzwungen, nicht im Client.** Der Stadt-Story-Consent-Filter, die Follower-Privatsphäre und der 24h-Verfall leben in SQL-Funktionen, Triggern und RLS-Policies. Eine UI-seitige „Lösung" für eine 🔒 Leitplanke ist keine.
+- **Kennzahl-Funktionen sind argumentlos.** `my_reach()` / `my_feedback()` sind `SECURITY DEFINER` ohne Parameter — es gibt bewusst keinen Weg, die Zahl eines *anderen* Users abzufragen. Nicht „für Debugging" einen Parameter ergänzen.
+- **Der service_role-Key gehört nicht in den Client und nach Möglichkeit nicht in den Edge.** Der Tages-Prompt lief ursprünglich über eine Server-Action und wurde bewusst auf Client-RPC umgestellt, um den Key aus dem Worker zu halten. Nur das Einlösen von Einladungs-Links braucht ihn noch.
 
 ## Dateistruktur
 
 ```
-CORSOEPHY/
+CORSO_EPHY/
 ├── docs/
 │   ├── PRD.md                # Product Requirements (Source of Truth — was & warum)
 │   ├── ROADMAP.md            # Bau-Reihenfolge nach Abhängigkeit (Phasen 0–3)
 │   └── STATUS.md             # Lebender Schnappschuss: aktueller Stand + nächster Schritt
 ├── src/
-│   ├── routes/               # file-based routing — siehe src/routes/README.md
-│   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider
+│   ├── routes/               # file-based routing — Konventionen: src/routes/README.md
+│   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider, AuthGate, Prompt-Splash
 │   │   ├── index.tsx         # Discovery-Screen (Entdeckungs-Feed, Swipe vertikal)
 │   │   ├── record.tsx        # Aufnahme-Screen (Live-Kamera + Prompt)
-│   │   ├── story.tsx         # Stadt-Story (20:00 Ritual, Swipe vertikal — UX/Optik wie Discovery, PRD 4.6 §5)
-│   │   ├── story-empty-lab.tsx # Empty-/Loading-States der Story (Demo-Daten, isoliert)
-│   │   ├── connections.tsx   # Verbindungen + verdienter Chat ("Korso")
+│   │   ├── story.tsx         # Stadt-Story (21:00 Ritual, Swipe vertikal — UX/Optik wie Discovery, PRD §4.6)
+│   │   ├── connections.tsx   # „Ich folge" + verdienter Chat (Chat = Phase 3, noch nicht gebaut)
 │   │   ├── feedback.tsx      # Rücklauf (morgendliche Reichweite, privat)
-│   │   ├── settings.tsx      # Einstellungen
-│   │   └── impressum.tsx / datenschutz.tsx / agb.tsx  # Rechtstexte
+│   │   ├── settings.tsx      # Einstellungen (Screen 10, bewusst minimal)
+│   │   ├── impressum|datenschutz|agb.tsx   # Rechts-Platzhalter (Gerüst: components/legal-page.tsx)
+│   │   └── story-empty-lab.tsx             # Lovable-Sandbox für den Story-Leerzustand (Mock, kein Supabase)
 │   ├── components/
-│   │   ├── ui/               # shadcn/ui Komponenten (generiert, nicht anfassen)
-│   │   └── *.tsx             # App-Komponenten (auth-gate, follow-button, dev-menu, …)
-│   ├── hooks/                # use-mobile.tsx u.a.
+│   │   ├── auth-gate.tsx     # Login-Screen + Session-Gate
+│   │   ├── city-backdrop.tsx # Geblurrte s/w Düsseldorf-Clips (Story-Leerzustand + Prompt-Splash)
+│   │   ├── daily-prompt-splash.tsx  # Vollbild-Prompt, 1× pro Corso-Tag
+│   │   ├── dev-menu.tsx      # Admin-Dev-Menü, NUR für dominik@subworx.io (serverseitig geprüft)
+│   │   ├── follow-button.tsx, heart-burst.tsx, legal-page.tsx
+│   │   └── ui/               # shadcn/ui Komponenten (nicht anfassen)
+│   ├── hooks/
+│   │   ├── use-camera.ts     # 🔒 getUserMedia + MediaRecorder — die Live-Kamera-Pflicht
+│   │   ├── use-snap-scroll.ts# Vertikaler Snap-Feed (Discovery/Story/Ich-folge teilen ihn)
+│   │   └── use-mobile.tsx
 │   ├── lib/
-│   │   ├── supabase/         # Supabase Client (browser) + Server + Typen + Upload
-│   │   ├── auth-context.tsx  # Auth-State (Magic-Link)
-│   │   ├── follow-context.tsx# Follow-State (24h-Verfall)
+│   │   ├── auth-context.tsx  # Session + Profil (Vorsicht: Auth-Lock, siehe STATUS)
+│   │   ├── follow-context.tsx# Follow/Renew/Unfollow/Nudge — alle DB-Writes zentral hier
+│   │   ├── corso-day.ts      # Der 21:00-Zyklusschnitt — überall benutzen, nie neu berechnen
+│   │   ├── record-view.ts    # Anonyme Ansichten-Erfassung (500-ms-Verweil-Schwelle)
+│   │   ├── prompts/          # useTodayPrompt → RPC get_today_prompt()
+│   │   ├── invites/          # ⚠️ Pilot-Provisorium: E-Mail-freie Einladungs-Links
+│   │   ├── supabase/         # client.ts, upload.ts, types.ts (handgepflegt!)
 │   │   └── utils.ts
 │   ├── assets/               # .asset.json Lovable-Assets
 │   ├── styles.css            # Globale Tailwind-Styles
 │   ├── router.tsx            # Router-Setup
-│   ├── server.ts / start.ts  # Server- / App-Entry-Point
-│   └── routeTree.gen.ts      # auto-generiert — nicht editieren
+│   ├── server.ts             # Server Entry Point (fängt /invite/<token> ab)
+│   ├── start.ts              # App Entry Point
+│   └── routeTree.gen.ts      # auto-generiert — nie von Hand editieren
 ├── supabase/
-│   ├── migrations/           # 0001…-*.sql — Schema, RLS, Cron-Jobs (Source of Truth fürs DB-Schema)
-│   ├── seed/ · templates/    # Seed-Daten, Auth-E-Mail-Templates
-├── scripts/                  # db-apply.mjs, dev-mobile.sh, deploy.sh, make-invites.mjs, security-test-*.mjs
-├── public/
-├── .claude/ · .cursor/rules/ # AI-Assistenten- / Cursor-Regeln
-└── ...config files (.env.example, vite.config.ts, tsconfig.json, …)
+│   ├── migrations/           # Nummerierte SQL-Migrationen (0001…) — Reihenfolge ist bindend
+│   ├── seed/                 # Prompt-Seeds
+│   └── templates/            # Auth-E-Mail-Template (auth_email_de.html)
+├── scripts/
+│   ├── deploy.sh             # Der einzige Deploy-Befehl
+│   ├── db-apply.mjs          # Migration anwenden (braucht SBP-Token)
+│   ├── make-invites.mjs      # Einladungs-Links erzeugen (lokal, service_role)
+│   └── security-test-*.mjs   # Negativ-Tests für die Privatsphäre-Leitplanken
+├── public/                   # inkl. empty-bg-4…9.mp4 (~35 MB Hintergrund-Clips, in Git)
+├── .claude/                  # Claude Code Konfiguration
+├── .cursor/rules/            # Cursor IDE Regeln
+└── ...config files
 ```
 
 ## Konventionen
@@ -112,6 +136,10 @@ CORSOEPHY/
 - Neue UI-Komponenten → zuerst prüfen ob shadcn/ui-Komponente vorhanden
 - Keine hartcodierten Farben — Tailwind-Klassen oder CSS-Variablen
 - Keine Follower-Zahlen oder Publikumsgröße für andere Nutzer sichtbar machen
+- **Migrationen sind append-only:** neue Datei mit der nächsten Nummer, bereits angewendete Migrationen nie rückwirkend editieren
+- **`src/lib/supabase/types.ts` ist handgepflegt** (nicht generiert) — bei jeder Schema-Änderung mitziehen, sonst driftet es unbemerkt
+- **Zeitlogik immer über `corso-day.ts`** — der Zyklus beginnt um 21:00, nicht um Mitternacht. Nie eigenes Datums-Rechnen daneben bauen.
+- **Verfall immer über `expires_at > now()` filtern**, nie über Tages-Arithmetik. `expires_at` wird ausschließlich per DB-Trigger gesetzt — nie vom Client mitschicken.
 
 ## Was du NICHT tun sollst
 
