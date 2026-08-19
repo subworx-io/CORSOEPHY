@@ -12,9 +12,9 @@
 
 **Phase 0 ist abgeschlossen. Phase 1 ist zu ~60 % gebaut.**
 
-Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop läuft **ohne Mock**: posten → in Discovery erscheinen → folgen → in die Stadt-Story gezogen werden → private Zahl im Rücklauf. Alle 5 Kern-Screens plus ein minimaler Einstellungen-Screen (Screen 10) und drei Rechts-Platzhalterseiten existieren.
+Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop läuft **ohne Mock**: posten → in Discovery erscheinen → folgen → in den Stadt Corso gezogen werden → private Zahl im Rücklauf. Alle 5 Kern-Screens plus ein minimaler Einstellungen-Screen (Screen 10) und drei Rechts-Platzhalterseiten existieren.
 
-**Am 19. August gegen die Live-DB verifiziert:** Alle drei Server-Jobs laufen mit echten Daten — die Stadt-Story wurde am 1., 2. und 13. August real um 20:00 Berlin aus echten einwilligenden Posts gezogen; der Reichweiten-Snapshot lief zuletzt heute Morgen; der Follow-Verfall stempelte zuverlässig um 08:00. **Überholt seit 19. August abends:** der 08:00-Reset ist durch den individuellen 24h-Verfall ersetzt, die Ziehung läuft um 21:00 (`0015_rolling_24h_expiry.sql`).
+**Am 19. August gegen die Live-DB verifiziert:** Alle drei Server-Jobs laufen mit echten Daten — der Stadt Corso wurde am 1., 2. und 13. August real um 20:00 Berlin aus echten einwilligenden Momenten gezogen; der Reichweiten-Snapshot lief zuletzt heute Morgen; der Follow-Verfall stempelte zuverlässig um 08:00. **Überholt seit 19. August abends:** der 08:00-Reset ist durch den individuellen 24h-Verfall ersetzt, die Ziehung läuft um 21:00 (`0015_rolling_24h_expiry.sql`).
 
 **Es fehlt in Phase 1:** Infinite Scroll in der Discovery und Push-Notifications.
 **Noch gar nicht gebaut:** verdienter Chat (Phase 3), Metrik-Tracking und Report/Block (Phase 2).
@@ -41,24 +41,24 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 
 ## Phase 0 — Backend-Fundament (blockt alles)
 
-**Ziel:** Aus dem Solo-Klick-Prototyp wird eine zwischen mehreren Geräten geteilte App. Follow-State und Posts überleben Reload und sind serverseitig.
+**Ziel:** Aus dem Solo-Klick-Prototyp wird eine zwischen mehreren Geräten geteilte App. Follow-State und Momente überleben Reload und sind serverseitig.
 
 **Scope:**
 - Auth (Magic-Link oder Telefonnummer, kein Passwort nötig).
-- Persistenz für: User, Posts, Follows, Anstupser.
+- Persistenz für: User, Momente, Follows, Anstupser.
 - Video-Upload + Storage + Auslieferung (der disabled „Verwenden"-Button wird funktional).
 - ~~Der **08:00-Reset als echter Server-Job**~~ — **abgelöst am 19. August**: Verfall läuft ohne Job, rein über `expires_at > now()` pro Datensatz.
 - Follow-Logik vom React-Context ins Backend migrieren (24h-Verfall, `canRenew` ab 12h). Serverseitig erzwungen ist seit `0015` der Verfall selbst (Trigger); die Anzeige-Logik lebt weiter im Context.
 
 **Akzeptanzkriterien:**
-- [x] Zwei verschiedene Handys sehen denselben geteilten Zustand. *(Datenebene 7. Juli verifiziert: Follows/Posts/Nudges serverseitig, kein localStorage mehr. Realer Zwei-Geräte-Test steht noch aus — hängt an der Login-Zustellung, siehe STATUS.)*
+- [x] Zwei verschiedene Handys sehen denselben geteilten Zustand. *(Datenebene 7. Juli verifiziert: Follows/Momente/Nudges serverseitig, kein localStorage mehr. Realer Zwei-Geräte-Test steht noch aus — hängt an der Login-Zustellung, siehe STATUS.)*
 - [x] Ein hochgeladener Clip erscheint auf einem anderen Gerät in der Discovery. *(7. Juli: Upload + `posts`-Insert unter RLS verifiziert; Discovery lädt echte Posts, Mock-Fallback entfernt.)*
 - [x] Follow überlebt App-Reload. *(7. Juli: `follow-context` lädt aktive Follows aus der DB statt aus Seeds/localStorage.)*
 - [x] Follows verfallen serverseitig, ohne dass ein Client offen sein muss. *(Bis 19. Aug: pg_cron `expire-follows-daily`, `0003`. Seit `0015`: 24h ab Follow, per `expires_at` in jeder Query — der Cron ist ersatzlos entfallen.)*
 
-**Phase 0 abgeschlossen (15. Juli):** Aufnahme-UI-Flow (Kamera→Upload) im echten Browser end-to-end verifiziert — aufgenommener Clip erscheint bei anderen Usern in Discovery. Damit ist auch der geräte-übergreifende Konsum-Loop real bestätigt. Die damals noch offene **Login-Mail-Zustellung** (Spam-Placement) ist ebenfalls gelöst — Magic-Link-Mails landen im Posteingang; für den Freundes-Pilot ist der Einladungs-Link ohnehin der Hauptweg.
+**Phase 0 abgeschlossen (15. Juli):** Aufnahme-UI-Flow (Kamera→Upload) im echten Browser end-to-end verifiziert — aufgenommener Moment erscheint bei anderen Usern in Discovery. Damit ist auch der geräte-übergreifende Konsum-Loop real bestätigt. Die damals noch offene **Login-Mail-Zustellung** (Spam-Placement) ist ebenfalls gelöst — Magic-Link-Mails landen im Posteingang; für den Freundes-Pilot ist der Einladungs-Link ohnehin der Hauptweg.
 
-**Bewusst NICHT in Phase 0:** ID-Verifizierung, Push, Stadt-Story-Algorithmus, Chat.
+**Bewusst NICHT in Phase 0:** ID-Verifizierung, Push, Algorithmus für den Stadt Corso, Chat.
 
 ---
 
@@ -66,23 +66,23 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 
 **Ziel:** Die komplette Kern-Kette läuft mit echten Daten zwischen mehreren Geräten. Das ist der eigentliche Test.
 
-**Die Kette:** Post hochladen → erscheint in Discovery → folgbar → kann in Stadt-Story gezogen werden → Rücklauf zeigt echte Zahl → Push bringt zurück.
+**Die Kette:** Moment hochladen → erscheint in Discovery → folgbar → kann in Stadt Corso gezogen werden → Rücklauf zeigt echte Zahl → Push bringt zurück.
 
 **Scope:**
-- ✅ **Stadt-Story-Auswahl als echter Mechanismus** (statt 8 Mock-Clips) — **erledigt 15. Juli** (`0005_city_story_draw.sql` live, `story.tsx` de-mockt, Details in `docs/STATUS.md`). Serverseitige gewichtete Zufallsziehung: `w = 1 + ln(1 + aktive_follower)`, Grundchance > 0 für jeden Clip, stadtweit eingefroren via pg_cron um 21:00 Berlin (bis 19. Aug: 20:00).
-  - 🔒 LEITPLANKE: keine sichtbaren Reaktions-/Follower-Zahlen während der Story. ✅ eingehalten (Query selektiert keine Zahlen).
-  - 🔒 LEITPLANKE: nur einwilligungs-markierte Clips kommen in Frage. ✅ serverseitig erzwungen.
-  - ~~`[ENTSCHEIDUNG OFFEN]` Stadt-Story-Größe/Frequenz~~ → **entschieden:** immer mit so vielen einwilligenden Clips wie da sind (max. 8), kein Mindest-Schwellwert, kein Fake-Auffüllen.
+- ✅ **Auswahl für den Stadt Corso als echter Mechanismus** (statt 8 Mock-Clips) — **erledigt 15. Juli** (`0005_city_story_draw.sql` live, `story.tsx` de-mockt, Details in `docs/STATUS.md`). Serverseitige gewichtete Zufallsziehung: `w = 1 + ln(1 + aktive_follower)`, Grundchance > 0 für jeden Clip, stadtweit eingefroren via pg_cron um 21:00 Berlin (bis 19. Aug: 20:00).
+  - 🔒 LEITPLANKE: keine sichtbaren Reaktions-/Follower-Zahlen während des Stadt Corso. ✅ eingehalten (Query selektiert keine Zahlen).
+  - 🔒 LEITPLANKE: nur einwilligungs-markierte Momente kommen in Frage. ✅ serverseitig erzwungen.
+  - ~~`[ENTSCHEIDUNG OFFEN]` Größe des Stadt Corso/Frequenz~~ → **entschieden:** immer mit so vielen einwilligenden Momenten wie da sind (max. 8), kein Mindest-Schwellwert, kein Fake-Auffüllen.
 - **Discovery als langer Scroll-Feed** — **noch nicht gebaut** (`src/routes/index.tsx:99-100` hat weiterhin ein hartes `limit 20` ohne Pagination und ohne Tages-Ordering). Ziel: **Infinite Scroll** (erst ~20, beim Erreichen des Endes nächste 20 nachladen), Reihenfolge **heute zuerst → ältere als Nachschub**, um ein ausgedehntes Scrollverhalten zu etablieren. Details in `docs/STATUS.md`.
   - **Entschieden (15. Juli):** Area = **ganze Stadt Düsseldorf** (Area-Filter vorerst No-Op). Interim ältere Momente als Nachschub, **Endzustand nur heute** (`prompt_date = corso_day(now())`) — bewusst erst später, nicht jetzt eingrenzen.
-- ~~**Rücklauf-Screen mit echten Zahlen**~~ → **✅ gebaut & live (15. Juli):** `feedback.tsx` zeigt zwei private Kennzahlen — **Publikum** (aktive Follower) + **Zuschauer** (eindeutige Betrachter des letzten Moments, inkl. anonymer Pool-Zuschauer, PRD-Entscheidung #3 = JA) — je mit neutralem „seit gestern"-Delta. Bewusst **zwei** statt drei Zahlen: „Follower" und „Publikum" wären identisch → keine Redundanz. Ansichten anonym via `post_views`/`record_view`; „seit gestern"-Basis via nächtlichem `snapshot_reach`-Cron; alles über `my_feedback()` (RLS-privat, SECURITY DEFINER). Migration `0010`, deployed. **Dies ist die Datenquelle für die Kill-Metrik „aktiver-Post-Anteil".**
-- **Push-Notifications** (PWA-fähig): 21:00-Stadt-Story-Push + Push, wenn eine gefolgte Person postet. **Noch nicht begonnen** — im Code existiert nur `public/manifest.json`, kein Service Worker, keine `PushManager`-Anbindung.
+- ~~**Rücklauf-Screen mit echten Zahlen**~~ → **✅ gebaut & live (15. Juli):** `feedback.tsx` zeigt zwei private Kennzahlen — **Publikum** (aktive Follower) + **Zuschauer** (eindeutige Betrachter des letzten Moments, inkl. anonymer Pool-Zuschauer, PRD-Entscheidung #3 = JA) — je mit neutralem „seit gestern"-Delta. Bewusst **zwei** statt drei Zahlen: „Follower" und „Publikum" wären identisch → keine Redundanz. Ansichten anonym via `post_views`/`record_view`; „seit gestern"-Basis via nächtlichem `snapshot_reach`-Cron; alles über `my_feedback()` (RLS-privat, SECURITY DEFINER). Migration `0010`, deployed. **Dies ist die Datenquelle für die Kill-Metrik „aktiver-Moment-Anteil".**
+- **Push-Notifications** (PWA-fähig): 21:00-Push zum Stadt Corso + Push, wenn eine gefolgte Person postet. **Noch nicht begonnen** — im Code existiert nur `public/manifest.json`, kein Service Worker, keine `PushManager`-Anbindung.
   - ⚠️ Dies ist der wichtigste offene Punkt der Phase: **ohne Push gibt es keinen strukturellen Grund zurückzukommen.** Die Kill-Metrik „Daily-Open-Rate ≥ 50 %" wäre ohne Push nicht fair messbar.
-  - `[ENTSCHEIDUNG OFFEN]` Die genaue Mechanik des „Privaten Korso" (Push-Fenster 19–22 Uhr, PRD #7) ist ungeklärt und wird hier zum ersten Mal relevant.
+  - `[ENTSCHEIDUNG OFFEN]` Die genaue Mechanik des „Privaten Corso" (Push-Fenster 19–22 Uhr, PRD #7) ist ungeklärt und wird hier zum ersten Mal relevant.
 
 **Akzeptanzkriterien:**
-- [x] Stadt-Story zeigt zur Ziehungszeit real geposteten Content, nicht Mock. *(15. Juli gebaut; **19. August in der Live-DB bestätigt**: echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Posts. Damit ist auch ein echter Cron-Lauf mit echtem Content belegt, nicht nur ein manueller Force-Draw.)*
-- [x] Ein Clip ohne Einwilligung erscheint NIE in der Stadt-Story. *(Serverseitiger `city_story_consent = true`-Filter in `draw_city_story`.)*
+- [x] Stadt Corso zeigt zur Ziehungszeit real geposteten Content, nicht Mock. *(15. Juli gebaut; **19. August in der Live-DB bestätigt**: echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Momenten. Damit ist auch ein echter Cron-Lauf mit echtem Content belegt, nicht nur ein manueller Force-Draw.)*
+- [x] Ein Clip ohne Einwilligung erscheint NIE in der Stadt Corso. *(Serverseitiger `city_story_consent = true`-Filter in `draw_city_story`.)*
 - [ ] Discovery lädt beim Runterscrollen weitere Momente nach (Infinite Scroll), heute zuerst.
 - [x] Rücklauf zeigt für jeden User die korrekte private Zahl. *(15. Juli: `my_feedback()` — Publikum + Zuschauer; RLS-privat, Negativ-Test `scripts/security-test-feedback.mjs` Layer 1 grün. **Die „seit gestern"-Deltas sind seit dem laufenden `snapshot_reach`-Cron real** — zuletzt am 19. August ausgeführt.)*
 - [ ] 21:00-Push kommt zuverlässig an.
@@ -94,15 +94,15 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 **Ziel:** Genug Robustheit + Sicherheit, um es 20–30 Freunden in die Hand zu geben, ohne dass es peinlich bricht oder jemand zu Schaden kommt.
 
 **Scope:**
-- **Onboarding (Screen 1), pragmatisch:** Magic-Link/Telefon-Login + Selbst-Bestätigung „18+". Kurz-Erklärung von Stadt-Story + verfallendem Publikum in unter 30 Sek.
+- **Onboarding (Screen 1), pragmatisch:** Magic-Link/Telefon-Login + Selbst-Bestätigung „18+". Kurz-Erklärung von Stadt Corso + verfallendem Publikum in unter 30 Sek.
   - **Pilot-Weg gebaut (15. Juli):** E-Mail-freie **Einladungs-Links** (Maxim erzeugt pro Freund, WhatsApp, Klick = eingeloggt). Einmalig, 7 Tage gültig, serverseitig eingelöst. ⚠️ Bewusstes Pilot-Provisorium — der zahlende Fremden-Pilot bekommt echte Self-Service-Registrierung. Details in `docs/STATUS.md`.
   - `[ENTSCHEIDUNG OFFEN]` Volle ID-Verifizierung gehört VOR öffentlichen Launch, NICHT vor Freundes-Pilot. Nicht jetzt bauen.
-- **Metrik-/Event-Tracking** (ab Tag 1 instrumentieren, sonst nachträglich nicht rekonstruierbar): Daily-Open-Rate, aktiver-Post-Anteil, Follow-Events, Stadt-Story-Auftritte, Verbindungen.
+- **Metrik-/Event-Tracking** (ab Tag 1 instrumentieren, sonst nachträglich nicht rekonstruierbar): Daily-Open-Rate, aktiver-Moment-Anteil, Follow-Events, Auftritte im Stadt Corso, Verbindungen.
 - **Report + Block** (minimale Safety): Report = sofort aus allen Pools.
   - **Vorarbeit (16. Juli):** Der **Einstellungen-Screen (Screen 10)** ist minimal gebaut & deployed (`src/routes/settings.tsx`) — mit einer **Blockierte-Personen-Sektion als Platzhalter**, die sauber leer anzeigt und in dieser Phase an eine künftige `blocks`-Tabelle andockt (`useBlockedProfiles`-Stub). Das eigentliche Report/Block-Feature (Blockieren auslösen, Report → aus allen Pools) ist noch NICHT gebaut. Details in `docs/STATUS.md`.
 
 **Akzeptanzkriterien:**
-- [ ] Neuer Nutzer kommt ohne Hilfe vom Login bis zum ersten Post.
+- [ ] Neuer Nutzer kommt ohne Hilfe vom Login bis zum ersten Moment.
 - [ ] Die drei Kill-Metriken sind in einem Dashboard ablesbar.
 - [ ] Report entfernt einen User sofort aus allen Pools.
 
@@ -121,7 +121,7 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 **Akzeptanzkriterien:**
 - [ ] Gegenseitiges Folgen erzeugt den stillen Hinweis bei beiden.
 - [ ] Chat schaltet erst nach der definierten Anzahl Austausch-Runden frei.
-- [ ] Eine Verbindung im Austausch überlebt einen Tag ohne Post.
+- [ ] Eine Verbindung im Austausch überlebt einen Tag ohne Moment.
 
 ---
 
@@ -151,9 +151,9 @@ Beide sind am 19. August live verifiziert, kosten je unter 5 Minuten und blockie
 
 | # | Punkt | Bezug | Status |
 |---|---|---|---|
-| 1 | Stadt-Story zieht nur „wer heute gepostet hat" + Follower-Gewicht → Cold-Start-Schutz geschwächt ggü. v0.1 | PRD §4.6 | **Bewusst zurückgestellt** (vorerst ignorieren, nicht aufgreifen) |
-| 2 | Stadt-Story-Größe/Frequenz bei kleinem Pilot (8 Clips zu dünn?) | PRD offene Entscheidung #6 | ✅ **entschieden (15. Juli):** immer mit so vielen einwilligenden Clips wie da sind (max. 8), kein Minimum, kein Fake-Auffüllen |
-| 3 | Mechanik des „Privaten Korso" (Push-Fenster 19–22 Uhr) | PRD offene Entscheidung #7 | offen — **wird mit dem Push-Feature in Phase 1 fällig** |
+| 1 | Stadt Corso zieht nur „wer heute gepostet hat" + Follower-Gewicht → Cold-Start-Schutz geschwächt ggü. v0.1 | PRD §4.6 | **Bewusst zurückgestellt** (vorerst ignorieren, nicht aufgreifen) |
+| 2 | Größe des Stadt Corso/Frequenz bei kleinem Pilot (8 Momente zu dünn?) | PRD offene Entscheidung #6 | ✅ **entschieden (15. Juli):** immer mit so vielen einwilligenden Momenten wie da sind (max. 8), kein Minimum, kein Fake-Auffüllen |
+| 3 | Mechanik des „Privaten Corso" (Push-Fenster 19–22 Uhr) | PRD offene Entscheidung #7 | offen — **wird mit dem Push-Feature in Phase 1 fällig** |
 | 4 | Verbindungs-Trigger bei täglich verfallenden Follows | PRD offene Entscheidung #8 | offen, blockt erst Phase 3 |
 | 5 | Mitigation der Geschlechter-Asymmetrie | PRD offene Entscheidung #10, Risiko §8.2 | offen — blockt keine Bauphase, ist aber das gefährlichste strukturelle Produkt-Risiko vor dem zahlenden Pilot |
 

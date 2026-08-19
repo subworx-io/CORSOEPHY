@@ -11,7 +11,7 @@
 
 **Phase 0 (Backend-Fundament) ist durch. Phase 1 (Konsum-Loop end-to-end echt) ist zu ~60 % gebaut.**
 
-Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (alles committet, letzter Commit `7baf6e7` vom 12. August), und **alle drei Server-Jobs laufen nachweislich mit echten Daten** (Beleg unten). Der Kern-Loop — posten → in Discovery erscheinen → folgen → in die Stadt-Story gezogen werden → private Zahl im Rücklauf — funktioniert vollständig ohne Mock.
+Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (alles committet, letzter Commit `7baf6e7` vom 12. August), und **alle drei Server-Jobs laufen nachweislich mit echten Daten** (Beleg unten). Der Kern-Loop — posten → in Discovery erscheinen → folgen → in den Stadt Corso gezogen werden → private Zahl im Rücklauf — funktioniert vollständig ohne Mock.
 
 **Am Abend des 19. August umgestellt:** Der feste Tagesrhythmus ist weg. Verfall läuft jetzt **pro Datensatz 24 h ab Entstehung**, der Zyklus-Wechsel (Prompt + Stadt-Corso-Ziehung) liegt auf **21:00** statt 08:00/20:00. Details unten unter „Rollender 24h-Verfall". Discovery hat dabei ihr Infinite Scroll bekommen.
 
@@ -32,9 +32,9 @@ Alles hier wurde an diesem Tag **gegen die echte DB und die echte Deployment-Umg
 | `reach-snapshot-summer` / `-winter` | `5 19` / `5 20` | Basislinie für die „seit gestern"-Deltas, jetzt am **Zyklus-Start (21:05)** statt morgens. Gleicher Stunden-Guard. |
 | ~~`expire-follows-daily`~~ | — | **Ersatzlos entfallen.** Verfall wird nicht mehr markiert, sondern in jeder Query über `expires_at > now()` gerechnet. |
 
-Historischer Beleg (vor der Umstellung): echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Posts. Der Mechanismus ist also mit echtem Content bewiesen, nur die Uhrzeit hat sich verschoben.
+Historischer Beleg (vor der Umstellung): echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Momenten. Der Mechanismus ist also mit echtem Content bewiesen, nur die Uhrzeit hat sich verschoben.
 
-Nebenbeleg für die Korrektheit der Ziehung: Am 11. und 12. August gab es einwilligende Posts, aber **keine** Story-Slots — beide Posts wurden erst *nach* der damaligen Ziehungszeit hochgeladen, waren also gar keine Kandidaten. Genau das erwartete Verhalten. *(Seit `0015` kann das so nicht mehr passieren: Kandidat ist alles, was zur Ziehung noch lebt.)*
+Nebenbeleg für die Korrektheit der Ziehung: Am 11. und 12. August gab es einwilligende Momente, aber **keine** Slots im Stadt Corso — beide Momente wurden erst *nach* der damaligen Ziehungszeit hochgeladen, waren also gar keine Kandidaten. Genau das erwartete Verhalten. *(Seit `0015` kann das so nicht mehr passieren: Kandidat ist alles, was zur Ziehung noch lebt.)*
 
 ### 📊 Datenbestand
 
@@ -49,7 +49,7 @@ Nebenbeleg für die Korrektheit der Ziehung: Am 11. und 12. August gab es einwil
 
 **Nach der 24h-Umstellung (live gemessen):** von 29 Momenten sind **2 lebend**, 27 abgelaufen; von 11 Follows ist **1 aktiv**. Genau das ist die neue Regel — die Discovery zeigt jetzt 2 statt 29 Momente. Das ist kein Fehler, sondern die Dichte des Test-Bestands.
 
-**Nutzungsmuster:** Posts am 11., 12., 13. und dann wieder am 19. August — eine Lücke von sechs Tagen. Die App wird derzeit sporadisch von den Entwicklern getestet, nicht täglich genutzt. Das ist erwartbar, solange kein Pilot läuft, aber es heißt auch: **es gibt bisher keinerlei Signal zu den Kill-Metriken.**
+**Nutzungsmuster:** Momente am 11., 12., 13. und dann wieder am 19. August — eine Lücke von sechs Tagen. Die App wird derzeit sporadisch von den Entwicklern getestet, nicht täglich genutzt. Das ist erwartbar, solange kein Pilot läuft, aber es heißt auch: **es gibt bisher keinerlei Signal zu den Kill-Metriken.**
 
 ### Code-Stand geprüft
 
@@ -62,16 +62,16 @@ Nebenbeleg für die Korrektheit der Ziehung: Am 11. und 12. August gab es einwil
 
 ## 🔧 WIP im Working Tree (19. August, unkommittiert)
 
-**Prompt am Moment auf allen Feed-Screens — gebaut (19. August).** Das im Rücklauf bereits gebaute „zu welchem Prompt entstand dieser Moment" ist jetzt auf Discovery, Stadt-Story und „Ich folge" verallgemeinert:
+**Prompt am Moment auf allen Feed-Screens — gebaut (19. August).** Das im Rücklauf bereits gebaute „zu welchem Prompt entstand dieser Moment" ist jetzt auf Discovery, Stadt Corso und „Ich folge" verallgemeinert:
 
 - **Neu:** `src/components/moment-prompt.tsx` (gemeinsame Darstellung) und `src/lib/prompts/prompt-history.ts` — `fetchPromptsByDate()` holt die Prompt-Texte für **mehrere Corso-Tage in einer Abfrage** (statt ein Request pro Kachel; nötig, weil die Feeds interimsweise mehrtägig sind) plus `promptDayLabel()` für „Heute" / „Gestern" / „Di, 12. Aug".
 - **Geändert:** `index.tsx`, `story.tsx`, `connections.tsx` laden `posts.prompt_date` mit, lösen die Texte per `fetchPromptsByDate()` auf und binden `<MomentPrompt>` ein; `feedback.tsx` nutzt jetzt den geteilten `promptDayLabel()` statt einer lokalen Kopie.
-- **Darstellung (Entscheidung 19. August, Maxim/Dominik):** Editorial-Overlay **oben auf der Kachel** — Optik 1:1 vom Aufnahme-Screen (System-Serif, linksbündige Magazin-Headline, weicher Scrim statt Box), **mit Tages-Label** darüber. Linker Einzug (`pl-[4.5rem]`) hält die Spalte des Ton-Buttons frei, `pointer-events-none` lässt ihn klickbar. Unten bleibt frei für Handle + Folgen-Button. Damit sieht „Prompt" überall gleich aus: Aufnahme → Discovery → Ich folge → Stadt-Story → Rücklauf.
+- **Darstellung (Entscheidung 19. August, Maxim/Dominik):** Editorial-Overlay **oben auf der Kachel** — Optik 1:1 vom Aufnahme-Screen (System-Serif, linksbündige Magazin-Headline, weicher Scrim statt Box), **mit Tages-Label** darüber. Linker Einzug (`pl-[4.5rem]`) hält die Spalte des Ton-Buttons frei, `pointer-events-none` lässt ihn klickbar. Unten bleibt frei für Handle + Folgen-Button. Damit sieht „Prompt" überall gleich aus: Aufnahme → Discovery → Ich folge → Stadt Corso → Rücklauf.
 - **Warum mit Tages-Label:** Discovery zeigt interimsweise auch ältere Momente als Nachschub — ohne den Tag wechselte der Prompt beim Scrollen ohne sichtbaren Grund.
 - Hält sich an die bestehende Regel: Auflösung ausschließlich über `daily_prompt`, **kein Rückfall auf `prompts.active_date`** — ohne Historie wird nichts angezeigt statt etwas Falsches. Kein DB-Change nötig (`daily_prompt` ist per RLS für alle Angemeldeten lesbar).
 
 ✅ Typecheck + Production-Build grün, neue Dateien lint-sauber.
-⚠️ **Nicht committet, nicht deployed, nicht im Browser gesehen** — die Optik auf einem echten Gerät (lange Prompts, Zusammenspiel mit dem Story-Badge oben) steht noch aus.
+⚠️ **Nicht committet, nicht deployed, nicht im Browser gesehen** — die Optik auf einem echten Gerät (lange Prompts, Zusammenspiel mit dem Badge des Stadt Corso oben) steht noch aus.
 
 ---
 
@@ -115,7 +115,7 @@ Diese Werte wurden im Chat geteilt und sind **noch nicht rotiert**:
 ### 4. Phase-1-Features, die noch fehlen
 
 - **Discovery als langer Scroll-Feed** — Infinite Scroll + „heute zuerst"-Ordering (Details unten).
-- **Push-Notifications** — 21:00-Stadt-Story-Push + Push, wenn eine gefolgte Person postet. **Ohne Push gibt es keinen strukturellen Grund zurückzukommen**; die Kill-Metrik „Daily-Open-Rate ≥ 50 %" wäre ohne Push nicht fair messbar.
+- **Push-Notifications** — 21:00-Push zum Stadt Corso + Push, wenn eine gefolgte Person postet. **Ohne Push gibt es keinen strukturellen Grund zurückzukommen**; die Kill-Metrik „Daily-Open-Rate ≥ 50 %" wäre ohne Push nicht fair messbar.
 
 ### 5. Nicht abschließend bewiesen
 
@@ -129,9 +129,9 @@ Diese Werte wurden im Chat geteilt und sind **noch nicht rotiert**:
 
 | Route | Screen | Stand |
 |---|---|---|
-| `index.tsx` | **Discovery** (Entdeckungs-Feed, vertikaler Swipe) | Echte Posts aus der DB, Follow schreibt in die DB, kein Mock-Fallback (ehrlicher Leerzustand). Eigene Posts raus (`author_id ≠ auth.uid()`), gefolgte Personen verlassen den Feed. Zahnrad oben rechts → `/settings`. **Offen:** hartes `limit 20` ohne Pagination/Tages-Ordering. |
-| `story.tsx` | **Stadt-Story** (21:00-Ritual) | Liest die stadtweit eingefrorene Auswahl über `city_story()`; serverseitige gewichtete Ziehung um 21:00 via pg_cron. Leerzustand mit atmosphärischem Video-Hintergrund (cross-fadende s/w Düsseldorf-Clips, körnig, Blue-Hour-Tint, `blur(5px)`) + großem `Std:Min:Sek`-Countdown auf die nächste 21:00. Läuft die Story, zeigt eine dezente Pille oben „Stadt-Story · noch X h Y min" bis zur nächsten Ziehung. 🔒 Keine Follower-/Reaktions-Zahlen. |
-| `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Stadt-Story-Freigabe als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. 🔒 Kein Galerie-Upload. |
+| `index.tsx` | **Discovery** (Entdeckungs-Feed, vertikaler Swipe) | Echte Momente aus der DB, Follow schreibt in die DB, kein Mock-Fallback (ehrlicher Leerzustand). Eigene Momente raus (`author_id ≠ auth.uid()`), gefolgte Personen verlassen den Feed. Zahnrad oben rechts → `/settings`. **Offen:** hartes `limit 20` ohne Pagination/Tages-Ordering. |
+| `story.tsx` | **Stadt Corso** (21:00-Ritual) | Liest die stadtweit eingefrorene Auswahl über `city_story()`; serverseitige gewichtete Ziehung um 21:00 via pg_cron. Leerzustand mit atmosphärischem Video-Hintergrund (cross-fadende s/w Düsseldorf-Clips, körnig, Blue-Hour-Tint, `blur(5px)`) + großem `Std:Min:Sek`-Countdown auf die nächste 21:00. Läuft die Story, zeigt eine dezente Pille oben „Stadt Corso · noch X h Y min" bis zur nächsten Ziehung. 🔒 Keine Follower-/Reaktions-Zahlen. |
+| `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Freigabe für den Stadt Corso als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. 🔒 Kein Galerie-Upload. |
 | `connections.tsx` | **„Ich folge"** / verdienter Chat | Echter Follow-Graph. Anstupsen + Follow-Erneuern schreiben in die DB. Entfolgen per Tippen auf „folgst du heute" (`unfollow()` setzt `expires_at = now()`) → Person taucht wieder in Discovery auf. Verdienter Chat = Phase 3, noch nicht gebaut. |
 | `feedback.tsx` | **Rücklauf** (private Reichweite) | Zwei private Kennzahlen: **Publikum** (aktive Follower) + **Zuschauer** (eindeutige Betrachter des letzten Moments inkl. anonymer Pool-Zuschauer), je mit neutralem „seit gestern"-Delta (↑/↓/–, kein Rot, kein trauriges Icon). Bewusst nur zwei Zahlen — „Follower" und „Publikum" wären identisch. Dein aktueller Moment läuft als Video-Hintergrund, die Zahlen als ruhiges Overlay. Zeigt zusätzlich den **Prompt, zu dem der Moment entstand** (Auflösung über `posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text`, mit Label „Heute"/„Gestern"/Datum). |
 | `settings.tsx` | **Einstellungen** (Screen 10, minimal) | Vier bewusst schmale Blöcke: Benachrichtigungen (`push_enabled`-Switch), Sicherheit (Blockierte-Personen-Platzhalter), Rechtliches (`/impressum`, `/datenschutz`, `/agb`), Account (Anzeigename, Abmelden, manuelle Kontolöschung per Mailto). ⛔ **Zwei Felder defekt bis Migration `0014` läuft.** |
@@ -162,17 +162,17 @@ Das Script baut mit `NODE_ENV=production`, prüft dass kein `jsxDEV` im Bundle l
 
 ## Architektur & Mechanik im Detail
 
-### Stadt-Story-Ziehung (live seit 15. Juli, `0005_city_story_draw.sql`)
+### Ziehung für den Stadt Corso (live seit 15. Juli, `0005_city_story_draw.sql`)
 
 - **Kandidaten (serverseitig gefiltert):** alle **lebenden** Momente (`expires_at > now()`, also jünger als 24 h) **mit** `city_story_consent = true`, Autor in der Zielstadt. 🔒 Consent wird in der SQL-Funktion erzwungen, nicht im Client. *(Bis 19. Aug: `prompt_date = corso_day()`.)*
 - **Ein Moment kann höchstens von EINER Ziehung gesehen werden** — Ziehungen liegen 24 h auseinander, genau wie die Lebensdauer.
-- **Gewicht je Clip:** `w = 1 + ln(1 + aktive_follower)`. Neuling (0 Follower) → `w = 1.0` (reale Grundchance); 50 Follower → `w ≈ 4.9`. Log = abnehmender Grenznutzen, keine Rangliste. Ziehung ohne Zurücklegen (Efraimidis-Spirakis: `random()^(1/w)`, die 8 größten gewinnen). 🔒 Die Follower-Zahl wird **inline** gezählt und verlässt die Funktion nie.
+- **Gewicht je Moment:** `w = 1 + ln(1 + aktive_follower)`. Neuling (0 Follower) → `w = 1.0` (reale Grundchance); 50 Follower → `w ≈ 4.9`. Log = abnehmender Grenznutzen, keine Rangliste. Ziehung ohne Zurücklegen (Efraimidis-Spirakis: `random()^(1/w)`, die 8 größten gewinnen). 🔒 Die Follower-Zahl wird **inline** gezählt und verlässt die Funktion nie.
 - **Verifiziert (Monte-Carlo, 2000 Läufe):** Neuling mit 0 Followern kommt an ~36 % der Tage rein; ein „Whale" mit 800 Followern an 95 % — trotz 800× Follower nur ~2,6× die Chance.
 - **Eingefroren & stadtweit identisch:** `draw_city_story(city, force)` schreibt bis zu 8 Slots nach `city_story_slots`. `force=false` ist idempotent (deckt „Cron doppelt gelaufen" ab).
 - **Zeit:** pg_cron `city-story-draw-summer` (19:00 UTC) + `city-story-draw-winter` (20:00 UTC); `run_city_story_draw()` prüft selbst `= 21 Uhr Berlin` und no-opt sonst → DST-sicher exakt 21:00.
-- **Lesepfad:** über `city_story()` (SECURITY DEFINER), nicht direkt über die Tabelle — die eingefrorene Story überlebt den 24h-Verfall ihrer Clips. 🔒 Nur Anzeige-Daten, keine Zahlen.
+- **Lesepfad:** über `city_story()` (SECURITY DEFINER), nicht direkt über die Tabelle — die eingefrorenen Stadt Corso überlebt den 24h-Verfall ihrer Clips. 🔒 Nur Anzeige-Daten, keine Zahlen.
 - **Dev-Werkzeuge (nur Test):** `select draw_city_story('Düsseldorf', true);`, Seed `select dev_seed_city_story('{0,0,1,3,8,20,60,150}');`, Aufräumen `select dev_clear_city_story_test();`.
-- **In-App-Dev-Menü** (`0006` + `src/components/dev-menu.tsx`): Ribbon-Button **nur für `dominik@subworx.io`**, Drawer mit fünf Aktionen (Story ziehen / zurücksetzen / Follows verfallen / Fake-Clips seeden / Fake-Daten löschen), jede mit Bestätigungs-Schritt. Läuft über Admin-gegatete `dev_menu_*`-Wrapper (`is_dev_admin()` prüft die E-Mail serverseitig).
+- **In-App-Dev-Menü** (`0006` + `src/components/dev-menu.tsx`): Ribbon-Button **nur für `dominik@subworx.io`**, Drawer mit fünf Aktionen (Stadt Corso ziehen / zurücksetzen / Follows verfallen / Fake-Momente seeden / Fake-Daten löschen), jede mit Bestätigungs-Schritt. Läuft über Admin-gegatete `dev_menu_*`-Wrapper (`is_dev_admin()` prüft die E-Mail serverseitig).
 - **🔒 Security-Fix in `0006`:** Supabase-Default-Grants hatten die Roh-Funktionen aus `0005` faktisch für **jeden** `authenticated`/`anon` aufrufbar gemacht (ein `revoke from public` griff nicht gegen die expliziten Rollen-Grants). `0006` sperrt `execute` für anon/authenticated zu — nur postgres/service_role und die Admin-Wrapper rufen sie noch auf. Verifiziert via `has_function_privilege`.
 - **Zukunftssicher:** Ziehung läuft pro Stadt (`profiles.city`); weitere Städte brauchen keine Migration.
 
@@ -189,16 +189,16 @@ Das Script baut mit `NODE_ENV=production`, prüft dass kein `jsxDEV` im Bundle l
 ### Täglicher Prompt aus der DB
 
 - **40 leichte, filmbare Prompts** mit Kategorie-Hebel `zeig` / `augenzwinkern` / `funken` (14/16/10). Die 50 alten introspektiven Prompts sind **deaktiviert, nicht gelöscht** (Audit bleibt heil).
-- **`get_today_prompt()`** (SECURITY DEFINER, atomar mit Advisory-Lock) zieht **gewichtet ~40/40/20**, **nie zweimal hintereinander**, friert pro Corso-Tag ein und protokolliert in `daily_prompt` — Grundlage, um Post-Raten pro Prompt zu messen. Über 60 simulierte Tage verifiziert: 0 Doppel, Gewichtung stimmt, alle 40 rotieren.
+- **`get_today_prompt()`** (SECURITY DEFINER, atomar mit Advisory-Lock) zieht **gewichtet ~40/40/20**, **nie zweimal hintereinander**, friert pro Corso-Tag ein und protokolliert in `daily_prompt` — Grundlage, um Moment-Raten pro Prompt zu messen. Über 60 simulierte Tage verifiziert: 0 Doppel, Gewichtung stimmt, alle 40 rotieren.
 - ⚠️ **`prompts.active_date` ist seit `0013` nur noch ein LRU-Marker**, keine Historie. Wer wissen will, welcher Prompt an welchem Tag lief, muss `daily_prompt` lesen. Kein Rückfall auf `active_date` bauen — er zeigt den falschen Prompt.
 - **Frontend (Client-RPC, KEIN Server-Secret):** `useTodayPrompt` ruft `get_today_prompt()` per `supabase.rpc` mit anon-Key + User-JWT auf. Bewusst gegen die ursprüngliche Server-Action getauscht, um den service_role-Key aus dem Edge zu halten. Geteilter Query-Key → ein Call für Splash + Kamera-Overlay.
-- **`DailyPromptSplash`** (Vollbild, 3 s auto-aus, localStorage `corso_last_prompt_seen` = Corso-Tag, SSR-sicher): Hintergrund = `CityBackdrop` (dieselben geblurrten s/w Clips wie der Story-Leerzustand), einen Tick dunkler, dezenter Glas-Container um den Prompt.
+- **`DailyPromptSplash`** (Vollbild, 3 s auto-aus, localStorage `corso_last_prompt_seen` = Corso-Tag, SSR-sicher): Hintergrund = `CityBackdrop` (dieselben geblurrten s/w Clips wie der Leerzustand des Stadt Corso), einen Tick dunkler, dezenter Glas-Container um den Prompt.
 - **Migrationen:** `0008` (Umbau `prompt_date` → `active_date`), `0011` (Enum, `active`-Flag, `daily_prompt`, gewichtete Rotation, View `prompt_performance`), `0012` (Seed), `0013` (LRU-Marker).
 
 ### Rücklauf-Datenpfad
 
 - Alles über `my_feedback()` (SECURITY DEFINER, argumentlos, RLS-privat).
-- Ansichten anonym via `post_views` + `record_view()` — Discovery/Story/Ich-folge feuern beim aktiven Clip.
+- Ansichten anonym via `post_views` + `record_view()` — Discovery/Stadt Corso/Ich-folge feuern beim aktiven Clip.
 - **500-ms-Verweil-Schwelle** vor dem Verbuchen: Vorbeiziehen zählt nicht, Landen schon. (Nötig geworden, weil der Scroll-Fix vom 12. August den aktiven Index früher wechseln lässt — „Zuschauer" ist Kill-Metrik und darf nicht durch Vorbeiscrollen aufgeblasen werden.)
 - „seit gestern"-Basis: nächtlicher `snapshot_reach()`-Cron (`5 7 * * *` UTC).
 - Migration `0010`, Negativ-Test `scripts/security-test-feedback.mjs`.
@@ -246,11 +246,11 @@ Jede Abfrage mit `.is("expires_at", null)` liefert ab jetzt **null aktive Follow
 - 🔒 **`connections`** (Dating-Anbahnung) — bleibt unangetastet, verfällt nie.
 - **Anstupsen** — Limit „1 pro Person pro Zyklus" hängt weiter am 21:00-Zyklus, nicht an der 24h-Uhr.
 - **Prompt-Historie** (`daily_prompt`) — eine Zeile pro Zyklus, unverändert.
-- **Die Mediendatei im Storage** — bleibt liegen. Die 24 h werden auf Datensatz-Ebene erzwungen, nicht auf Datei-Ebene (nötig für die eingefrorene Story, und entspricht dem „nicht löschen"-Prinzip).
+- **Die Mediendatei im Storage** — bleibt liegen. Die 24 h werden auf Datensatz-Ebene erzwungen, nicht auf Datei-Ebene (nötig für die eingefrorenen Stadt Corso, und entspricht dem „nicht löschen"-Prinzip).
 
 ### Stadt-Corso schlägt Verfall
 
-Ein gezogener Moment bleibt die **ganze Story lang sichtbar** (21:00 bis zur nächsten Ziehung), auch wenn seine 24 h währenddessen ablaufen. In Discovery/Ich folge/Rücklauf ist er dann weg, im Stadt Corso steht er weiter — ein Clip kann so bis zu ~48 h im Corso stehen. Deshalb liest die Story über `city_story()` an der RLS vorbei. Damit die Kill-Metrik dabei nicht lügt, zählt `my_feedback()` die Zuschauer des Moments, der **gerade sichtbar ist** (lebend ODER im laufenden Corso) — sonst zeigte der Rücklauf 0 Zuschauer, während die halbe Stadt den Clip sieht (`latest_visible_post()`).
+Ein gezogener Moment bleibt die **ganze Story lang sichtbar** (21:00 bis zur nächsten Ziehung), auch wenn seine 24 h währenddessen ablaufen. In Discovery/Ich folge/Rücklauf ist er dann weg, im Stadt Corso steht er weiter — ein Moment kann so bis zu ~48 h im Corso stehen. Deshalb liest die Story über `city_story()` an der RLS vorbei. Damit die Kill-Metrik dabei nicht lügt, zählt `my_feedback()` die Zuschauer des Moments, der **gerade sichtbar ist** (lebend ODER im laufenden Corso) — sonst zeigte der Rücklauf 0 Zuschauer, während die halbe Stadt den Clip sieht (`latest_visible_post()`).
 
 ---
 
@@ -261,7 +261,7 @@ Ein gezogener Moment bleibt die **ganze Story lang sichtbar** (21:00 bis zur nä
 - **Inhalt:** alle **lebenden** Momente der Stadt (jünger als 24 h), neueste zuerst. Kein Tagesfilter mehr nötig — die 24h-Uhr ist der Filter.
 - **Laden:** **Infinite Scroll** (gebaut 19. Aug): `useInfiniteQuery` + `range()`, 20 pro Seite, nachgeladen 3 Kacheln vor dem Ende.
 - **Area:** = **ganze Stadt Düsseldorf** (Pilot) → Area-Filter vorerst No-Op. Feinere Area (Stadtteil/Radius) bewusst NICHT jetzt.
-- **Bestehende Regeln bleiben:** eigene Posts raus, gefolgte Personen verlassen den Feed.
+- **Bestehende Regeln bleiben:** eigene Momente raus, gefolgte Personen verlassen den Feed.
 - ⚠️ **Der Feed kann leer sein.** Bei aktuell 2 lebenden Momenten ist er es fast. Das ist die gewollte Regel (Entscheidung 19. Aug: „alte Momente sind weg") und **kein Auftrag, mit älteren Momenten aufzufüllen** — die frühere Interim-Regel „ältere als Nachschub" ist damit hinfällig.
 
 ---
@@ -354,11 +354,11 @@ Per SendGrid-API verifiziert: `subworx.io` → valid, DKIM1/DKIM2/SPF alle valid
 
 ---
 
-## Lovable-Sandbox für Story-Design
+## Lovable-Sandbox für Design des Stadt Corso
 
 Zum gefahrlosen visuellen Iterieren gibt es eigenständige Vorschau-Routen mit Mock-Daten, ohne Supabase/Auth — der echte `story.tsx` bleibt unangetastet:
 
-- **`src/routes/story-empty-lab.tsx`** (`/story-empty-lab`) — der Story-Leerzustand. Look ist fertig iteriert und nach `story.tsx` zurückportiert; die Lab-Route bleibt zum Weiter-Schrauben. **Wer hier am Look schraubt, muss Änderungen von Hand nach `story.tsx` zurücktragen** (beide Dateien halten den Countdown und den `blur`-Wert redundant synchron).
+- **`src/routes/story-empty-lab.tsx`** (`/story-empty-lab`) — der Leerzustand des Stadt Corso. Look ist fertig iteriert und nach `story.tsx` zurückportiert; die Lab-Route bleibt zum Weiter-Schrauben. **Wer hier am Look schraubt, muss Änderungen von Hand nach `story.tsx` zurücktragen** (beide Dateien halten den Countdown und den `blur`-Wert redundant synchron).
 - **`story-lab.tsx`** (Story-Karten-Sandbox) liegt **nur auf dem Branch `story-experiments`**, nicht auf `main`. Lovable arbeitet auf diesem Branch; guter Look wird manuell nach `story.tsx` zurückportiert.
 
 ---
@@ -366,7 +366,7 @@ Zum gefahrlosen visuellen Iterieren gibt es eigenständige Vorschau-Routen mit M
 ## Chronik der gelösten Bugs
 
 <details>
-<summary><strong>12. August — Scroll-Verhalten in Discovery/Story/Ich-folge repariert</strong></summary>
+<summary><strong>12. August — Scroll-Verhalten in Discovery/Stadt Corso/Ich-folge repariert</strong></summary>
 
 **Symptom:** Beim Hochwischen wurde kurz noch der bisherige Moment als aktiver gezeigt, bevor er verschwand; der neue wirkte dabei „eingefroren". Zusätzlich beim allerersten Aufruf am Tag ein verrutschtes/klemmendes Scrollen, das sich nach einem Reload gab.
 
@@ -420,7 +420,7 @@ Nur ein Reload half, auf MacBook wie Mobile. Ursache in `src/lib/auth-context.ts
 ## Offene Produkt-Entscheidungen, die jetzt relevant sind
 
 - **Auth-Methode:** Hauptweg für den Freundes-Pilot ist der **E-Mail-freie Einladungs-Link**; der Magic-Link bleibt als Rückfall. Beides bewusst Pilot-Provisorium.
-- **Privater Korso** (PRD #7) — das Push-Fenster 19–22 Uhr, Mechanik undefiniert. Wird relevant, sobald Push gebaut wird.
+- **Privater Corso** (PRD #7) — das Push-Fenster 19–22 Uhr, Mechanik undefiniert. Wird relevant, sobald Push gebaut wird.
 - **Verbindungs-Trigger bei verfallenden Follows** (PRD #8) — blockt erst Phase 3.
 - **Geschlechter-Asymmetrie** (PRD #10) — strukturell das gefährlichste offene Produkt-Risiko, Mitigation offen.
 

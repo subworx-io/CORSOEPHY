@@ -87,7 +87,7 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
 }
 
 // Discovery startet direkt beim ersten Moment — der 21:00-Countdown lebt jetzt
-// auf dem Story-Screen (dort gehört er hin: er zählt auf die Stadt Corso).
+// auf dem Story-Screen (dort gehört er hin: er zählt auf den Stadt Corso).
 const buildSlides = (tiles: Tile[]): Slide[] =>
   tiles.length > 0
     ? tiles.map((t) => ({ kind: "tile" as const, ...t }))
