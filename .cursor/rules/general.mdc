@@ -1,5 +1,6 @@
 ---
 description: Allgemeine Code-Stil-Regeln und Kommunikationssprache
+alwaysApply: true
 ---
 
 # Allgemeine Regeln
@@ -9,11 +10,13 @@ description: Allgemeine Code-Stil-Regeln und Kommunikationssprache
 - Code (Variablen, Funktionen, Klassen): **Englisch**
 - Commit-Messages: **Englisch**
 
-## Code-Stil
+## Code-Stil (via `.prettierrc` erzwungen — bei Zweifel gilt Prettier)
 - Einrückung: 2 Spaces
-- Semikolons: je nach Projekt-Konvention (TODO: festlegen)
-- Anführungszeichen: einfach (`'`) außer bei JSX-Attributen (`"`)
-- Maximale Zeilenlänge: 100 Zeichen
+- Semikolons: **ja** (`semi: true`)
+- Anführungszeichen: **doppelt** (`"`), `singleQuote: false`
+- Trailing Commas: überall (`trailingComma: "all"`)
+- Maximale Zeilenlänge: 100 Zeichen (`printWidth: 100`)
+- Vor dem Commit `bun run format` laufen lassen
 - Keine `console.log` im finalen Code – stattdessen strukturiertes Logging
 
 ## Funktionen & Variablen

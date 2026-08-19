@@ -1,5 +1,6 @@
 ---
-description: Erlaubte Libraries, verbotene Patterns und Stack-Entscheidungen für Korso
+description: Erlaubte Libraries, verbotene Patterns und Stack-Entscheidungen für Corso
+alwaysApply: true
 ---
 
 # Stack & Libraries
@@ -23,6 +24,12 @@ description: Erlaubte Libraries, verbotene Patterns und Stack-Entscheidungen fü
 - **Material Symbols Outlined** — Icons via Google Fonts (`<span className="material-symbols-outlined">`)
 - **Lucide React** — Backup-Icons
 
+## Backend
+
+- **Supabase** (`@supabase/supabase-js`) — Auth (Magic-Link), Postgres + RLS, Storage, Cron.
+- Browser-Client: `src/lib/supabase/client.ts` (VITE_-Keys, öffentlich). Server-Client: `src/lib/supabase/server.ts` (service_role, nie ins Bundle).
+- DB-Schema = `supabase/migrations/`. Änderungen immer als neue Migration, nie am Live-Schema vorbei.
+
 ## Formulare & Validierung
 
 - **React Hook Form** + **Zod** — immer zusammen verwenden
@@ -35,6 +42,7 @@ description: Erlaubte Libraries, verbotene Patterns und Stack-Entscheidungen fü
 | `@tanstack/react-router` | Routing |
 | `@tanstack/react-query` | Server State |
 | `@tanstack/react-start` | Framework |
+| `@supabase/supabase-js` | Backend (Auth, DB, Storage) |
 | `react-hook-form` + `zod` | Formulare |
 | `tailwindcss` v4 | Styling |
 | `shadcn/ui` (Radix-based) | UI-Komponenten |
@@ -73,4 +81,6 @@ Tailwind CSS v4 — utility-first.
 
 ## Testing
 
-Noch nicht konfiguriert — wird festgelegt sobald Backend steht.
+Kein Unit-/E2E-Framework konfiguriert. Vorhanden sind Security-Smoke-Tests als
+Node-Skripte: `scripts/security-test-follows.mjs`, `scripts/security-test-feedback.mjs`
+(prüfen RLS-Härtung; per `node scripts/…` gegen eine Supabase-Instanz laufen lassen).
