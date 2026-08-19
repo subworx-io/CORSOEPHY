@@ -6,7 +6,7 @@ export interface Profile {
   handle: string; // @handle, 1 Gesicht = 1 Handle
   city: string;
   display_name: string | null; // frei editierbarer Anzeigename (optional); Identität bleibt der @handle
-  push_enabled: boolean; // Push-Präferenz — nur gespeichert, Push-Logik folgt später
+  push_enabled: boolean; // Push-*Absicht* des Nutzers; die Geräte-Erlaubnis liegt in push_subscriptions
   created_at: string;
 }
 
@@ -57,6 +57,20 @@ export interface Follow {
   expires_at: string;
 }
 
+// Ein Web-Push-Abo = ein Gerät/Browser, nicht ein Mensch (0016).
+// 🔒 Nur für den eigenen Nutzer lesbar; der endpoint ist ein Geräte-Identifikator.
+export interface PushSubscriptionRow {
+  id: string;
+  user_id: string;
+  endpoint: string; // Push-Dienst-Endpunkt (Apple/Google/Mozilla), global eindeutig
+  p256dh: string; // Schlüssel für die Nutzlast-Verschlüsselung (RFC 8291)
+  auth: string;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string; // vom Client bei jedem Start aufgefrischt
+  failure_count: number; // aufeinanderfolgende Zustellfehler
+}
+
 export interface Nudge {
   id: string;
   nudger_id: string;
@@ -91,11 +105,19 @@ export interface PostView {
 }
 
 // Rückgabe von my_feedback() — die einzige (private) Lese-Oberfläche des Rücklaufs.
-// Deltas sind null, solange es kein Gestern gibt (has_yesterday = false).
+// Seit 0017 entlang der zwei Kräfte (PRD §1): was der laufende Moment eingebracht
+// hat (views/stayed/in_city_story) und was verfällt, wenn nichts nachkommt (at_risk).
+// Kein „seit gestern"-Delta mehr — der Bezugsrahmen ist der Moment, nicht der Zyklus.
 export interface MyFeedback {
-  publikum: number;
-  publikum_delta: number | null;
-  zuschauer: number;
-  zuschauer_delta: number | null;
-  has_yesterday: boolean;
+  followers: number;
+  views: number;
+  stayed: number;
+  at_risk: number;
+  moment_id: string | null;
+  moment_live: boolean;
+  moment_created_at: string | null;
+  moment_expires_at: string | null;
+  in_city_story: boolean;
+  is_record: boolean;
+  streak: number;
 }
