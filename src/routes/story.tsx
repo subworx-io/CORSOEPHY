@@ -7,6 +7,7 @@ import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { FollowButton } from "@/components/follow-button";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { recordView } from "@/lib/record-view";
+import { logEvent } from "@/lib/events";
 import { corsoDay, nextCycleStart } from "@/lib/corso-day";
 import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { MomentPrompt } from "@/components/moment-prompt";
@@ -118,6 +119,15 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
 
 function StoryPage() {
   const { user } = useAuth();
+
+  // story_viewed (Metrik-Tracking): einmal beim Öffnen des Story-Screens, wenn
+  // eingeloggt. Bewusst getrennt von app_open — das Öffnen der Stadt Corso ist
+  // ein eigenes Signal (kann parallel zu app_open auftreten, wird getrennt
+  // ausgewertet). Fire-and-forget; ein Log-Fehler stört die Story nicht.
+  useEffect(() => {
+    if (!user) return;
+    logEvent("story_viewed");
+  }, [user]);
 
   // Die stadtweit eingefrorene Auswahl des heutigen Corso-Tags. Alle Nutzer der
   // Stadt lesen exakt dieselben Slots (serverseitig um 21:00 gezogen).

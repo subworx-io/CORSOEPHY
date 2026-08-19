@@ -15,6 +15,8 @@ Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (
 
 **Am Abend des 19. August umgestellt:** Der feste Tagesrhythmus ist weg. Verfall läuft jetzt **pro Datensatz 24 h ab Entstehung**, der Zyklus-Wechsel (Prompt + Stadt-Corso-Ziehung) liegt auf **21:00** statt 08:00/20:00. Details unten unter „Rollender 24h-Verfall". Discovery hat dabei ihr Infinite Scroll bekommen.
 
+**Metrik-Tracking ab Tag 1 (gebaut, noch nicht angewendet):** Ein write-only Event-Log (`events` + `log_event()`, Migration `0018_events.sql`, Muster wie `post_views`/`reports`) plus Client-Instrumentierung: `app_open` (Start/Fokus, 5-min-entprellt), `story_viewed`, `moment_posted`, `follow_set` (mit `kind: follow|renew`), `nudge_sent`. Server: `draw_city_story()` schreibt zusätzlich `story_drawn` je gezogenem Slot. **Offen (Koordinator):** `follow_expired` bleibt reservierter Enum ohne Feuer-Pfad — seit `0015` gibt es keinen Verfall-Cron mehr, Verfall ist bei der Auswertung aus `follows.expires_at` ableitbar (Empfehlung: kein Marker-Job). Migration ist NICHT angewendet, Branch NICHT gepusht.
+
 **Was Phase 1 noch fehlt:** Push-Notifications.
 **Was den Pilot-Start blockiert:** zwei Config-Schritte von je unter 5 Minuten (siehe „Offene Punkte").
 

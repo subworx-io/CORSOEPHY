@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { cycleStart } from "@/lib/corso-day";
+import { logEvent } from "@/lib/events";
 
 export interface FollowedPerson {
   handle: string;
@@ -174,6 +175,9 @@ export function FollowProvider({ children }: { children: ReactNode }) {
           },
           { onConflict: "follower_id,followee_id" },
         );
+        // follow_set (Metrik-Tracking): kind unterscheidet Erst-Follow von Erneuerung
+        // (PRD-Open-Question). 🔒 metadata nur Referenz-ID + Enum. Fire-and-forget.
+        logEvent("follow_set", { followee_id: followeeId, kind: "follow" });
         await load();
       })();
     },
@@ -230,6 +234,8 @@ export function FollowProvider({ children }: { children: ReactNode }) {
           },
           { onConflict: "follower_id,followee_id" },
         );
+        // follow_set (Metrik-Tracking): Erneuerung → kind = "renew". Fire-and-forget.
+        logEvent("follow_set", { followee_id: followeeId, kind: "renew" });
         await load();
       })();
     },
@@ -254,6 +260,8 @@ export function FollowProvider({ children }: { children: ReactNode }) {
             { nudger_id: user.id, nudged_id: followeeId },
             { onConflict: "nudger_id,nudged_id,nudge_date" },
           );
+        // nudge_sent (Metrik-Tracking): 🔒 metadata nur die Referenz-ID. Fire-and-forget.
+        logEvent("nudge_sent", { nudged_id: followeeId });
       })();
     },
     [user],
