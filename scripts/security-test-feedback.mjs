@@ -80,9 +80,22 @@ console.log(`A's neuester Post: ${aPostId ?? "(keiner)"}`);
 {
   const r = await B.rpc("my_feedback");
   const row = r.data?.[0];
-  const sameAsA = aFeedback && row && row.publikum === aFeedback.publikum && row.zuschauer === aFeedback.zuschauer;
+  const sameAsA = aFeedback && row && row.followers === aFeedback.followers && row.views === aFeedback.views;
   // „Gleich" wäre nur zufällig identische Zahlen; entscheidend: B kann A NICHT ADRESSIEREN.
   check("B's my_feedback liefert nur B's Zahlen", !r.error, `B=${JSON.stringify(row)} (kein Argument → A nicht adressierbar; zufällige Gleichheit=${!!sameAsA})`);
+}
+
+// Angriff 1b: my_feedback nimmt auch nach 0017 KEIN Argument — die neuen Felder
+// (at_risk, stayed, streak, is_record) sind damit ebenfalls nicht fremd-abfragbar.
+{
+  const r = await B.rpc("my_feedback", { target_user: aId });
+  check("my_feedback akzeptiert kein Ziel-Argument", !!r.error, `error=${r.error?.message ?? "KEIN FEHLER — Funktion nimmt ein Argument!"}`);
+}
+
+// Angriff 1c: B versucht A's „auf der Kippe"-Fenster selbst zu rekonstruieren.
+{
+  const r = await B.from("follows").select("expires_at", { count: "exact", head: true }).eq("followee_id", aId);
+  check("B zählt A's auslaufende Follows", (r.count ?? 0) === 0, `count=${r.count}`);
 }
 
 if (aPostId) {

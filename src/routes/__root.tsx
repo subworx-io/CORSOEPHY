@@ -63,6 +63,7 @@ import { FollowProvider } from "../lib/follow-context";
 import { AuthProvider } from "../lib/auth-context";
 import { AuthGate } from "../components/auth-gate";
 import { DailyPromptSplash } from "../components/daily-prompt-splash";
+import { PushOptinSplash } from "../components/push-optin-splash";
 
 function NotFoundComponent() {
   return (
@@ -205,6 +206,7 @@ function RootComponent() {
               <Toaster />
             </div>
             <DailyPromptSplash />
+            <PushOptinSplash />
           </FollowProvider>
         </AuthGate>
       </AuthProvider>

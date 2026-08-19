@@ -5,6 +5,7 @@ import { useCamera } from "@/hooks/use-camera";
 import { useAuth } from "@/lib/auth-context";
 import { uploadMoment } from "@/lib/supabase/upload";
 import { useTodayPrompt } from "@/lib/prompts/use-today-prompt";
+import { logEvent } from "@/lib/events";
 
 export const Route = createFileRoute("/record")({
   head: () => ({
@@ -45,11 +46,14 @@ function RecordPage() {
     if (!cam.recordedBlob || !user) return;
     setUploadStatus("uploading");
     setUploadError(null);
-    const { error } = await uploadMoment(cam.recordedBlob, user.id, cityStory);
+    const { post, error } = await uploadMoment(cam.recordedBlob, user.id, cityStory);
     if (error) {
       setUploadStatus("error");
       setUploadError(error);
     } else {
+      // moment_posted (Metrik-Tracking): nach erfolgreichem Upload/Post.
+      // 🔒 metadata trägt nur die Referenz-ID, keine Clip-Inhalte. Fire-and-forget.
+      logEvent("moment_posted", post ? { post_id: post.id } : null);
       setUploadStatus("done");
       await queryClient.invalidateQueries({ queryKey: ["discovery"] });
       setTimeout(() => void navigate({ to: "/" }), 1200);

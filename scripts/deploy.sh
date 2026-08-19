@@ -51,8 +51,11 @@ cp    dist/server/_tanstack-start-manifest*.mjs deploy/ 2>/dev/null || true
 echo '{"name":"corso-deploy","version":"1.0.0","sideEffects":true}' > deploy/package.json
 
 # Routes: all dynamic except static assets
+# /sw.js MUSS statisch ausgeliefert werden, nicht durch den SSR-Worker: ein
+# Service Worker, der als HTML zurückkommt, registriert sich nicht — und Push
+# scheitert dann ohne erkennbare Fehlermeldung.
 cat > deploy/_routes.json << 'EOF'
-{"version":1,"include":["/*"],"exclude":["/assets/*","/favicon.ico","/manifest.json"]}
+{"version":1,"include":["/*"],"exclude":["/assets/*","/favicon.ico","/manifest.json","/sw.js"]}
 EOF
 
 echo "▸ Deploy to Cloudflare Pages..."

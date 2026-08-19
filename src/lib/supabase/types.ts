@@ -6,7 +6,7 @@ export interface Profile {
   handle: string; // @handle, 1 Gesicht = 1 Handle
   city: string;
   display_name: string | null; // frei editierbarer Anzeigename (optional); Identität bleibt der @handle
-  push_enabled: boolean; // Push-Präferenz — nur gespeichert, Push-Logik folgt später
+  push_enabled: boolean; // Push-*Absicht* des Nutzers; die Geräte-Erlaubnis liegt in push_subscriptions
   created_at: string;
 }
 
@@ -55,6 +55,20 @@ export interface Follow {
   // followed_at + 24h, per DB-Trigger erzwungen (0015). Aktiv = expires_at > now().
   // ⚠️ Vor 0015 bedeutete NULL „aktiv" — diese Semantik gilt NICHT mehr.
   expires_at: string;
+}
+
+// Ein Web-Push-Abo = ein Gerät/Browser, nicht ein Mensch (0016).
+// 🔒 Nur für den eigenen Nutzer lesbar; der endpoint ist ein Geräte-Identifikator.
+export interface PushSubscriptionRow {
+  id: string;
+  user_id: string;
+  endpoint: string; // Push-Dienst-Endpunkt (Apple/Google/Mozilla), global eindeutig
+  p256dh: string; // Schlüssel für die Nutzlast-Verschlüsselung (RFC 8291)
+  auth: string;
+  user_agent: string | null;
+  created_at: string;
+  last_seen_at: string; // vom Client bei jedem Start aufgefrischt
+  failure_count: number; // aufeinanderfolgende Zustellfehler
 }
 
 export interface Nudge {
@@ -110,11 +124,37 @@ export interface CityMomentCounts {
 }
 
 // Rückgabe von my_feedback() — die einzige (private) Lese-Oberfläche des Rücklaufs.
-// Deltas sind null, solange es kein Gestern gibt (has_yesterday = false).
+// Seit 0017 entlang der zwei Kräfte (PRD §1): was der laufende Moment eingebracht
+// hat (views/stayed/in_city_story) und was verfällt, wenn nichts nachkommt (at_risk).
+// Kein „seit gestern"-Delta mehr — der Bezugsrahmen ist der Moment, nicht der Zyklus.
 export interface MyFeedback {
-  publikum: number;
-  publikum_delta: number | null;
-  zuschauer: number;
-  zuschauer_delta: number | null;
-  has_yesterday: boolean;
+  followers: number;
+  views: number;
+  stayed: number;
+  at_risk: number;
+  moment_id: string | null;
+  moment_live: boolean;
+  moment_created_at: string | null;
+  moment_expires_at: string | null;
+  in_city_story: boolean;
+  is_record: boolean;
+  streak: number;
 }
+
+// Kanonische Event-Typen des Metrik-Logs (0018_events.sql). Muss exakt zum
+// event_type-Check der Tabelle + zur Validierung in log_event() passen.
+// events ist write-only (RLS ohne Lese-Policy) → kein Row-Interface nötig,
+// clientseitig wird nur dieser Union als RPC-Argument gebraucht.
+//   follow_expired — reserviert, wird NICHT gefeuert (Verfall implizit über
+//                    follows.expires_at seit 0015, kein Cron mehr).
+//   chat_reached   — reserviert (Phase 3, Chat existiert nicht).
+//   story_drawn    — nur serverseitig in draw_city_story() geschrieben.
+export type EventType =
+  | "app_open"
+  | "moment_posted"
+  | "follow_set"
+  | "follow_expired"
+  | "story_viewed"
+  | "nudge_sent"
+  | "chat_reached"
+  | "story_drawn";

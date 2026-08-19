@@ -5,12 +5,16 @@ import { useAuth } from "@/lib/auth-context";
 import { useBlocks } from "@/lib/blocks/use-blocks";
 import { Switch } from "@/components/ui/switch";
 import type { Profile } from "@/lib/supabase/types";
+import { usePush } from "@/hooks/use-push";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
     meta: [
       { title: "Einstellungen — Corso" },
-      { name: "description", content: "Benachrichtigungen, Sicherheit, Rechtliches und dein Konto." },
+      {
+        name: "description",
+        content: "Benachrichtigungen, Sicherheit, Rechtliches und dein Konto.",
+      },
     ],
   }),
   component: SettingsPage,
@@ -78,19 +82,45 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 /* 1. Benachrichtigungen ------------------------------------------------- */
 
+/*
+ * Zwei Dinge müssen zusammenkommen, damit ein Push ankommt:
+ *   profiles.push_enabled  — die Absicht des Nutzers (0014)
+ *   ein Eintrag in push_subscriptions — die Erlaubnis dieses Geräts (0016)
+ *
+ * Der Switch steht deshalb nur auf „an", wenn beides stimmt. Sie können
+ * auseinanderlaufen — iOS wirft das Abo weg, wenn die PWA neu installiert
+ * wird. Diesen Fall benennen wir, statt ihn zu verschlucken: sonst glaubt
+ * jemand, Push sei an, und wundert sich still über die Stille um 21:00.
+ */
+
 function NotificationsSection({ profile }: { profile: Profile }) {
   const { updateProfile } = useAuth();
-  // Optimistischer lokaler Stand; bei DB-Fehler zurückrollen.
-  const [enabled, setEnabled] = useState(profile.push_enabled);
+  const { status, busy, enable, disable } = usePush();
+  const [wanted, setWanted] = useState(profile.push_enabled);
   const [saving, setSaving] = useState(false);
 
+  const on = status === "on" && wanted;
+  // Die Absicht steht, aber genau dieses Gerät hört nicht zu.
+  const staleOnThisDevice = wanted && (status === "off" || status === "blocked");
+
   async function toggle(next: boolean) {
-    setEnabled(next);
     setSaving(true);
-    const { error } = await updateProfile({ push_enabled: next });
-    setSaving(false);
+    // Reihenfolge ist Absicht: erst das Abo (auf iOS muss die Berechtigungs-
+    // abfrage am Fingertipp hängen), erst danach die Präferenz speichern.
+    const { error } = next ? await enable() : await disable();
+
     if (error) {
-      setEnabled(!next); // zurückrollen
+      setSaving(false);
+      toast.error(error);
+      return;
+    }
+
+    setWanted(next);
+    const result = await updateProfile({ push_enabled: next });
+    setSaving(false);
+
+    if (result.error) {
+      setWanted(!next);
       toast.error("Konnte nicht gespeichert werden.");
     }
   }
@@ -101,17 +131,43 @@ function NotificationsSection({ profile }: { profile: Profile }) {
         <div>
           <p className="text-sm font-medium">Push-Benachrichtigungen</p>
           <p className="mt-0.5 text-xs leading-snug text-white/40">
-            Push kommt bald — deine Wahl ist schon gespeichert.
+            {status === "blocked"
+              ? "In den Einstellungen deines Geräts für Corso erlauben."
+              : staleOnThisDevice
+                ? "Auf diesem Gerät gerade nicht aktiv — einmal aus- und wieder einschalten."
+                : "Um 21:00, wenn deine Stadt spazieren geht."}
           </p>
         </div>
         <Switch
-          checked={enabled}
-          disabled={saving}
+          checked={on}
+          disabled={saving || busy || status === "loading" || status === "blocked"}
           onCheckedChange={toggle}
           aria-label="Push-Benachrichtigungen"
           className="data-[state=checked]:bg-white data-[state=unchecked]:bg-white/20"
         />
       </div>
+
+      {/* 🔒 iOS lässt Web Push ausschließlich aus der installierten PWA zu.
+          Ohne diesen Hinweis bleibt der Switch für iPhone-Nutzer wirkungslos
+          und unerklärlich — das ist der Regelfall im Düsseldorfer Pilot. */}
+      {status === "needs-install" && (
+        <div className="border-t border-white/5 px-4 py-4">
+          <p className="text-xs leading-relaxed text-white/60">
+            Damit Corso dich abends erreicht, muss die App auf dem Home-Bildschirm liegen: unten auf{" "}
+            <span className="text-white/80">Teilen</span> tippen, dann{" "}
+            <span className="text-white/80">Zum Home-Bildschirm</span>. Danach Corso von dort öffnen
+            und hier einschalten.
+          </p>
+        </div>
+      )}
+
+      {status === "unsupported" && (
+        <div className="border-t border-white/5 px-4 py-4">
+          <p className="text-xs leading-relaxed text-white/60">
+            Dieser Browser kann keine Push-Benachrichtigungen. Auf dem Handy funktioniert es.
+          </p>
+        </div>
+      )}
     </Section>
   );
 }
