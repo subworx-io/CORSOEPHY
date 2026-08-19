@@ -1,6 +1,6 @@
 # Corso — Roadmap
 
-**Version:** 0.1 (Stand 18. Juni 2026)
+**Version:** 0.2 (Stand 19. August 2026)
 **Bezug:** Ergänzt das PRD (`docs/PRD.md`). Bei Konflikt gewinnt das PRD.
 **Zweck:** Priorisierte Bau-Reihenfolge vom aktuellen Klick-Prototyp zu einem mit Freunden teilbaren MVP.
 
@@ -8,14 +8,20 @@
 
 ---
 
-## Aktueller Stand (Ausgangspunkt)
+## Aktueller Stand (19. August 2026)
 
-Klickbarer Frontend-Prototyp (TanStack Start, mobile-first, PWA-fähig). Die 5 Kern-Screens + ein minimaler Einstellungen-Screen (Screen 10, seit 16. Juli) existieren; drei Rechts-Platzhalterseiten (Impressum/Datenschutz/AGB) angelegt. **Backend-Fundament steht** (Supabase): Auth, Posts/Upload, Follows/Nudges und 08:00-Reset sind serverseitig. Stand 7. Juli ist der **Follow-Loop de-mockt** — Discovery/„Ich folge" nur noch echte DB-Daten, keine localStorage-Seeds mehr.
+**Phase 0 ist abgeschlossen. Phase 1 ist zu ~60 % gebaut.**
 
-**Steht solide (leitplanken-treu):** Discovery (echte Posts), Aufnahme (Live-Kamera + Upload), Ich-folge (echter Follow-Graph, verfallendes Herz).
-**Noch Mock/offen:** verdienter Chat, Metrik-Tracking. *(Stadt-Story-Auswahl seit 15. Juli echt; Rücklauf-Screen mit echten privaten Zahlen — Publikum + Zuschauer inkl. Pool — seit 15. Juli live; Onboarding-Login-Zustellung für den Pilot über E-Mail-freie Einladungs-Links gelöst — Details in `docs/STATUS.md`.)*
+Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop läuft **ohne Mock**: posten → in Discovery erscheinen → folgen → in die Stadt-Story gezogen werden → private Zahl im Rücklauf. Alle 5 Kern-Screens plus ein minimaler Einstellungen-Screen (Screen 10) und drei Rechts-Platzhalterseiten existieren.
 
-> Tagesaktueller Detail-Stand (WIP, uncommitted Änderungen, nächster konkreter Schritt) → `docs/STATUS.md`.
+**Am 19. August gegen die Live-DB verifiziert:** Alle drei Server-Jobs laufen mit echten Daten — die Stadt-Story wurde am 1., 2. und 13. August real um 20:00 Berlin aus echten einwilligenden Posts gezogen; der Reichweiten-Snapshot lief zuletzt heute Morgen; der Follow-Verfall stempelte zuverlässig um 08:00. **Überholt seit 19. August abends:** der 08:00-Reset ist durch den individuellen 24h-Verfall ersetzt, die Ziehung läuft um 21:00 (`0015_rolling_24h_expiry.sql`).
+
+**Es fehlt in Phase 1:** Infinite Scroll in der Discovery und Push-Notifications.
+**Noch gar nicht gebaut:** verdienter Chat (Phase 3), Metrik-Tracking und Report/Block (Phase 2).
+
+> ⚠️ **Der Freundes-Pilot hat noch nicht begonnen.** Die `invites`-Tabelle ist leer, und das Cloudflare-Secret zum Einlösen der Einladungs-Links ist nicht gesetzt — der Haupt-Onboarding-Weg ist damit funktionsunfähig. Es gibt entsprechend **kein einziges Signal zu den Kill-Metriken.** Details und Befehle in `docs/STATUS.md`.
+
+> Tagesaktueller Detail-Stand und die konkreten nächsten Schritte → `docs/STATUS.md`.
 
 ---
 
@@ -41,16 +47,16 @@ Klickbarer Frontend-Prototyp (TanStack Start, mobile-first, PWA-fähig). Die 5 K
 - Auth (Magic-Link oder Telefonnummer, kein Passwort nötig).
 - Persistenz für: User, Posts, Follows, Anstupser.
 - Video-Upload + Storage + Auslieferung (der disabled „Verwenden"-Button wird funktional).
-- Der **08:00-Reset als echter Server-Job** (Follows verfallen, Discovery leert sich, neuer Prompt).
-- Follow-Logik vom React-Context ins Backend migrieren (24h-Verfall, 08:00-Reset, `canRenew`).
+- ~~Der **08:00-Reset als echter Server-Job**~~ — **abgelöst am 19. August**: Verfall läuft ohne Job, rein über `expires_at > now()` pro Datensatz.
+- Follow-Logik vom React-Context ins Backend migrieren (24h-Verfall, `canRenew` ab 12h). Serverseitig erzwungen ist seit `0015` der Verfall selbst (Trigger); die Anzeige-Logik lebt weiter im Context.
 
 **Akzeptanzkriterien:**
 - [x] Zwei verschiedene Handys sehen denselben geteilten Zustand. *(Datenebene 7. Juli verifiziert: Follows/Posts/Nudges serverseitig, kein localStorage mehr. Realer Zwei-Geräte-Test steht noch aus — hängt an der Login-Zustellung, siehe STATUS.)*
 - [x] Ein hochgeladener Clip erscheint auf einem anderen Gerät in der Discovery. *(7. Juli: Upload + `posts`-Insert unter RLS verifiziert; Discovery lädt echte Posts, Mock-Fallback entfernt.)*
 - [x] Follow überlebt App-Reload. *(7. Juli: `follow-context` lädt aktive Follows aus der DB statt aus Seeds/localStorage.)*
-- [x] Um 08:00 verfallen Follows serverseitig, ohne dass ein Client offen sein muss. *(pg_cron `expire-follows-daily`, `0003_follows_expiry.sql`.)*
+- [x] Follows verfallen serverseitig, ohne dass ein Client offen sein muss. *(Bis 19. Aug: pg_cron `expire-follows-daily`, `0003`. Seit `0015`: 24h ab Follow, per `expires_at` in jeder Query — der Cron ist ersatzlos entfallen.)*
 
-**Phase 0 inhaltlich abgeschlossen (15. Juli):** Aufnahme-UI-Flow (Kamera→Upload) im echten Browser end-to-end verifiziert — aufgenommener Clip erscheint bei anderen Usern in Discovery. Damit ist auch der geräte-übergreifende Konsum-Loop real bestätigt. Einziger noch nicht sauber gelöster Punkt bleibt die **Login-Mail-Zustellung** (Spam-Placement, siehe STATUS) — bis dahin Login via Admin-Links.
+**Phase 0 abgeschlossen (15. Juli):** Aufnahme-UI-Flow (Kamera→Upload) im echten Browser end-to-end verifiziert — aufgenommener Clip erscheint bei anderen Usern in Discovery. Damit ist auch der geräte-übergreifende Konsum-Loop real bestätigt. Die damals noch offene **Login-Mail-Zustellung** (Spam-Placement) ist ebenfalls gelöst — Magic-Link-Mails landen im Posteingang; für den Freundes-Pilot ist der Einladungs-Link ohnehin der Hauptweg.
 
 **Bewusst NICHT in Phase 0:** ID-Verifizierung, Push, Stadt-Story-Algorithmus, Chat.
 
@@ -63,21 +69,23 @@ Klickbarer Frontend-Prototyp (TanStack Start, mobile-first, PWA-fähig). Die 5 K
 **Die Kette:** Post hochladen → erscheint in Discovery → folgbar → kann in Stadt-Story gezogen werden → Rücklauf zeigt echte Zahl → Push bringt zurück.
 
 **Scope:**
-- ✅ **Stadt-Story-Auswahl als echter Mechanismus** (statt 8 Mock-Clips) — **erledigt 15. Juli** (`0005_city_story_draw.sql` live, `story.tsx` de-mockt, Details in `docs/STATUS.md`). Serverseitige gewichtete Zufallsziehung: `w = 1 + ln(1 + aktive_follower)`, Grundchance > 0 für jeden Clip, stadtweit eingefroren via pg_cron um 20:00 Berlin.
+- ✅ **Stadt-Story-Auswahl als echter Mechanismus** (statt 8 Mock-Clips) — **erledigt 15. Juli** (`0005_city_story_draw.sql` live, `story.tsx` de-mockt, Details in `docs/STATUS.md`). Serverseitige gewichtete Zufallsziehung: `w = 1 + ln(1 + aktive_follower)`, Grundchance > 0 für jeden Clip, stadtweit eingefroren via pg_cron um 21:00 Berlin (bis 19. Aug: 20:00).
   - 🔒 LEITPLANKE: keine sichtbaren Reaktions-/Follower-Zahlen während der Story. ✅ eingehalten (Query selektiert keine Zahlen).
   - 🔒 LEITPLANKE: nur einwilligungs-markierte Clips kommen in Frage. ✅ serverseitig erzwungen.
   - ~~`[ENTSCHEIDUNG OFFEN]` Stadt-Story-Größe/Frequenz~~ → **entschieden:** immer mit so vielen einwilligenden Clips wie da sind (max. 8), kein Mindest-Schwellwert, kein Fake-Auffüllen.
-- **Discovery als langer Scroll-Feed** (aktuell hartes `limit 20` ohne Pagination): **Infinite Scroll** (erst ~20, beim Erreichen des Endes nächste 20 nachladen), Reihenfolge **heute zuerst → ältere als Nachschub**. Ziel: ausgedehntes Scrollverhalten etablieren. Details in `docs/STATUS.md`.
+- **Discovery als langer Scroll-Feed** — **noch nicht gebaut** (`src/routes/index.tsx:99-100` hat weiterhin ein hartes `limit 20` ohne Pagination und ohne Tages-Ordering). Ziel: **Infinite Scroll** (erst ~20, beim Erreichen des Endes nächste 20 nachladen), Reihenfolge **heute zuerst → ältere als Nachschub**, um ein ausgedehntes Scrollverhalten zu etablieren. Details in `docs/STATUS.md`.
   - **Entschieden (15. Juli):** Area = **ganze Stadt Düsseldorf** (Area-Filter vorerst No-Op). Interim ältere Momente als Nachschub, **Endzustand nur heute** (`prompt_date = corso_day(now())`) — bewusst erst später, nicht jetzt eingrenzen.
 - ~~**Rücklauf-Screen mit echten Zahlen**~~ → **✅ gebaut & live (15. Juli):** `feedback.tsx` zeigt zwei private Kennzahlen — **Publikum** (aktive Follower) + **Zuschauer** (eindeutige Betrachter des letzten Moments, inkl. anonymer Pool-Zuschauer, PRD-Entscheidung #3 = JA) — je mit neutralem „seit gestern"-Delta. Bewusst **zwei** statt drei Zahlen: „Follower" und „Publikum" wären identisch → keine Redundanz. Ansichten anonym via `post_views`/`record_view`; „seit gestern"-Basis via nächtlichem `snapshot_reach`-Cron; alles über `my_feedback()` (RLS-privat, SECURITY DEFINER). Migration `0010`, deployed. **Dies ist die Datenquelle für die Kill-Metrik „aktiver-Post-Anteil".**
-- **Push-Notifications** (PWA-fähig): 20:00-Stadt-Story-Push + Push, wenn eine gefolgte Person postet.
+- **Push-Notifications** (PWA-fähig): 21:00-Stadt-Story-Push + Push, wenn eine gefolgte Person postet. **Noch nicht begonnen** — im Code existiert nur `public/manifest.json`, kein Service Worker, keine `PushManager`-Anbindung.
+  - ⚠️ Dies ist der wichtigste offene Punkt der Phase: **ohne Push gibt es keinen strukturellen Grund zurückzukommen.** Die Kill-Metrik „Daily-Open-Rate ≥ 50 %" wäre ohne Push nicht fair messbar.
+  - `[ENTSCHEIDUNG OFFEN]` Die genaue Mechanik des „Privaten Korso" (Push-Fenster 19–22 Uhr, PRD #7) ist ungeklärt und wird hier zum ersten Mal relevant.
 
 **Akzeptanzkriterien:**
-- [x] Stadt-Story zeigt um 20:00 real geposteten Content, nicht Mock. *(15. Juli: `story.tsx` liest `city_story_slots`; Ziehung serverseitig live + verifiziert.)*
+- [x] Stadt-Story zeigt zur Ziehungszeit real geposteten Content, nicht Mock. *(15. Juli gebaut; **19. August in der Live-DB bestätigt**: echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Posts. Damit ist auch ein echter Cron-Lauf mit echtem Content belegt, nicht nur ein manueller Force-Draw.)*
 - [x] Ein Clip ohne Einwilligung erscheint NIE in der Stadt-Story. *(Serverseitiger `city_story_consent = true`-Filter in `draw_city_story`.)*
 - [ ] Discovery lädt beim Runterscrollen weitere Momente nach (Infinite Scroll), heute zuerst.
-- [x] Rücklauf zeigt für jeden User die korrekte private Zahl. *(15. Juli: `my_feedback()` — Publikum + Zuschauer + „seit gestern"-Deltas; RLS-privat, Negativ-Test `scripts/security-test-feedback.mjs` Layer 1 grün. Deltas erscheinen ab dem ersten `snapshot_reach`-Lauf.)*
-- [ ] 20:00-Push kommt zuverlässig an.
+- [x] Rücklauf zeigt für jeden User die korrekte private Zahl. *(15. Juli: `my_feedback()` — Publikum + Zuschauer; RLS-privat, Negativ-Test `scripts/security-test-feedback.mjs` Layer 1 grün. **Die „seit gestern"-Deltas sind seit dem laufenden `snapshot_reach`-Cron real** — zuletzt am 19. August ausgeführt.)*
+- [ ] 21:00-Push kommt zuverlässig an.
 
 ---
 
@@ -130,14 +138,27 @@ Klickbarer Frontend-Prototyp (TanStack Start, mobile-first, PWA-fähig). Die 5 K
 
 ## Offene Punkte, die die Roadmap blockieren können
 
+### Technische Blocker (nicht Entscheidungen — nur Ausführung)
+
+Beide sind am 19. August live verifiziert, kosten je unter 5 Minuten und blockieren den Pilot-Start. Befehle in `docs/STATUS.md`.
+
+| # | Punkt | Wirkung |
+|---|---|---|
+| T1 | Cloudflare-Secret `SUPABASE_SERVICE_ROLE_KEY` nicht gesetzt | **Einladungs-Links sind funktionsunfähig** → der Haupt-Onboarding-Weg des Freundes-Pilots. Blockt Pilot-Start. |
+| T2 | Migration `0014_profile_settings.sql` nicht angewendet | Push-Präferenz + Anzeigename im Einstellungen-Screen werfen eine Fehler-Toast. |
+
+### Offene Entscheidungen
+
 | # | Punkt | Bezug | Status |
 |---|---|---|---|
 | 1 | Stadt-Story zieht nur „wer heute gepostet hat" + Follower-Gewicht → Cold-Start-Schutz geschwächt ggü. v0.1 | PRD §4.6 | **Bewusst zurückgestellt** (vorerst ignorieren, nicht aufgreifen) |
-| 2 | Stadt-Story-Größe/Frequenz bei kleinem Pilot (8 Clips zu dünn?) | PRD offene Entscheidung #6 | **entschieden (15. Juli):** immer mit so vielen einwilligenden Clips wie da sind (max. 8), kein Minimum, kein Fake-Auffüllen |
-| 3 | Verbindungs-Trigger bei täglich verfallenden Follows | PRD offene Entscheidung #8 | offen, blockt erst Phase 3 |
+| 2 | Stadt-Story-Größe/Frequenz bei kleinem Pilot (8 Clips zu dünn?) | PRD offene Entscheidung #6 | ✅ **entschieden (15. Juli):** immer mit so vielen einwilligenden Clips wie da sind (max. 8), kein Minimum, kein Fake-Auffüllen |
+| 3 | Mechanik des „Privaten Korso" (Push-Fenster 19–22 Uhr) | PRD offene Entscheidung #7 | offen — **wird mit dem Push-Feature in Phase 1 fällig** |
+| 4 | Verbindungs-Trigger bei täglich verfallenden Follows | PRD offene Entscheidung #8 | offen, blockt erst Phase 3 |
+| 5 | Mitigation der Geschlechter-Asymmetrie | PRD offene Entscheidung #10, Risiko §8.2 | offen — blockt keine Bauphase, ist aber das gefährlichste strukturelle Produkt-Risiko vor dem zahlenden Pilot |
 
-> Phase 0 ist vollständig entblockt. Keine offene Entscheidung steht dem Backend-Fundament im Weg.
+> Phase 0 und Phase 1 sind von offenen Entscheidungen frei — außer #3, die mit dem Push-Feature fällig wird.
 
 ---
 
-*Ende Roadmap v0.1 — Stand 18. Juni 2026.*
+*Ende Roadmap v0.2 — Stand 19. August 2026.*

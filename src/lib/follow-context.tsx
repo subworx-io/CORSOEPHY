@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { cycleStart } from "@/lib/corso-day";
 
 export interface FollowedPerson {
   handle: string;
@@ -11,7 +12,7 @@ export interface FollowedPerson {
   src: string | null;
   // Zeitpunkt des letzten (Re-)Follows in ms — Basis für das verfallende Herz
   followedAt: number;
-  // Hat der User die Person heute (seit dem letzten 08:00-Reset) schon angestupst?
+  // Hat der User die Person in diesem Zyklus (seit 21:00) schon angestupst?
   nudged: boolean;
 }
 
@@ -28,46 +29,31 @@ interface FollowContextType {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Jüngster 08:00-Reset vor `now`. */
-export function lastReset(now: number) {
-  const r = new Date(now);
-  r.setHours(8, 0, 0, 0);
-  if (now < r.getTime()) r.setDate(r.getDate() - 1);
-  return r.getTime();
-}
-
-/** Nächster 08:00-Reset echt nach `t` — der 1. Reset nach dem Follow. */
-function firstResetAfter(t: number) {
-  const r = new Date(t);
-  r.setHours(8, 0, 0, 0);
-  if (r.getTime() <= t) r.setDate(r.getDate() + 1);
-  return r.getTime();
-}
+/** Erneuern erst nach der Hälfte der Laufzeit — sonst wäre der Verfall per Dauer-Tippen aushebelbar. */
+const RENEW_AFTER_MS = 12 * 60 * 60 * 1000;
 
 /**
- * Füllgrad des Herzens (0..1) — „Glas"-Logik (PRD 4.3, Variante A):
- * Voll & sicher bis zum 1. 08:00-Reset nach dem Follow. Danach läuft das Glas
- * über den Entscheidungstag gleichmäßig leer und ist am 2. Reset (24h später) leer.
- * Der Pegel hängt also am 08:00-Raster, nicht an einem gleitenden 24h-Fenster.
+ * Füllgrad des Herzens (0..1) — rollende 24h ab dem letzten (Re-)Follow.
+ * Kein 08:00-Raster mehr: jeder Follow hat seine eigene Uhr. Voll im Moment des
+ * Folgens, gleichmäßig leer nach genau 24 Stunden.
+ * Spiegelt follows.expires_at der DB (= followed_at + 24h, per Trigger erzwungen).
  */
 export function followFill(followedAt: number, now: number) {
-  const decisionStart = firstResetAfter(followedAt);
-  if (now <= decisionStart) return 1; // bis zum 1. Reset: voll & sicher
-  return Math.max(0, 1 - (now - decisionStart) / DAY_MS);
+  return Math.max(0, Math.min(1, 1 - (now - followedAt) / DAY_MS));
 }
 
-/** Follow läuft am 2. Reset ab, falls nicht erneuert → fliegt aus „Ich folge". */
+/** Follow ist 24h nach dem letzten (Re-)Follow abgelaufen → fliegt aus „Ich folge". */
 export function isExpired(followedAt: number, now: number) {
-  return now >= firstResetAfter(followedAt) + DAY_MS;
+  return now >= followedAt + DAY_MS;
 }
 
 /**
- * Refolgen erst ab dem nächsten 08:00-Reset (PRD 4.3: kein Doppel-Follow am selben Tag).
- * → erneuerbar, wenn der letzte Follow vor dem heutigen Reset lag.
+ * Erneuern ist ab der zweiten Hälfte möglich (Follow ≥ 12h alt). Nachfolge-Regel
+ * zur alten „kein Doppel-Follow am selben Tag"-Regel (PRD 4.3): Erneuern bleibt
+ * eine Entscheidung, kein Reflex. Serverseitig im Trigger gespiegelt.
  */
 export function canRenew(followedAt: number, now: number) {
-  return followedAt < lastReset(now);
+  return now - followedAt >= RENEW_AFTER_MS;
 }
 
 const FollowContext = createContext<FollowContextType | null>(null);
@@ -90,12 +76,13 @@ export function FollowProvider({ children }: { children: ReactNode }) {
       setFollowed(new Map());
       return;
     }
-    // Aktive Follows: expires_at is null (der Cron/Reset markiert Abgelaufene).
+    // Aktive Follows: expires_at liegt in der Zukunft (rollende 24h ab Follow).
+    // Seit 0015 ist expires_at IMMER gesetzt — „is null" wäre jetzt immer leer.
     const { data: rows } = await supabase
       .from("follows")
       .select("followed_at, followee_id")
       .eq("follower_id", user.id)
-      .is("expires_at", null);
+      .gt("expires_at", new Date().toISOString());
     if (!rows?.length) {
       setFollowed(new Map());
       return;
@@ -107,8 +94,9 @@ export function FollowProvider({ children }: { children: ReactNode }) {
       .select("id, handle")
       .in("id", followeeIds);
 
-    // Anstupser seit dem letzten 08:00-Reset → markiert „heute angestupst".
-    const sinceReset = new Date(lastReset(Date.now())).toISOString();
+    // Anstupser seit dem Zyklus-Start (21:00) → markiert „heute angestupst".
+    // Das Anstups-Limit hängt weiter am Zyklus, nicht am rollenden 24h-Verfall.
+    const sinceReset = new Date(cycleStart()).toISOString();
     const { data: myNudges } = await supabase
       .from("nudges")
       .select("nudged_id")
@@ -137,8 +125,8 @@ export function FollowProvider({ children }: { children: ReactNode }) {
     void load();
   }, [load]);
 
-  // Am 2. Reset abgelaufene Follows sofort ausblenden (visuelle Sofortwirkung, bevor
-  // der tägliche Cron expires_at setzt). DB bleibt Quelle der Wahrheit.
+  // Nach 24h abgelaufene Follows sofort ausblenden, ohne auf einen Reload zu warten.
+  // Die DB bleibt Quelle der Wahrheit (jede Query filtert auf expires_at > now()).
   useEffect(() => {
     const prune = () =>
       setFollowed((prev) => {
@@ -177,11 +165,12 @@ export function FollowProvider({ children }: { children: ReactNode }) {
         const followeeId = await profileIdByHandle(person.handle);
         if (!followeeId) return; // Demo-/Story-Handle ohne echtes Profil → bleibt optimistisch
         await supabase.from("follows").upsert(
+          // expires_at wird NICHT mitgeschickt: der DB-Trigger setzt ihn zwingend auf
+          // followed_at + 24h. 🔒 So kann kein Client seinen Verfall verlängern.
           {
             follower_id: user.id,
             followee_id: followeeId,
             followed_at: new Date().toISOString(),
-            expires_at: null,
           },
           { onConflict: "follower_id,followee_id" },
         );
@@ -192,7 +181,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   );
 
   // Entfolgen: optimistisch aus „Ich folge" entfernen, dann in der DB als abgelaufen
-  // markieren (expires_at = now(), Verfall markieren statt löschen — wie der Cron).
+  // markieren (expires_at = now(), Verfall vorziehen statt löschen 🔒).
   // Danach erscheint die Person wieder in Discovery (dort reaktiv über `followed`).
   const unfollow = useCallback(
     (handle: string) => {
@@ -213,7 +202,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
           .update({ expires_at: new Date().toISOString() })
           .eq("follower_id", user.id)
           .eq("followee_id", followeeId)
-          .is("expires_at", null);
+          .gt("expires_at", new Date().toISOString());
       })();
     },
     [user],
@@ -232,11 +221,12 @@ export function FollowProvider({ children }: { children: ReactNode }) {
         const followeeId = await profileIdByHandle(handle);
         if (!followeeId) return;
         await supabase.from("follows").upsert(
+          // expires_at wird NICHT mitgeschickt: der DB-Trigger setzt ihn zwingend auf
+          // followed_at + 24h. 🔒 So kann kein Client seinen Verfall verlängern.
           {
             follower_id: user.id,
             followee_id: followeeId,
             followed_at: new Date().toISOString(),
-            expires_at: null,
           },
           { onConflict: "follower_id,followee_id" },
         );
@@ -269,7 +259,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
-  // Dev/Test: aus der DB neu laden (z.B. nach dem simulierten 08:00-Reset).
+  // Dev/Test: aus der DB neu laden (z.B. nachdem Follows im Dev-Menü verfallen sind).
   const reset = useCallback(() => {
     void load();
   }, [load]);

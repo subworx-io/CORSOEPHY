@@ -254,7 +254,7 @@ export function useSnapScroll({
     };
   }, [axis, getDim, applyPos, snapTo, isInsideContainer]);
 
-  // Maus-Drag horizontal für Stadt-Story auf Desktop
+  // Maus-Drag horizontal für Stadt Corso auf Desktop
   useEffect(() => {
     if (axis !== "x") return;
     let startX = 0;

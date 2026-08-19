@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { nextCycleStart } from "@/lib/corso-day";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STORY-EMPTY-LAB — Sandbox NUR für den Leerzustand der Stadt-Story.
+// STORY-EMPTY-LAB — Sandbox NUR für den Leerzustand der Stadt Corso.
 // Self-contained, kein Supabase / kein Auth. Route: /story-empty-lab
 //
 // Hintergrund-Clips liegen in public/ (empty-bg-4…9.mp4) und werden per
@@ -31,13 +32,8 @@ const CLIPS = [
 ];
 const HOLD_MS = 1600;
 
-// Nächste 20:00 — Ziel des Countdowns, solange die Story noch nicht läuft.
-function nextStoryTarget(now: number): number {
-  const target = new Date(now);
-  target.setHours(20, 0, 0, 0);
-  if (now >= target.getTime()) target.setDate(target.getDate() + 1);
-  return target.getTime();
-}
+// Nächste 21:00 (Berlin) — Ziel des Countdowns, solange die Story noch nicht läuft.
+const nextStoryTarget = (now: number) => nextCycleStart(new Date(now));
 
 function useTimeLeft(targetOf: (now: number) => number) {
   const [now, setNow] = useState(() => Date.now());
@@ -148,13 +144,13 @@ function StoryEmptyLab() {
 
         <div className="flex flex-col items-center gap-2">
           <span className="text-[11px] uppercase tracking-[0.4em] text-white/50 font-medium">
-            Stadt-Story um 20:00
+            Stadt Corso um 21:00
           </span>
           <StoryCountdown />
         </div>
 
         <p className="text-sm text-white/60 max-w-xs">
-          Um 20:00 enthüllt sich {CITY}. Dann zeigt die ganze Stadt dieselben
+          Um 21:00 enthüllt sich {CITY}. Dann zeigt die ganze Stadt dieselben
           Momente von heute.
         </p>
       </div>

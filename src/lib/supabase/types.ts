@@ -36,11 +36,14 @@ export type MediaType = "photo" | "video";
 export interface Post {
   id: string;
   author_id: string;
-  prompt_date: string;
+  prompt_date: string; // Corso-Zyklus (21:00→21:00), in dem der Moment entstand
   media_path: string; // Pfad im Storage-Bucket 'moments'
   media_type: MediaType;
   city_story_consent: boolean; // 🔒 Einwilligung pro Post
   created_at: string;
+  // Lebensende des Moments: created_at + 24h, per DB-Trigger erzwungen (0015).
+  // Lebend = expires_at > now(). Wird NIE vom Client gesetzt.
+  expires_at: string;
 }
 
 export interface Follow {
@@ -49,6 +52,9 @@ export interface Follow {
   followee_id: string;
   followed_at: string; // letzter (Re-)Follow → Basis fürs verfallende Herz
   created_at: string;
+  // followed_at + 24h, per DB-Trigger erzwungen (0015). Aktiv = expires_at > now().
+  // ⚠️ Vor 0015 bedeutete NULL „aktiv" — diese Semantik gilt NICHT mehr.
+  expires_at: string;
 }
 
 export interface Nudge {

@@ -7,12 +7,15 @@ import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { FollowButton } from "@/components/follow-button";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { recordView } from "@/lib/record-view";
+import { corsoDay, nextCycleStart } from "@/lib/corso-day";
+import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
+import { MomentPrompt } from "@/components/moment-prompt";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
     meta: [
-      { title: "Stadt-Story — Corso" },
-      { name: "description", content: "20:00 — Deine Stadt enthüllt sich." },
+      { title: "Stadt Corso" },
+      { name: "description", content: "21:00 — Deine Stadt enthüllt sich." },
     ],
   }),
   component: StoryPage,
@@ -20,35 +23,12 @@ export const Route = createFileRoute("/story")({
 
 const CITY = (import.meta.env.VITE_PILOT_CITY as string | undefined) ?? "Düsseldorf";
 
-// Corso-Tag clientseitig, spiegelt corso_day() der DB: der Tag läuft 08:00→08:00
-// (Europe/Berlin). So liest der Client dieselbe eingefrorene Auswahl wie der Server.
-function corsoDay(now = new Date()): string {
-  const shifted = new Date(now.getTime() - 8 * 60 * 60 * 1000);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Berlin",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(shifted); // en-CA → YYYY-MM-DD
-}
-
-// Nächste 20:00 — Ziel des Countdowns, solange die Story noch nicht läuft.
-// Rollt nach 20:00 automatisch auf den Folgetag weiter.
-function nextStoryTarget(now: number): number {
-  const target = new Date(now);
-  target.setHours(20, 0, 0, 0);
-  if (now >= target.getTime()) target.setDate(target.getDate() + 1);
-  return target.getTime();
-}
-
-// Ende der laufenden Story: der Corso-Tag läuft 08:00→08:00, die stadtweite
-// Auswahl ist bis zum nächsten 08:00 eingefroren. So lange „läuft" die Story.
-function storyEndsAt(now: number): number {
-  const target = new Date(now);
-  target.setHours(8, 0, 0, 0);
-  if (now >= target.getTime()) target.setDate(target.getDate() + 1);
-  return target.getTime();
-}
+// Ziehung und Zyklus-Wechsel fallen auf dieselbe Uhrzeit: um 21:00 wird die
+// Stadt Corso gezogen UND der neue Prompt startet. Die Auswahl steht danach
+// eingefroren bis zur nächsten Ziehung — also den ganzen Zyklus lang.
+// Beides ist derselbe Zeitpunkt, deshalb dieselbe Funktion.
+const nextStoryTarget = (now: number) => nextCycleStart(new Date(now));
+const storyEndsAt = nextStoryTarget;
 
 // Tickt sekündlich und liefert die verbleibende Zeit bis zum Ziel.
 function useTimeLeft(targetOf: (now: number) => number) {
@@ -68,11 +48,25 @@ function useTimeLeft(targetOf: (now: number) => number) {
 
 const pad = (n: number) => n.toString().padStart(2, "0");
 
+// Rückgabezeile von city_story() — 🔒 nur Anzeige-Daten, keine Zahlen.
+interface StoryRow {
+  slot: number;
+  handle: string;
+  media_path: string;
+  post_id: string;
+  prompt_date: string | null;
+}
+
 interface StoryClip {
   slot: number;
   handle: string;
   videoUrl: string;
   postId: string;
+  // Der Prompt, zu dem dieser Moment entstand. In der Story ist das für alle
+  // Slots derselbe Tag — trotzdem pro Clip aufgelöst, damit die Anzeige an der
+  // Historie hängt und nicht an einer Annahme.
+  promptText: string | null;
+  promptDate: string | null;
 }
 
 /* Video-Kachel — identische UX wie Discovery (autoplay stumm, tippen für Ton). */
@@ -123,37 +117,37 @@ function StoryPage() {
   const { user } = useAuth();
 
   // Die stadtweit eingefrorene Auswahl des heutigen Corso-Tags. Alle Nutzer der
-  // Stadt lesen exakt dieselben Slots (serverseitig um 20:00 gezogen).
+  // Stadt lesen exakt dieselben Slots (serverseitig um 21:00 gezogen).
   const { data: clips = [], isLoading } = useQuery({
     queryKey: ["city-story", corsoDay(), CITY, user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data, error } = await supabase
-        .from("city_story_slots")
-        .select("slot, posts(id, media_path, profiles(handle))")
-        .eq("story_date", corsoDay())
-        .eq("city", CITY)
-        .order("slot", { ascending: true });
-      if (error || !data?.length) return [];
+      // Gelesen wird über city_story() (SECURITY DEFINER), NICHT direkt über die
+      // Tabelle: seit 0015 blendet die RLS auf `posts` abgelaufene Momente aus.
+      // Die gezogene Stadt Corso bleibt aber bis zur nächsten Ziehung stehen —
+      // wer ins Rampenlicht gezogen wurde, verschwindet dort nicht mitten im Abend,
+      // auch wenn seine 24h in Discovery/Ich-folge längst abgelaufen sind.
+      const { data, error } = await supabase.rpc("city_story", { target_city: CITY });
+      const rows = (data ?? []) as StoryRow[];
+      if (error || !rows.length) return [];
+
+      // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
+      const promptsByDate = await fetchPromptsByDate(rows.map((row) => row.prompt_date));
 
       const withUrls = await Promise.all(
-        data.map(async (row) => {
-          const post = row.posts as unknown as {
-            id: string;
-            media_path: string;
-            profiles: { handle: string };
-          } | null;
-          if (!post) return null;
+        rows.map(async (row): Promise<StoryClip | null> => {
           const { data: urlData } = await supabase.storage
             .from("moments")
-            .createSignedUrl(post.media_path, 3600);
+            .createSignedUrl(row.media_path, 3600);
           if (!urlData?.signedUrl) return null;
           return {
-            slot: row.slot as number,
-            handle: post.profiles.handle,
+            slot: row.slot,
+            handle: row.handle,
             videoUrl: urlData.signedUrl,
-            postId: post.id,
-          } satisfies StoryClip;
+            postId: row.post_id,
+            promptDate: row.prompt_date ?? null,
+            promptText: row.prompt_date ? (promptsByDate[row.prompt_date] ?? null) : null,
+          };
         }),
       );
       return withUrls.filter((c): c is StoryClip => c !== null);
@@ -178,7 +172,7 @@ function StoryPage() {
     return () => clearTimeout(t);
   }, [currentIndex, clips]);
 
-  // Noch keine Story (vor 20:00 oder heute kein einwilligender Clip): ehrlicher
+  // Noch keine Story (vor 21:00 oder kein einwilligender Clip): ehrlicher
   // Leerzustand statt Mock. Kein "peinlich leer" durch Fake-Auffüllen (PRD).
   if (!isLoading && clips.length === 0) {
     return <StoryEmpty />;
@@ -229,6 +223,9 @@ function StoryPage() {
                   }}
                 />
 
+                {/* Zu welchem Prompt ist dieser Moment entstanden? */}
+                {c.promptText && <MomentPrompt text={c.promptText} date={c.promptDate} />}
+
                 {/* Herz-Burst beim Folgen — geteilt mit Discovery */}
                 <HeartBurst active={burstHandle === c.handle} />
 
@@ -238,7 +235,7 @@ function StoryPage() {
                   <div className="flex items-center gap-1.5 text-white/70 mb-2.5">
                     <span className="material-symbols-outlined text-[16px] leading-none">location_on</span>
                     <span className="text-xs font-medium tracking-tight">{CITY}</span>
-                    <span className="text-white/40 text-xs">· Stadt-Story</span>
+                    <span className="text-white/40 text-xs">· Stadt Corso</span>
                   </div>
                   <div className="flex justify-between items-end">
                     <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
@@ -265,7 +262,7 @@ function StoryPage() {
         ))}
       </div>
 
-      {/* Läuft-noch-Anzeige — die Story ist bis 08:00 stadtweit sichtbar. */}
+      {/* Läuft-noch-Anzeige — die Story steht bis zur nächsten Ziehung um 21:00. */}
       <StoryRunningBadge />
 
       <SwipeHint />
@@ -274,7 +271,7 @@ function StoryPage() {
 }
 
 // Dezente Pille oben mittig: zeigt, wie lange die laufende Story noch sichtbar
-// ist (bis zum 08:00-Reset des Corso-Tags). Keine Sekunden — es sind Stunden.
+// ist (bis zur nächsten Ziehung um 21:00). Keine Sekunden — es sind Stunden.
 function StoryRunningBadge() {
   const { hours, minutes } = useTimeLeft(storyEndsAt);
   const label = hours > 0 ? `noch ${hours} h ${minutes} min` : `noch ${minutes} min`;
@@ -290,7 +287,7 @@ function StoryRunningBadge() {
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
         </span>
         <span className="text-white text-xs font-medium tracking-tight tabular-nums">
-          Stadt-Story · {label}
+          Stadt Corso · {label}
         </span>
       </div>
     </div>
@@ -374,20 +371,20 @@ function StoryEmpty() {
 
         <div className="flex flex-col items-center gap-2">
           <span className="text-[11px] uppercase tracking-[0.4em] text-white/50 font-medium">
-            Stadt-Story um 20:00
+            Stadt Corso um 21:00
           </span>
           <StoryCountdown />
         </div>
 
         <p className="text-sm text-white/60 max-w-xs">
-          Um 20:00 enthüllt sich {CITY}. Dann zeigt die ganze Stadt dieselben Momente von heute.
+          Um 21:00 enthüllt sich {CITY}. Dann zeigt die ganze Stadt dieselben Momente.
         </p>
       </div>
     </div>
   );
 }
 
-// Großer Countdown auf die nächste 20:00 — das Gegenstück zum kleinen „läuft
+// Großer Countdown auf die nächste 21:00 — das Gegenstück zum kleinen „läuft
 // noch"-Badge, solange die Story noch nicht begonnen hat.
 function StoryCountdown() {
   const { hours, minutes, seconds } = useTimeLeft(nextStoryTarget);

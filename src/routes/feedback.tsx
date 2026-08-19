@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
-import { corsoDay } from "@/lib/corso-day";
+import { promptDayLabel } from "@/lib/prompts/prompt-history";
 import type { MyFeedback } from "@/lib/supabase/types";
 
 export const Route = createFileRoute("/feedback")({
@@ -31,23 +31,6 @@ interface FeedbackData {
   promptDate: string | null;
 }
 
-// Label über dem Prompt. Der Rücklauf zeigt den NEUESTEN eigenen Moment — der ist
-// meist von heute, kann aber älter sein, wenn man heute noch nicht gepostet hat.
-function promptDayLabel(promptDate: string): string {
-  const today = corsoDay();
-  if (promptDate === today) return "Heute";
-
-  const d = new Date(`${today}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  if (promptDate === d.toISOString().slice(0, 10)) return "Gestern";
-
-  return new Date(`${promptDate}T12:00:00Z`).toLocaleDateString("de-DE", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-}
-
 function FeedbackPage() {
   const { user } = useAuth();
   const [muted, setMuted] = useState(true);
@@ -66,11 +49,13 @@ function FeedbackPage() {
         (Array.isArray(rows) ? (rows[0] as MyFeedback) : (rows as MyFeedback)) ?? null;
       if (!feedback) return null;
 
-      // Dein aktueller Moment als Hintergrund (neuester eigener Post).
+      // Dein aktueller Moment als Hintergrund — nur solange er lebt (24h ab Post).
+      // Danach ist er auch für dich weg; die Zahlen bleiben.
       const { data: post } = await supabase
         .from("posts")
         .select("media_path, city_story_consent, created_at, prompt_date")
         .eq("author_id", user.id)
+        .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -145,7 +130,8 @@ function FeedbackPage() {
 
   const { feedback } = data;
 
-  // Noch kein Moment: ruhiger Zahlen-Screen ohne Video (Publikum steht trotzdem).
+  // Kein lebender Moment (nie einen aufgenommen oder die 24h sind um): ruhiger
+  // Zahlen-Screen ohne Video (Publikum steht trotzdem).
   if (!data.videoUrl) {
     return (
       <div
@@ -179,7 +165,8 @@ function FeedbackPage() {
         </div>
         <div className="px-8">
           <p className="text-white/25 text-xs leading-snug max-w-[18rem]">
-            Noch kein Moment — nimm einen auf, dann erscheint er hier als Hintergrund.
+            Gerade kein lebender Moment — jeder Moment ist 24 Stunden sichtbar. Nimm einen neuen
+            auf, dann erscheint er hier als Hintergrund.
             {!feedback.has_yesterday && " Ab morgen siehst du die Veränderung seit gestern."}
           </p>
         </div>
@@ -244,11 +231,11 @@ function FeedbackPage() {
           </span>
         </button>
 
-        {/* Stadt-Story-Badge */}
+        {/* Badge: Freigabe für den Stadt Corso */}
         {data.cityStoryConsent && (
           <div className="absolute top-4 right-4 flex items-center gap-1.5 rounded-full bg-black/50 backdrop-blur-md px-3 py-1.5">
             <span className="material-symbols-outlined text-white/80 text-[14px]">movie</span>
-            <span className="text-[11px] text-white/80 font-medium">Stadt-Story freigegeben</span>
+            <span className="text-[11px] text-white/80 font-medium">Für den Stadt Corso freigegeben</span>
           </div>
         )}
 

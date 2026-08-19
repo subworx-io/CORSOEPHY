@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useFollow } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
@@ -9,6 +9,8 @@ import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
+import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
+import { MomentPrompt } from "@/components/moment-prompt";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -22,7 +24,18 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type Tile = { handle: string; src?: string; alt?: string; videoUrl?: string; postId?: string };
+type Tile = {
+  handle: string;
+  src?: string;
+  alt?: string;
+  videoUrl?: string;
+  postId?: string;
+  // Der Prompt, zu dem dieser Moment entstanden ist. Der Feed reicht über die
+  // Zyklus-Grenze (21:00) hinaus — ein Moment lebt 24h ab Post, die Kacheln
+  // gehören also zu zwei Prompts. null = keine Historie für den Tag → nichts zeigen.
+  promptText?: string | null;
+  promptDate?: string | null;
+};
 type TileSlide = { kind: "tile" } & Tile;
 type EmptySlide = { kind: "empty" };
 type Slide = TileSlide | EmptySlide;
@@ -73,8 +86,8 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
   );
 }
 
-// Discovery startet direkt beim ersten Moment — der 20:00-Countdown lebt jetzt
-// auf dem Story-Screen (dort gehört er hin: er zählt auf die Stadt-Story).
+// Discovery startet direkt beim ersten Moment — der 21:00-Countdown lebt jetzt
+// auf dem Story-Screen (dort gehört er hin: er zählt auf die Stadt Corso).
 const buildSlides = (tiles: Tile[]): Slide[] =>
   tiles.length > 0
     ? tiles.map((t) => ({ kind: "tile" as const, ...t }))
@@ -83,38 +96,59 @@ const buildSlides = (tiles: Tile[]): Slide[] =>
 // Dauer, die eine gerade gefolgte Kachel noch sichtbar bleibt: Herz-Burst (700ms) + Wegblenden.
 const EXIT_MS = 1100;
 
+// Momente pro Nachlade-Schritt. Klein halten: jede Kachel zieht eine signierte URL.
+const PAGE_SIZE = 20;
+// So viele Kacheln vor dem Ende wird nachgeladen, damit nie eine Lücke entsteht.
+const PREFETCH_MARGIN = 3;
+
 function Index() {
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { user } = useAuth();
 
-  // Echte Posts aus der DB laden (andere User, neueste zuerst)
-  const { data: dbTiles = [] } = useQuery({
+  // Echte Posts aus der DB laden: nur LEBENDE Momente (jeder Moment lebt 24h ab
+  // seinem Post), neueste zuerst, seitenweise nachgeladen. Kein hartes Limit mehr —
+  // der Feed scrollt endlos durch den lebenden Topf.
+  const {
+    data: pages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ["discovery", user?.id],
-    queryFn: async () => {
-      if (!user) return [];
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      if (!user) return [] as Tile[];
+      const from = (pageParam as number) * PAGE_SIZE;
       const { data, error } = await supabase
         .from("posts")
-        .select("id, media_path, profiles(handle)")
+        .select("id, media_path, prompt_date, profiles(handle)")
         .neq("author_id", user.id)
+        .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false })
-        .limit(20);
-      if (error || !data?.length) return [];
+        .range(from, from + PAGE_SIZE - 1);
+      if (error || !data?.length) return [] as Tile[];
+      // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
+      const promptsByDate = await fetchPromptsByDate(data.map((p) => p.prompt_date));
       const withUrls = await Promise.all(
-        data.map(async (post) => {
+        data.map(async (post): Promise<Tile | null> => {
           const { data: urlData } = await supabase.storage
             .from("moments")
             .createSignedUrl(post.media_path, 3600);
+          if (!urlData?.signedUrl) return null;
           return {
             handle: (post.profiles as unknown as { handle: string }).handle,
-            videoUrl: urlData?.signedUrl ?? null,
+            videoUrl: urlData.signedUrl,
             postId: post.id,
+            promptDate: post.prompt_date,
+            promptText: promptsByDate[post.prompt_date] ?? null,
           };
         }),
       );
-      return withUrls.filter(
-        (t): t is { handle: string; videoUrl: string; postId: string } => t.videoUrl !== null,
-      );
+      return withUrls.filter((t): t is Tile => t !== null);
     },
+    // Volle Seite → es könnte noch mehr geben. Kürzere Seite → Ende des Topfes.
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE ? allPages.length : undefined,
     enabled: !!user,
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -122,7 +156,7 @@ function Index() {
   });
 
   // Nur echte Posts aus der Stadt — kein Demo-Fallback mehr (F&F-Pilot: echt statt Fake).
-  const activeTiles: Tile[] = dbTiles;
+  const activeTiles: Tile[] = useMemo(() => (pages?.pages ?? []).flat(), [pages]);
 
   // Discovery zeigt nur Fremde (PRD §4.4): wem du folgst, verlässt den Feed.
   // Reaktiv auf den Follow-State — nicht am Mount eingefroren, damit das Verhalten
@@ -155,6 +189,13 @@ function Index() {
     count: slides.length,
     axis: "y",
   });
+
+  // Endlos-Scroll: rechtzeitig vor dem Ende die nächste Seite holen, damit der
+  // Feed unter dem Finger weiterläuft statt an einer Kante zu stehen.
+  useEffect(() => {
+    if (!hasNextPage || isFetchingNextPage) return;
+    if (currentIndex >= slides.length - PREFETCH_MARGIN) void fetchNextPage();
+  }, [currentIndex, slides.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Ansicht verbuchen, sobald ein fremder Clip aktiv wird (Datenquelle „Zuschauer").
   // Kurze Verweil-Schwelle: der aktive Index wechselt jetzt schon beim Überqueren
@@ -226,6 +267,10 @@ function Index() {
                         mixBlendMode: "overlay",
                       }}
                     />
+                    {/* Zu welchem Prompt ist dieser Moment entstanden? */}
+                    {slide.promptText && (
+                      <MomentPrompt text={slide.promptText} date={slide.promptDate} />
+                    )}
                     {/* Herzanimation mittig über dem Bild */}
                     {burstHandle === slide.handle && (
                       <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">

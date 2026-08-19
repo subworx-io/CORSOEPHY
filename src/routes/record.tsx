@@ -25,7 +25,7 @@ function RecordPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   // Täglicher Prompt (PRD 4.2) aus der DB — geteilter Cache mit dem Tages-Splash,
-  // daher kein zweiter API-Call. Wechselt mit dem 08:00-Reset (corso_day).
+  // daher kein zweiter API-Call. Wechselt mit dem Zyklus-Start um 21:00 (corso_day).
   const { data: todayPrompt } = useTodayPrompt();
   const promptText = todayPrompt?.text ?? "";
 
@@ -157,7 +157,7 @@ function RecordPage() {
         {/* Steuerung — schwebt über dem unteren Bildrand */}
         {showControls && (
           <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col items-center gap-4 bg-gradient-to-t from-black/60 via-black/20 to-transparent px-5 pb-6 pt-16">
-            {/* Stadt-Story-Einwilligung — kompakte Pille statt Card-Balken.
+            {/* Einwilligung für den Stadt Corso — kompakte Pille statt Card-Balken.
                 Erscheint erst nach der Aufnahme (recorded), direkt über
                 Verwenden/Neu: entschieden wird beim Sichten des Takes. */}
             {cam.status === "recorded" && (
@@ -193,7 +193,7 @@ function PromptOverlay({ text }: { text: string }) {
   );
 }
 
-// Dezenter An/Aus-Toggle für die Stadt-Story-Freigabe (🔒 Einwilligung pro Clip).
+// Dezenter An/Aus-Toggle für die Freigabe zum Stadt Corso (🔒 Einwilligung pro Moment).
 // Zustand bleibt klar erkennbar: gefüllt/weiß = an, gedimmt/outline = aus.
 function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => void }) {
   return (
@@ -202,13 +202,13 @@ function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => 
         onClick={onToggle}
         role="switch"
         aria-checked={value}
-        aria-label="Für Stadt-Story freigeben – kann um 20:00 stadtweit erscheinen"
+        aria-label="Für den Stadt Corso freigeben – kann um 21:00 stadtweit erscheinen"
         className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 backdrop-blur-md transition-all active:scale-[0.98] ${
           value ? "border-white bg-white text-black" : "border-white/25 bg-black/40 text-white/80"
         }`}
       >
         <span className="material-symbols-outlined text-[18px]">movie</span>
-        <span className="text-[13px] font-medium">Stadt-Story</span>
+        <span className="text-[13px] font-medium">Stadt Corso</span>
         <span
           className="material-symbols-outlined text-[18px]"
           style={{ fontVariationSettings: value ? "'FILL' 1" : "'FILL' 0" }}
@@ -217,7 +217,7 @@ function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => 
         </span>
       </button>
       <p className="text-[10px] text-white/50">
-        {value ? "Kann um 20:00 stadtweit erscheinen" : "Bleibt privat in deinem Corso"}
+        {value ? "Kann um 21:00 stadtweit erscheinen" : "Bleibt privat in deinem Corso"}
       </p>
     </div>
   );
