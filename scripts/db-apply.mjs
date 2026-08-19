@@ -3,18 +3,34 @@
 // kein Dashboard). Token kommt aus der Umgebung (SBP), wird nie geloggt.
 //
 // Aufruf:
-//   SBP=<sbp_management_token> node scripts/db-apply.mjs supabase/migrations/0010_post_views_feedback.sql
+//   node scripts/db-apply.mjs supabase/migrations/0010_post_views_feedback.sql
+//
+// Das Token wird aus .env gelesen (SBP=...) oder aus der Umgebung, falls dort
+// gesetzt. Es wird nie geloggt und gehört nicht in die Kommandozeile.
 //
 // Optional: PROJECT_REF überschreiben (Default: Pilot-Projekt).
 
 import { readFileSync } from "node:fs";
+
+// Token kommt aus der Umgebung — oder, wenn dort keins steht, aus .env.
+// So braucht kein Aufruf das Geheimnis in der Kommandozeile mitzuschleppen
+// (und keine Permission-Regel muss es enthalten, was sie bei jedem
+// Token-Wechsel brechen würde).
+if (!process.env.SBP) {
+  try {
+    process.loadEnvFile(new URL("../.env", import.meta.url));
+  } catch {
+    // Keine .env vorhanden — dann muss SBP eben in der Umgebung stehen.
+  }
+}
 
 const SBP = process.env.SBP;
 const REF = process.env.PROJECT_REF ?? "uuhrylkvwosflyypbdbj";
 const file = process.argv[2];
 
 if (!SBP) {
-  console.error("✗ SBP (Management-Token) nicht gesetzt.");
+  console.error("✗ SBP (Management-Token) nicht gesetzt — weder in der Umgebung noch in .env.");
+  console.error("  Neues Token: https://supabase.com/dashboard/account/tokens → als SBP=... in .env eintragen.");
   process.exit(1);
 }
 if (!file) {

@@ -64,6 +64,25 @@ Nebenbeleg für die Korrektheit der Ziehung: Am 11. und 12. August gab es einwil
 
 ## 🔧 WIP im Working Tree (19. August, unkommittiert)
 
+**Rücklauf entlang der zwei Kräfte — gebaut (19. August), Migration `0017` noch NICHT angewendet.**
+
+Der Rücklauf war ein Kontoauszug (zwei Bestandszahlen + „seit gestern"-Delta) in einem Produkt, das laut PRD §1 von zwei Kräften lebt — und zeigte davon keine: weder den Aufstieg (Stadt Corso) noch die Schwerkraft (was heute verfällt). Dazu war das Zuschauer-Delta seit dem rollenden Verfall sachlich falsch: es verglich die Views des neuen Moments mit denen eines anderen Moments von gestern, stürzte also nach jedem Post ab.
+
+- **Neue Achse:** Bezugsrahmen ist **dein laufender Moment**, nicht der 21:00-Schnitt. Oben „Gewonnen" (Views · sind geblieben · Stadt-Corso-Auftritt), unten „Auf der Kippe" (Follower, die in den nächsten 12 h neu entscheiden). Das „seit gestern"-Delta entfällt ersatzlos — die Publikums-Bewegung zerfällt sauber in die zwei Kräfte.
+- **UI-Benennung (Entscheidung 19. Aug, Dominik):** „Publikum" → **Follower**, „Zuschauer" → **Views**. Die Mechanik heißt im PRD weiterhin „verfallendes Publikum".
+- **Belohnung statt neutraler Kontostand (Entscheidung 19. Aug, Dominik):** Wachstum wird hervorgehoben, Verlust bleibt still; Rekord-Marker beim meistgesehenen Moment; Serie („X Tage in Folge", Kulanz bis 21:00); Stadt-Corso-Auftritt bekommt einen **Vollbild-Moment** (`src/components/city-story-hit-splash.tsx`, einmal pro Corso-Tag, localStorage `corso_last_city_hit_seen`). Das **kippt die frühere Entscheidung „Delta bewusst neutral"** — ⚠️ noch von Maxim gegenzuzeichnen.
+- **Rücklauf = Self-Screen:** Handle/Anzeigename + Zugang zu den Einstellungen sitzen jetzt im Kopf. Damit ist **PRD Screen 9 („Profil/Self") aufgelöst** — ⚠️ PRD §5 wird erst nach Maxims Freigabe nachgezogen.
+- **Ohne lebenden Moment:** Zahlen werden **eingefroren** statt auf 0 zu fallen („Dein letzter Moment · gestern"). Das Video ist weg — abgelaufene Posts sind per RLS auch für den Autor unlesbar, das bleibt so.
+- **Neu:** `supabase/migrations/0017_feedback_two_forces.sql` (my_feedback() neu, englische Spalten: `followers`, `views`, `stayed`, `at_risk`, `moment_live`, `in_city_story`, `is_record`, `streak`), `src/components/city-story-hit-splash.tsx`. **Geändert:** `src/routes/feedback.tsx` (neu gebaut), `src/lib/supabase/types.ts`, `scripts/security-test-feedback.mjs` (zwei neue Negativ-Tests: kein Ziel-Argument, kein Fremd-Zählen der auslaufenden Follows).
+- ✅ **Migration `0017` angewendet (19. Aug)** und gegen die echte DB verifiziert: Signatur `my_feedback()` weiterhin **argumentlos + SECURITY DEFINER**, neue Spalten stehen. Stichproben mit simulierten JWT-Claims (nur Lesen, nichts geschrieben):
+  - `@dominik` — lebender Moment, `views=3`, `in_city_story=true`, `streak=1` (letzter Moment davor war der 13. Aug → Serie bricht korrekt).
+  - `@xatowicz` — 1 Follower, `at_risk=0`, weil dessen Follow erst in 23,5 h ausläuft (Fenster ist 12 h) ✓.
+  - `@eddy51000` — kein lebender Moment: `moment_live=false`, `views=4` **eingefroren statt 0** (genau der alte Fehler), `is_record=true` gegen seinen früheren Moment mit 3 Views ✓.
+
+✅ Typecheck + Production-Build + Lint grün. ⚠️ Nicht committet, nicht deployed, nicht im Browser gesehen.
+
+---
+
 **Prompt am Moment auf allen Feed-Screens — gebaut (19. August).** Das im Rücklauf bereits gebaute „zu welchem Prompt entstand dieser Moment" ist jetzt auf Discovery, Stadt Corso und „Ich folge" verallgemeinert:
 
 - **Neu:** `src/components/moment-prompt.tsx` (gemeinsame Darstellung) und `src/lib/prompts/prompt-history.ts` — `fetchPromptsByDate()` holt die Prompt-Texte für **mehrere Corso-Tage in einer Abfrage** (statt ein Request pro Kachel; nötig, weil die Feeds interimsweise mehrtägig sind) plus `promptDayLabel()` für „Heute" / „Gestern" / „Di, 12. Aug".
@@ -135,7 +154,7 @@ Diese Werte wurden im Chat geteilt und sind **noch nicht rotiert**:
 | `story.tsx` | **Stadt Corso** (21:00-Ritual) | Liest die stadtweit eingefrorene Auswahl über `city_story()`; serverseitige gewichtete Ziehung um 21:00 via pg_cron. Leerzustand mit atmosphärischem Video-Hintergrund (cross-fadende s/w Düsseldorf-Clips, körnig, Blue-Hour-Tint, `blur(5px)`) + großem `Std:Min:Sek`-Countdown auf die nächste 21:00. Läuft die Story, zeigt eine dezente Pille oben „Stadt Corso · noch X h Y min" bis zur nächsten Ziehung. 🔒 Keine Follower-/Reaktions-Zahlen. |
 | `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Freigabe für den Stadt Corso als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. 🔒 Kein Galerie-Upload. |
 | `connections.tsx` | **„Ich folge"** / verdienter Chat | Echter Follow-Graph. Anstupsen + Follow-Erneuern schreiben in die DB. Entfolgen per Tippen auf „folgst du heute" (`unfollow()` setzt `expires_at = now()`) → Person taucht wieder in Discovery auf. Verdienter Chat = Phase 3, noch nicht gebaut. |
-| `feedback.tsx` | **Rücklauf** (private Reichweite) | Zwei private Kennzahlen: **Publikum** (aktive Follower) + **Zuschauer** (eindeutige Betrachter des letzten Moments inkl. anonymer Pool-Zuschauer), je mit neutralem „seit gestern"-Delta (↑/↓/–, kein Rot, kein trauriges Icon). Bewusst nur zwei Zahlen — „Follower" und „Publikum" wären identisch. Dein aktueller Moment läuft als Video-Hintergrund, die Zahlen als ruhiges Overlay. Zeigt zusätzlich den **Prompt, zu dem der Moment entstand** (Auflösung über `posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text`, mit Label „Heute"/„Gestern"/Datum). |
+| `feedback.tsx` | **Rücklauf** (private Bilanz + Self-Screen) | Entlang der zwei Kräfte (PRD §1), bezogen auf **deinen laufenden Moment**: oben „Gewonnen" (**Views** · **sind geblieben** · Stadt-Corso-Auftritt mit Vollbild-Moment), unten „Auf der Kippe" (**Follower**, die in den nächsten 12 h neu entscheiden). Kein „seit gestern"-Delta mehr. Rekord-Marker + Serie. Kopf trägt Handle/Anzeigename und den Weg in die Einstellungen (löst PRD Screen 9 ab). Ohne lebenden Moment: Zahlen eingefroren, Video weg. Zeigt den **Prompt, zu dem der Moment entstand** (`posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text`). |
 | `settings.tsx` | **Einstellungen** (Screen 10, minimal) | Vier bewusst schmale Blöcke: Benachrichtigungen (`push_enabled`-Switch), Sicherheit (Blockierte-Personen-Platzhalter), Rechtliches (`/impressum`, `/datenschutz`, `/agb`), Account (Anzeigename, Abmelden, manuelle Kontolöschung per Mailto). ✅ Seit `0014` (19. Aug angewendet) voll funktionsfähig — Push-Präferenz und Anzeigename schreiben durch. |
 | `impressum/datenschutz/agb.tsx` | Rechts-Platzhalter | Gemeinsames Gerüst `src/components/legal-page.tsx`, Inhalt „folgt". |
 
@@ -201,9 +220,9 @@ Das Script baut mit `NODE_ENV=production`, prüft dass kein `jsxDEV` im Bundle l
 
 - Alles über `my_feedback()` (SECURITY DEFINER, argumentlos, RLS-privat).
 - Ansichten anonym via `post_views` + `record_view()` — Discovery/Stadt Corso/Ich-folge feuern beim aktiven Clip.
-- **500-ms-Verweil-Schwelle** vor dem Verbuchen: Vorbeiziehen zählt nicht, Landen schon. (Nötig geworden, weil der Scroll-Fix vom 12. August den aktiven Index früher wechseln lässt — „Zuschauer" ist Kill-Metrik und darf nicht durch Vorbeiscrollen aufgeblasen werden.)
-- „seit gestern"-Basis: nächtlicher `snapshot_reach()`-Cron (`5 7 * * *` UTC).
-- Migration `0010`, Negativ-Test `scripts/security-test-feedback.mjs`.
+- **500-ms-Verweil-Schwelle** vor dem Verbuchen: Vorbeiziehen zählt nicht, Landen schon. (Nötig geworden, weil der Scroll-Fix vom 12. August den aktiven Index früher wechseln lässt — „Views" ist Kill-Metrik und darf nicht durch Vorbeiscrollen aufgeblasen werden.)
+- `snapshot_reach()`-Cron läuft am **Zyklus-Start (21:05 Berlin)** — `reach-snapshot-summer`/`-winter`, siehe Cron-Fahrplan oben. *(Die frühere Angabe „`5 7 * * *` UTC" an dieser Stelle war seit `0015` falsch.)* Der Screen liest die Snapshots seit `0017` nicht mehr; die Zeitreihe bleibt für die Pilot-Auswertung.
+- Migrationen `0010` + `0017`, Negativ-Test `scripts/security-test-feedback.mjs`.
 
 ---
 

@@ -29,6 +29,17 @@ interface DevAction {
   /** Zusätzliche Warnung, falls die Aktion für andere Nutzer sichtbar wirkt. */
   warn?: string;
   danger?: boolean;
+  /** Freitext-Felder, die vor dem Ausführen als RPC-Argumente mitgehen. */
+  inputs?: DevInput[];
+}
+
+/** Ein Eingabefeld im Bestätigungsschritt. `name` ist der RPC-Parametername. */
+interface DevInput {
+  name: string;
+  label: string;
+  placeholder: string;
+  max: number;
+  multiline?: boolean;
 }
 
 const ACTIONS: DevAction[] = [
@@ -82,6 +93,32 @@ const ACTIONS: DevAction[] = [
     desc: "Entfernt alle synthetischen Test-Konten samt ihrer Momente, Follows und Slots im Stadt Corso wieder.",
   },
   {
+    key: "broadcast",
+    rpc: "dev_menu_broadcast_push",
+    label: "Nachricht an alle senden",
+    icon: "campaign",
+    desc: "Schickt eine selbst geschriebene Push-Benachrichtigung an JEDEN, der Push eingeschaltet hat. Kommt binnen einer Minute an. Tippen darauf öffnet die Discovery.",
+    warn: "Geht an alle und landet auf fremden Sperrbildschirmen — dort mitlesbar. Keine Follower- oder Zuschauerzahlen, keine Namen Dritter hineinschreiben.",
+    danger: true,
+    inputs: [
+      { name: "p_title", label: "Titel", placeholder: "Corso", max: 60 },
+      {
+        name: "p_body",
+        label: "Text",
+        placeholder: "Heute Abend um 21:00 geht deine Stadt zum ersten Mal spazieren.",
+        max: 180,
+        multiline: true,
+      },
+    ],
+  },
+  {
+    key: "testpush",
+    rpc: "dev_menu_test_push",
+    label: "Test-Push an mich",
+    icon: "notifications_active",
+    desc: "Schickt sofort eine Push-Benachrichtigung an alle Geräte, auf denen du Push eingeschaltet hast — ohne bis 21:00 zu warten. Kommt binnen einer Minute an. Betrifft nur dich.",
+  },
+  {
     key: "splash",
     run: () => {
       window.dispatchEvent(new CustomEvent("corso:preview-splash"));
@@ -99,6 +136,8 @@ export function DevMenu() {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<DevAction | null>(null);
   const [running, setRunning] = useState(false);
+  // Werte der Freitext-Felder, sofern die gewählte Aktion welche hat.
+  const [values, setValues] = useState<Record<string, string>>({});
 
   // Sicherheitsnetz gegen einen bekannten vaul-Bug: nach dem Schließen des Drawers
   // kann `pointer-events: none` am <body> hängen bleiben → die ganze App reagiert
@@ -135,7 +174,12 @@ export function DevMenu() {
     setRunning(true);
     try {
       if (action.rpc) {
-        const { data, error } = await supabase.rpc(action.rpc);
+        // Felder gehen als benannte Argumente mit; ohne Felder bleibt der
+        // Aufruf argumentlos wie bisher.
+        const args = action.inputs
+          ? Object.fromEntries(action.inputs.map((f) => [f.name, (values[f.name] ?? "").trim()]))
+          : undefined;
+        const { data, error } = await supabase.rpc(action.rpc, args);
         if (error) {
           toast.error("Fehlgeschlagen", { description: error.message });
         } else {
@@ -201,7 +245,10 @@ export function DevMenu() {
                   <button
                     key={a.key}
                     type="button"
-                    onClick={() => setPending(a)}
+                    onClick={() => {
+                      setValues({});
+                      setPending(a);
+                    }}
                     className="flex items-center gap-3 rounded-xl bg-white/5 hover:bg-white/10 active:scale-[0.99] transition-all px-4 py-3 text-left"
                   >
                     <span
@@ -243,6 +290,47 @@ export function DevMenu() {
                   )}
                 </div>
 
+                {pending.inputs && (
+                  <div className="flex flex-col gap-3">
+                    {pending.inputs.map((f) => {
+                      const value = values[f.name] ?? "";
+                      return (
+                        <label key={f.name} className="flex flex-col gap-1.5">
+                          <span className="flex items-baseline justify-between text-xs text-white/50">
+                            {f.label}
+                            <span className={value.length > f.max ? "text-red-400" : ""}>
+                              {value.length}/{f.max}
+                            </span>
+                          </span>
+                          {f.multiline ? (
+                            <textarea
+                              rows={3}
+                              value={value}
+                              maxLength={f.max}
+                              placeholder={f.placeholder}
+                              onChange={(e) =>
+                                setValues((v) => ({ ...v, [f.name]: e.target.value }))
+                              }
+                              className="resize-none rounded-xl bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:bg-white/10 transition-colors"
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={value}
+                              maxLength={f.max}
+                              placeholder={f.placeholder}
+                              onChange={(e) =>
+                                setValues((v) => ({ ...v, [f.name]: e.target.value }))
+                              }
+                              className="rounded-xl bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/25 outline-none focus:bg-white/10 transition-colors"
+                            />
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -254,7 +342,10 @@ export function DevMenu() {
                   </button>
                   <button
                     type="button"
-                    disabled={running}
+                    disabled={
+                      running ||
+                      (pending.inputs?.some((f) => (values[f.name] ?? "").trim() === "") ?? false)
+                    }
                     onClick={() => runAction(pending)}
                     className={`flex-1 h-11 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 ${
                       pending.danger
