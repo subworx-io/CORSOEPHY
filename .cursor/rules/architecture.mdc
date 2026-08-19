@@ -1,13 +1,17 @@
 ---
-description: Projektarchitektur, Ordnerstruktur und Datenfluss für Korso
+description: Projektarchitektur, Ordnerstruktur und Datenfluss für Corso
+alwaysApply: true
 ---
 
 # Architektur
 
 ## Überblick
 
-Korso ist eine **mobile-first Web-App** (TanStack Start, SSR-fähig).
-Aktueller Stand: Frontend-only mit Demo-Daten. Backend und Datenbank noch nicht integriert.
+Corso ist eine **mobile-first Web-App** (TanStack Start, SSR-fähig).
+Aktueller Stand: Frontend **und** Supabase-Backend integriert (Auth via Magic-Link,
+Postgres mit RLS, Storage, Cron). Das DB-Schema ist die Source of Truth in
+`supabase/migrations/`. Reine Demo-Daten leben nur noch in `city-backdrop.tsx`
+und `story-empty-lab.tsx`.
 
 ## Routing (TanStack Router, file-based)
 
@@ -18,11 +22,15 @@ Jede Datei in `src/routes/` wird automatisch zur Route:
 | `__root.tsx` | Layout | BottomNav, QueryClientProvider, Error Boundaries |
 | `index.tsx` | `/` | Discovery-Screen — vertikaler Swipe durch Nutzer-Tiles + Countdown |
 | `record.tsx` | `/record` | Aufnahme — Live-Kamera + Tages-Prompt |
-| `story.tsx` | `/story` | Stadt-Story — horizontaler Swipe, 20:00-Ritual |
-| `connections.tsx` | `/connections` | Verbindungen + verdienter Chat |
+| `story.tsx` | `/story` | Stadt-Story — **vertikaler** Swipe (UX wie Discovery, PRD 4.6 §5), 20:00-Ritual |
+| `story-empty-lab.tsx` | `/story-empty-lab` | Empty-/Loading-States der Story (isoliert, Demo-Daten) |
+| `connections.tsx` | `/connections` | Verbindungen + verdienter Chat ("Korso") |
 | `feedback.tsx` | `/feedback` | Rücklauf — morgendliche Reichweite (privat) |
+| `settings.tsx` | `/settings` | Einstellungen |
+| `impressum.tsx` · `datenschutz.tsx` · `agb.tsx` | `/impressum` … | Rechtstexte |
 
 **Neue Routes:** Immer als neue Datei in `src/routes/` anlegen. Kein manuelles Routing.
+Konventionen (dynamische/optionale/Splat-Segmente) → `src/routes/README.md`.
 
 ## Komponentenstruktur
 
@@ -39,27 +47,31 @@ src/lib/               → Utilities, Hilfsfunktionen
 - **Lokaler UI-State:** React `useState` / `useReducer`
 - **Kein globaler Store** (kein Zustand, kein Redux) — solange nicht nötig
 
-## Datenfluss (aktuell Demo, später Backend)
+## Datenfluss
 
 ```
 Route Component
-  → useQuery(queryKey, fetchFn)     ← TanStack Query
-  → fetchFn → API-Endpunkt          ← noch nicht implementiert
+  → useQuery / useMutation          ← TanStack Query
+  → src/lib/supabase/client.ts      ← Browser-Client (anon key, RLS-geschützt)
+  → Supabase (Postgres + RLS)       ← Schema in supabase/migrations/
   → Daten → UI-Render
 ```
 
-Alle Demo-Daten (`TILES`, `CLIPS` etc.) sind direkt in den Route-Dateien als Konstanten.
-Wenn das Backend kommt, werden diese durch `useQuery`-Calls ersetzt.
+- **Browser-Client:** `src/lib/supabase/client.ts` (VITE_-Keys, öffentlich, RLS schützt).
+- **Server-Client:** `src/lib/supabase/server.ts` (service_role, umgeht RLS — nie ins Frontend-Bundle).
+- **Auth-/Follow-State:** `src/lib/auth-context.tsx` und `src/lib/follow-context.tsx`.
+- **Media-Upload:** `src/lib/supabase/upload.ts` → Supabase Storage.
 
 ## Kern-Mechaniken und wo sie sitzen
 
-| Mechanik | Wo implementiert (geplant) |
+| Mechanik | Wo implementiert |
 |---|---|
-| Verfallendes Publikum (24h) | Backend-Job + `/feedback` Route |
-| Stadt-Story Auswahl (gedämpft) | Backend-Job um 20:00, `/story` Route |
-| Live-Kamera Pflicht | `/record` Route — WebRTC, kein `<input type="file">` |
-| Verdienter Chat (3–4 Runden) | `/connections` Route + Backend-Logik |
-| Follow (24h Ablauf) | Backend-Job + `/story` und `/connections` |
+| Verfallendes Publikum (24h) | `supabase/migrations/0003_follows_expiry.sql` + `/feedback` |
+| Stadt-Story Auswahl (gedämpft) | `supabase/migrations/0005_city_story_draw.sql` + `/story` |
+| Live-Kamera Pflicht | `/record` — WebRTC/MediaRecorder, kein `<input type="file">` |
+| Verdienter Chat (3–4 Runden) | `/connections` + DB-Logik |
+| Follow (24h Ablauf) | `follow-context.tsx` + `0003_follows_expiry.sql` |
+| Reach-Grant / Sichtbarkeit | `0004_reach_grant_hardening.sql`, `0010_post_views_feedback.sql` |
 
 ## Navigation
 
@@ -68,9 +80,9 @@ Discovery → Story → Aufnahme → Korso (Connections) → Rücklauf (Feedback
 
 ## Was noch fehlt (Stand: Pilot-Phase)
 
-- Backend / API-Schicht (noch kein Stack definiert)
-- Auth / ID-Verifizierung
-- Datenbank
-- Push-Notifications
-- Video-Handling (Upload, Streaming)
-- Admin-Panel für Pilot
+- Push-Notifications (PWA, VAPID — Phase 1)
+- Stripe-Abo (zahlender Fremden-Pilot — nicht im MVP)
+- ID-Verifizierung (über Magic-Link-Auth hinaus)
+- Automatisiertes Test-Framework (nur `scripts/security-test-*.mjs` vorhanden)
+
+> Genauen aktuellen Stand immer in `docs/STATUS.md` prüfen — nicht in dieser Datei.
