@@ -1,4 +1,4 @@
--- 0016_report_block.sql
+-- 0017_report_block.sql
 -- Report + Block: Sicherheits-Grundausstattung vor dem Fremden-Pilot.
 -- Block wird SERVERSEITIG durchgesetzt (RLS-Policy + SECURITY-DEFINER-RPC + Trigger),
 -- nie nur im Frontend. Der posts-Filter kommt ADDITIV obendrauf auf Consent/24h-Verfall.
@@ -136,13 +136,17 @@ revoke all on function unblock_user(uuid) from anon;
 grant execute on function unblock_user(uuid) to authenticated;
 
 -- ── Bidirektionaler Block-Filter auf posts (additiv) ────────────────────────
--- Ersetzt posts_read_all (0001): kommt OBENDRAUF auf Consent/24h-Verfall (die in
--- Hooks/DEFINER weiterlaufen). Deckt Discovery, Stadt-Story (Join) und "Ich folge"
--- gemeinsam ab. Eigene Posts bleiben sichtbar (Self-Block per check unmöglich).
-drop policy posts_read_all on posts;
-create policy posts_read_all on posts for select to authenticated
+-- Erweitert posts_read_living (0015): der Block-Filter kommt OBENDRAUF auf den
+-- 24h-Verfall (`expires_at > now()`), er ersetzt ihn NICHT — sonst würden
+-- abgelaufene Momente wieder sichtbar (🔒 Ephemeralität). Deckt Discovery und
+-- "Ich folge" ab (beide lesen direkt posts); die Stadt-Story liest über
+-- city_story() (DEFINER) und ist bewusst nicht block-gefiltert — der eingefrorene
+-- Corso zeigt weiter alle gezogenen Slots.
+drop policy posts_read_living on posts;
+create policy posts_read_living on posts for select to authenticated
 using (
-  not exists (
+  expires_at > now()
+  and not exists (
     select 1 from blocks b
     where (b.blocker_id = auth.uid()      and b.blocked_id = posts.author_id)
        or (b.blocker_id = posts.author_id and b.blocked_id = auth.uid())
@@ -171,3 +175,49 @@ $$;
 create trigger nudges_block_guard
   before insert on nudges
   for each row execute function reject_nudge_if_blocked();
+
+-- ── city_story(): author_id ergänzen + Block im eingefrorenen Corso durchsetzen ──
+-- Seit 0015 liest die Stadt-Story über diese DEFINER-Funktion (umgeht die posts-RLS,
+-- damit gezogene Slots den 24h-Verfall überleben). Dadurch greift der posts-Block-
+-- Filter hier NICHT automatisch — ein blockierter Fremder bliebe im stadtweiten
+-- Rampenlicht sichtbar. Deshalb wird der Block hier explizit mitgefiltert.
+-- Zusätzlich author_id zurückgeben, damit Melden/Blockieren auch aus der Story geht.
+-- Return-Type ändert sich → drop + recreate (create or replace erlaubt keinen neuen
+-- Rückgabetyp). Rest der Definition 1:1 aus 0015 übernommen.
+drop function if exists city_story(text);
+create function city_story(target_city text default null)
+returns table (
+  slot        smallint,
+  handle      text,
+  media_path  text,
+  post_id     uuid,
+  author_id   uuid,
+  prompt_date date
+)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select s.slot, pr.handle, p.media_path, p.id, p.author_id, p.prompt_date
+  from city_story_slots s
+  join posts p    on p.id = s.post_id
+  join profiles pr on pr.id = p.author_id
+  where auth.uid() is not null
+    and s.story_date = corso_day(now())
+    and s.city = coalesce(
+      target_city,
+      (select city from profiles where id = auth.uid()),
+      'Düsseldorf'
+    )
+    and not exists (
+      select 1 from blocks b
+      where (b.blocker_id = auth.uid()  and b.blocked_id = p.author_id)
+         or (b.blocker_id = p.author_id and b.blocked_id = auth.uid())
+    )
+  order by s.slot
+$$;
+
+revoke all on function city_story(text) from public;
+revoke all on function city_story(text) from anon;
+grant execute on function city_story(text) to authenticated;
