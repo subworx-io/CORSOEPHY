@@ -9,6 +9,7 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase/client";
 import type { Profile } from "./supabase/types";
+import { logAppOpen } from "./events";
 
 interface AuthContextType {
   session: Session | null;
@@ -170,6 +171,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    *    Adresse ein Konto an, und das Einladungs-System wäre über das Login-Formular
    *    umgehbar. Die Tür ist der Einladungs-Link, nicht dieses Feld.
    */
+  // app_open-Instrumentierung (Metrik-Tracking): feuert bei Kaltstart/Login
+  // (sobald eine User-ID vorliegt) UND bei jeder Rückkehr in den Vordergrund
+  // (visibilitychange → visible). Nur bei eingeloggtem User — log_event() würfe
+  // sonst „not authenticated". Das Entprellen (max. 1 / 5 min) liegt in
+  // logAppOpen(); der Mount- und der sofortige visible-Fall zählen so nicht doppelt.
+  const userId = session?.user?.id ?? null;
+  useEffect(() => {
+    if (!userId) return;
+    // Kaltstart / frischer Login: einmal feuern, wenn die Seite sichtbar ist.
+    if (typeof document === "undefined" || document.visibilityState === "visible") {
+      logAppOpen();
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") logAppOpen();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [userId]);
+
   const requestLoginCode = useCallback(async (email: string) => {
     // VITE_APP_URL bevorzugen (ngrok/Prod-URL), damit der Link im Mail auch auf
     // einem echten Gerät auf den richtigen Host zeigt.

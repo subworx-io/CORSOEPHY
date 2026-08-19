@@ -118,3 +118,21 @@ export interface MyFeedback {
   zuschauer_delta: number | null;
   has_yesterday: boolean;
 }
+
+// Kanonische Event-Typen des Metrik-Logs (0018_events.sql). Muss exakt zum
+// event_type-Check der Tabelle + zur Validierung in log_event() passen.
+// events ist write-only (RLS ohne Lese-Policy) → kein Row-Interface nötig,
+// clientseitig wird nur dieser Union als RPC-Argument gebraucht.
+//   follow_expired — reserviert, wird NICHT gefeuert (Verfall implizit über
+//                    follows.expires_at seit 0015, kein Cron mehr).
+//   chat_reached   — reserviert (Phase 3, Chat existiert nicht).
+//   story_drawn    — nur serverseitig in draw_city_story() geschrieben.
+export type EventType =
+  | "app_open"
+  | "moment_posted"
+  | "follow_set"
+  | "follow_expired"
+  | "story_viewed"
+  | "nudge_sent"
+  | "chat_reached"
+  | "story_drawn";
