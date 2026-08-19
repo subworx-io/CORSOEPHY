@@ -109,31 +109,24 @@ und **noch nicht rotiert** wurden. Beim Anlegen der Secrets ist der richtige Mom
 neues Management-Token erzeugen und das alte löschen, service_role-Key in Supabase
 rotieren und in Cloudflare neu setzen.
 
-## 6. Beim Merge des Push-Branches (`feat/web-push-und-rucklauf-bilanz`)
+## 6. Ledger-Stand ✅ erledigt (19. August)
 
-Der Push-Stack liegt bereits auf der Produktions-DB (`push_subscriptions`,
-`push_outbox`, `dispatch_push`, Cron `push-dispatch` — am 19. August verifiziert),
-seine Migrationsdateien sind aber noch in keinem Ledger. Direkt nach dem Merge, vor
-dem ersten Release von `main`:
+Nach dem Merge von PR #5 (Metrik-Tracking) und PR #6 (Push/Rücklauf) ist das Ledger
+mit der Produktions-DB in Deckung gebracht — **hier ist nichts mehr zu tun**:
 
-```bash
-node scripts/migrate.mjs --mark-applied \
-  supabase/migrations/0016_push_subscriptions.sql \
-  supabase/migrations/0017_feedback_two_forces.sql \
-  supabase/migrations/0018_push_dispatch.sql \
-  supabase/migrations/0019_dev_test_push.sql \
-  supabase/migrations/0020_dev_broadcast_push.sql
-```
+- Die fünf Push-/Rücklauf-Migrationen lagen längst auf der DB (von Hand gefahren) und
+  wurden mit `--mark-applied` verbucht, nicht erneut ausgeführt.
+- `0018_events.sql` aus PR #5 war **nicht** auf der DB — der Migrator hat sie
+  angewendet (`events`-Tabelle, RLS an, keine Policy, `log_event()` steht).
+- Damit gilt: 23 Dateien im Repo, 23 im Ledger, nichts ausstehend.
 
-Sonst versucht der erste Release, sie erneut zu fahren, und bricht bei
-`create table push_subscriptions` ab (der Lauf stoppt dann sauber, ohne halben Stand —
-aber der Release ist rot).
+Prüfen kannst du das jederzeit mit `node scripts/migrate.mjs --list`.
 
-**Zusätzlich:** Dieser Branch belegt `0016` und `0017` doppelt (`0016_push_subscriptions`
-neben `0016_city_moment_counts`, `0017_feedback_two_forces` neben `0017_report_block`).
-Für das Ledger ist das unkritisch (es bucht Dateinamen), für Menschen nicht. Beim Merge
-umbenennen auf `0021…0025` wäre sauber — dann aber **vor** dem `--mark-applied`, sonst
-stehen die alten Namen im Ledger.
+**Doppelte Nummern:** `main` trägt jetzt `0016`, `0017` und `0018` je zweimal (aus
+parallel entwickelten Branches). Für das Ledger ist das unkritisch — es bucht
+Dateinamen, und die Reihenfolge ist über den vollen Namen eindeutig. Nachträglich
+umbenennen wäre jetzt schädlich: die alten Namen stehen im Ledger, umbenannte Dateien
+würden als neu und ausstehend gelten. Also stehen lassen und ab `0021` weiterzählen.
 
 ## 7. Optional, wenn du Ruhe haben willst
 
