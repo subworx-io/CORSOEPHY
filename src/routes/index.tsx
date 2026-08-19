@@ -9,6 +9,8 @@ import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
+import { useCityMomentCounts } from "@/lib/city/use-city-moment-counts";
+import { MomentMenu } from "@/components/moment-menu";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -22,7 +24,7 @@ export const Route = createFileRoute("/")({
   component: Index,
 });
 
-type Tile = { handle: string; src?: string; alt?: string; videoUrl?: string; postId?: string };
+type Tile = { handle: string; src?: string; alt?: string; videoUrl?: string; postId?: string; authorId?: string };
 type TileSlide = { kind: "tile" } & Tile;
 type EmptySlide = { kind: "empty" };
 type Slide = TileSlide | EmptySlide;
@@ -87,6 +89,9 @@ function Index() {
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { user } = useAuth();
 
+  // Dezenter Gemeinschafts-Zähler: wachsendes Stimmungsbild der Stadt (Momente heute/gestern).
+  const { data: cityCounts } = useCityMomentCounts();
+
   // Echte Posts aus der DB laden (andere User, neueste zuerst)
   const { data: dbTiles = [] } = useQuery({
     queryKey: ["discovery", user?.id],
@@ -94,7 +99,7 @@ function Index() {
       if (!user) return [];
       const { data, error } = await supabase
         .from("posts")
-        .select("id, media_path, profiles(handle)")
+        .select("id, author_id, media_path, profiles(handle)")
         .neq("author_id", user.id)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -108,11 +113,13 @@ function Index() {
             handle: (post.profiles as unknown as { handle: string }).handle,
             videoUrl: urlData?.signedUrl ?? null,
             postId: post.id,
+            authorId: post.author_id,
           };
         }),
       );
       return withUrls.filter(
-        (t): t is { handle: string; videoUrl: string; postId: string } => t.videoUrl !== null,
+        (t): t is { handle: string; videoUrl: string; postId: string; authorId: string } =>
+          t.videoUrl !== null,
       );
     },
     enabled: !!user,
@@ -226,6 +233,16 @@ function Index() {
                         mixBlendMode: "overlay",
                       }}
                     />
+                    {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+                    {slide.authorId && (
+                      <div className="absolute top-4 right-4 z-20">
+                        <MomentMenu
+                          reportedUserId={slide.authorId}
+                          reportedPostId={slide.postId ?? null}
+                          handle={slide.handle}
+                        />
+                      </div>
+                    )}
                     {/* Herzanimation mittig über dem Bild */}
                     {burstHandle === slide.handle && (
                       <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
@@ -294,7 +311,18 @@ function Index() {
 
       {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
       <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
-        <div className="flex justify-end items-center gap-4 px-6 h-14 max-w-[600px] mx-auto">
+        <div className="flex justify-between items-start gap-4 px-6 pt-3 min-h-14 max-w-[600px] mx-auto">
+          {/* Gemeinschafts-Zähler — dezentes Stimmungsbild, fängt keine Swipe-Gesten ab */}
+          {cityCounts ? (
+            <div className="pointer-events-none select-none drop-shadow-md leading-tight">
+              <p className="text-white/80 text-sm font-semibold tracking-tight">
+                {cityCounts.today} {cityCounts.today === 1 ? "Moment" : "Momente"} heute in Düsseldorf
+              </p>
+              <p className="text-white/40 text-xs mt-0.5">gestern: {cityCounts.yesterday}</p>
+            </div>
+          ) : (
+            <span />
+          )}
           <Link
             to="/settings"
             className="flex items-center gap-2 text-white active:scale-95 transition-transform drop-shadow-md"

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
+import { useBlocks } from "@/lib/blocks/use-blocks";
 import { Switch } from "@/components/ui/switch";
 import type { Profile } from "@/lib/supabase/types";
 
@@ -16,19 +17,6 @@ export const Route = createFileRoute("/settings")({
 });
 
 const NAME_MAX = 40;
-
-// ⚠️ Platzhalter (Phase 2-Produktfeature): Report/Block existiert noch nicht,
-// es gibt keine blocks-Tabelle. Diese Sektion dockt später hier an — momentan
-// liefert der Stub bewusst eine leere Liste, damit der Leerzustand echt ist.
-// TODO Phase 2: aus einer künftigen `blocks`-Tabelle laden (blocker_id = auth.uid()).
-type BlockedProfile = Pick<Profile, "id" | "handle">;
-function useBlockedProfiles(): { blocked: BlockedProfile[]; unblock: (id: string) => void } {
-  const [blocked] = useState<BlockedProfile[]>([]);
-  const unblock = (_id: string) => {
-    // TODO Phase 2: Eintrag aus der blocks-Tabelle löschen.
-  };
-  return { blocked, unblock };
-}
 
 function SettingsPage() {
   const { user, profile } = useAuth();
@@ -131,7 +119,7 @@ function NotificationsSection({ profile }: { profile: Profile }) {
 /* 2. Sicherheit --------------------------------------------------------- */
 
 function SecuritySection() {
-  const { blocked, unblock } = useBlockedProfiles();
+  const { blocked, unblock } = useBlocks();
 
   return (
     <Section title="Sicherheit">
@@ -147,7 +135,7 @@ function SecuritySection() {
               <li key={p.id} className="flex items-center justify-between gap-4 py-3">
                 <span className="text-sm">{p.handle}</span>
                 <button
-                  onClick={() => unblock(p.id)}
+                  onClick={() => void unblock(p.id)}
                   className="text-xs font-medium text-white/60 transition hover:text-white active:scale-95"
                 >
                   Entsperren

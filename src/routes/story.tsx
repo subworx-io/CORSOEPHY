@@ -7,6 +7,7 @@ import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { FollowButton } from "@/components/follow-button";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { recordView } from "@/lib/record-view";
+import { MomentMenu } from "@/components/moment-menu";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
@@ -73,6 +74,7 @@ interface StoryClip {
   handle: string;
   videoUrl: string;
   postId: string;
+  authorId: string;
 }
 
 /* Video-Kachel — identische UX wie Discovery (autoplay stumm, tippen für Ton). */
@@ -130,7 +132,7 @@ function StoryPage() {
       if (!user) return [];
       const { data, error } = await supabase
         .from("city_story_slots")
-        .select("slot, posts(id, media_path, profiles(handle))")
+        .select("slot, posts(id, author_id, media_path, profiles(handle))")
         .eq("story_date", corsoDay())
         .eq("city", CITY)
         .order("slot", { ascending: true });
@@ -140,6 +142,7 @@ function StoryPage() {
         data.map(async (row) => {
           const post = row.posts as unknown as {
             id: string;
+            author_id: string;
             media_path: string;
             profiles: { handle: string };
           } | null;
@@ -153,6 +156,7 @@ function StoryPage() {
             handle: post.profiles.handle,
             videoUrl: urlData.signedUrl,
             postId: post.id,
+            authorId: post.author_id,
           } satisfies StoryClip;
         }),
       );
@@ -228,6 +232,15 @@ function StoryPage() {
                     mixBlendMode: "overlay",
                   }}
                 />
+
+                {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+                <div className="absolute top-4 right-4 z-20">
+                  <MomentMenu
+                    reportedUserId={c.authorId}
+                    reportedPostId={c.postId}
+                    handle={c.handle}
+                  />
+                </div>
 
                 {/* Herz-Burst beim Folgen — geteilt mit Discovery */}
                 <HeartBurst active={burstHandle === c.handle} />

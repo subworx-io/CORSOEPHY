@@ -12,6 +12,7 @@ import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
+import { MomentMenu } from "@/components/moment-menu";
 
 export const Route = createFileRoute("/connections")({
   head: () => ({
@@ -59,11 +60,13 @@ function PersonSlide({
   person,
   now,
   videoUrl,
+  postId,
   isActive,
 }: {
   person: FollowedPerson;
   now: number;
   videoUrl?: string;
+  postId?: string;
   isActive: boolean;
 }) {
   const { renew, unfollow, nudge } = useFollow();
@@ -105,6 +108,16 @@ function PersonSlide({
           boxShadow: "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
         }}
       >
+        {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+        {person.id && (
+          <div className="absolute top-4 right-4 z-20">
+            <MomentMenu
+              reportedUserId={person.id}
+              reportedPostId={postId ?? null}
+              handle={person.handle}
+            />
+          </div>
+        )}
         {videoUrl ? (
           <>
             <video
@@ -306,7 +319,7 @@ function ConnectionsPage() {
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
           >
-            <PersonSlide person={person} now={now} videoUrl={videosByHandle[person.handle]?.url} isActive={isActive} />
+            <PersonSlide person={person} now={now} videoUrl={videosByHandle[person.handle]?.url} postId={videosByHandle[person.handle]?.postId} isActive={isActive} />
           </div>
         );
       })}
