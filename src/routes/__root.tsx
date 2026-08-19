@@ -15,7 +15,7 @@ import { Toaster } from "../components/ui/sonner";
 const TABS = [
   { to: "/" as const, label: "Discovery", icon: "explore" },
   { to: "/connections" as const, label: "Ich folge", icon: "favorite" },
-  { to: "/story" as const, label: "Story", icon: "movie" },
+  { to: "/story" as const, label: "Stadt Corso", icon: "movie" },
   { to: "/record" as const, label: "Aufnahme", icon: "videocam" },
   { to: "/feedback" as const, label: "Rücklauf", icon: "trending_up" },
 ];

@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabase/client";
 
 // Verbucht eine Ansicht des aktuell aktiven Clips — fire-and-forget. Wird von
-// Discovery / Stadt-Story / Ich-folge aufgerufen, sobald ein Clip aktiv wird.
+// Discovery / Stadt Corso / Ich-folge aufgerufen, sobald ein Clip aktiv wird.
 // Die Zählung ist die Datenquelle für "Zuschauer" im Rücklauf (Kill-Metrik).
 //
 // 🔒 record_view() schreibt serverseitig nur viewer_id = auth.uid() und schließt

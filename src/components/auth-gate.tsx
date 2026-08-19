@@ -11,13 +11,32 @@ const INVITE_ERRORS: Record<string, string> = {
   error: "Beim Einlösen ist etwas schiefgelaufen. Bitte versuch es später noch einmal.",
 };
 
-function useInviteError(): string | null {
-  const [msg, setMsg] = useState<string | null>(null);
+// Bei `error` schickt die Einlöse-Route zusätzlich `why=<stelle>` mit. Ohne diese
+// Auffächerung sähen alle vier Ursachen identisch aus und der Flow scheitert still —
+// Maxim müsste die Cloudflare-Logs mitschneiden, um überhaupt etwas zu erfahren.
+const INVITE_ERROR_WHY: Record<string, string> = {
+  nokey: "Der Server findet seinen Zugangsschlüssel nicht (Cloudflare-Secret fehlt).",
+  dbread: "Der Server konnte den Link nicht in der Datenbank nachschlagen.",
+  claim: "Der Server konnte den Link nicht als benutzt markieren.",
+  link: "Der Server konnte kein Login für diese E-Mail erzeugen.",
+};
+
+type InviteError = { message: string; why: string | null; detail: string | null };
+
+function useInviteError(): InviteError | null {
+  const [state, setState] = useState<InviteError | null>(null);
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get("invite_error");
-    if (code && INVITE_ERRORS[code]) setMsg(INVITE_ERRORS[code]);
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("invite_error");
+    if (!code || !INVITE_ERRORS[code]) return;
+    const why = params.get("why");
+    setState({
+      message: INVITE_ERRORS[code],
+      why: why ? (INVITE_ERROR_WHY[why] ?? why) : null,
+      detail: params.get("detail"),
+    });
   }, []);
-  return msg;
+  return state;
 }
 
 /**
@@ -70,37 +89,113 @@ function Splash() {
 }
 
 function LoginScreen() {
-  const { signInWithMagicLink } = useAuth();
+  const { requestLoginCode, verifyLoginCode } = useAuth();
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [code, setCode] = useState("");
+  // "email" = Adresse eingeben, "code" = 6-stelligen Code aus der Mail eintippen.
+  const [step, setStep] = useState<"email" | "code">("email");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resent, setResent] = useState(false);
   const inviteError = useInviteError();
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function sendCode(e?: React.FormEvent) {
+    e?.preventDefault();
     setError(null);
-    setStatus("sending");
-    const { error } = await signInWithMagicLink(email.trim());
+    setBusy(true);
+    const { error } = await requestLoginCode(email.trim());
+    setBusy(false);
     if (error) {
       setError(error);
-      setStatus("idle");
-    } else {
-      setStatus("sent");
+      return;
     }
+    setCode("");
+    setStep("code");
   }
 
-  if (status === "sent") {
+  async function submitCode(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    const { error } = await verifyLoginCode(email.trim(), code);
+    setBusy(false);
+    // Erfolg braucht kein setState: onAuthStateChange setzt die Session, das
+    // AuthGate rendert daraufhin die App.
+    if (error) setError(error);
+  }
+
+  // --- Schritt 2: Code eingeben ---------------------------------------------
+  // Der Code ist auf dem iPhone der einzige Weg, der zuverlässig funktioniert:
+  // eine Home-Bildschirm-App hat einen eigenen Speicher, ein angetippter Link
+  // öffnet aber immer in Safari — die Session landet dann am falschen Ort.
+  if (step === "code") {
     return (
       <Screen>
-        <h1 className="text-2xl font-semibold tracking-tight">Check deine Mails</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Code eingeben</h1>
         <p className="mt-3 text-sm text-white/60">
-          Wir haben dir einen Login-Link an <span className="text-white">{email}</span> geschickt.
-          Öffne ihn auf diesem Gerät.
+          Wir haben dir einen 6-stelligen Code an <span className="text-white">{email}</span>{" "}
+          geschickt. Tipp ihn hier ein — dann bleibst du auf diesem Gerät eingeloggt.
+        </p>
+
+        <form onSubmit={submitCode} className="mt-8 space-y-3">
+          <input
+            type="text"
+            required
+            autoFocus
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            // Code-Länge steht in Supabase (Auth → mailer_otp_length, aktuell 6).
+            // Bis 8 zulassen, damit eine spätere Umstellung dort die App nicht still bricht.
+            maxLength={8}
+            placeholder="000000"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-center font-mono text-2xl tracking-[0.4em] text-white placeholder:text-white/20 outline-none focus:border-white/30"
+          />
+          <button
+            type="submit"
+            disabled={busy || code.length < 6}
+            className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-black transition-opacity disabled:opacity-50"
+          >
+            {busy ? "Prüfen…" : "Einloggen"}
+          </button>
+          {error && <p className="text-sm text-red-400">{error}</p>}
+        </form>
+
+        <div className="mt-6 flex items-center justify-between text-xs text-white/40">
+          <button
+            type="button"
+            onClick={() => {
+              setStep("email");
+              setError(null);
+              setResent(false);
+            }}
+            className="transition-colors hover:text-white/70"
+          >
+            ← Andere E-Mail
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              await sendCode();
+              setResent(true);
+            }}
+            className="transition-colors hover:text-white/70 disabled:opacity-50"
+          >
+            {resent ? "Nochmal geschickt ✓" : "Code erneut schicken"}
+          </button>
+        </div>
+
+        <p className="mt-6 text-center text-xs text-white/30">
+          In der Mail steht auch ein Link. Auf dem iPhone funktioniert der Code besser — ein Link
+          öffnet in Safari und loggt dich dort ein, nicht hier.
         </p>
       </Screen>
     );
   }
 
+  // --- Schritt 1: E-Mail ----------------------------------------------------
   return (
     <Screen>
       <h1 className="text-3xl font-semibold tracking-tight">Corso</h1>
@@ -108,11 +203,17 @@ function LoginScreen() {
 
       {inviteError && (
         <div className="mt-6 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
-          {inviteError}
+          <p>{inviteError.message}</p>
+          {inviteError.why && <p className="mt-2 text-xs text-amber-200/70">{inviteError.why}</p>}
+          {inviteError.detail && (
+            <p className="mt-1 font-mono text-[11px] break-words text-amber-200/50">
+              {inviteError.detail}
+            </p>
+          )}
         </div>
       )}
 
-      <form onSubmit={submit} className="mt-8 space-y-3">
+      <form onSubmit={sendCode} className="mt-8 space-y-3">
         <input
           type="email"
           required
@@ -125,10 +226,10 @@ function LoginScreen() {
         />
         <button
           type="submit"
-          disabled={status === "sending"}
+          disabled={busy}
           className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-black transition-opacity disabled:opacity-50"
         >
-          {status === "sending" ? "Senden…" : "Login-Link schicken"}
+          {busy ? "Senden…" : "Code schicken"}
         </button>
         {error && <p className="text-sm text-red-400">{error}</p>}
       </form>

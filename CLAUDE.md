@@ -41,10 +41,10 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 - 🔒 Live-Kamera-Pflicht — kein Galerie-Upload, keine Filter
 - 🔒 Follower-Zahlen sind für andere unsichtbar
 - 🔒 Kein Publikums-Verfall durch Zahlung verlängerbar
-- 🔒 Einwilligung pro Clip ob Stadt-Story-fähig
+- 🔒 Einwilligung pro Moment, ob für den Stadt Corso freigegeben
 - Verfallendes Publikum: Follow = 24h **ab dem Follow** (individuelle Uhr pro Datensatz, kein stadtweiter Reset), danach aktiver Re-Entscheid; Erneuern ab 12h möglich
-- Moment = 24h ab dem Post, danach überall weg; genau ein lebender Moment pro Person
-- Verdienter Chat: erst nach 3–4 gegenseitigen Clip-Austauschen
+- Moment = 24h ab dem Upload, danach überall weg; genau ein lebender Moment pro Person
+- Verdienter Chat: erst nach 3–4 gegenseitigen Moment-Austauschen
 
 ## Stack
 
@@ -62,7 +62,7 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 - **Deployment:** **Cloudflare Pages** (Worker-SSR), live auf `https://corso-app.pages.dev`. Einziger Befehl: `bash scripts/deploy.sh`.
 
 ### Wichtige Backend-Prinzipien
-- **Leitplanken werden serverseitig erzwungen, nicht im Client.** Der Stadt-Story-Consent-Filter, die Follower-Privatsphäre und der 24h-Verfall leben in SQL-Funktionen, Triggern und RLS-Policies. Eine UI-seitige „Lösung" für eine 🔒 Leitplanke ist keine.
+- **Leitplanken werden serverseitig erzwungen, nicht im Client.** Der Einwilligung für den Stadt Corso-Filter, die Follower-Privatsphäre und der 24h-Verfall leben in SQL-Funktionen, Triggern und RLS-Policies. Eine UI-seitige „Lösung" für eine 🔒 Leitplanke ist keine.
 - **Kennzahl-Funktionen sind argumentlos.** `my_reach()` / `my_feedback()` sind `SECURITY DEFINER` ohne Parameter — es gibt bewusst keinen Weg, die Zahl eines *anderen* Users abzufragen. Nicht „für Debugging" einen Parameter ergänzen.
 - **Der service_role-Key gehört nicht in den Client und nach Möglichkeit nicht in den Edge.** Der Tages-Prompt lief ursprünglich über eine Server-Action und wurde bewusst auf Client-RPC umgestellt, um den Key aus dem Worker zu halten. Nur das Einlösen von Einladungs-Links braucht ihn noch.
 
@@ -79,22 +79,22 @@ CORSO_EPHY/
 │   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider, AuthGate, Prompt-Splash
 │   │   ├── index.tsx         # Discovery-Screen (Entdeckungs-Feed, Swipe vertikal)
 │   │   ├── record.tsx        # Aufnahme-Screen (Live-Kamera + Prompt)
-│   │   ├── story.tsx         # Stadt-Story (21:00 Ritual, Swipe vertikal — UX/Optik wie Discovery, PRD §4.6)
+│   │   ├── story.tsx         # Stadt Corso (21:00 Ritual, Swipe vertikal — UX/Optik wie Discovery, PRD §4.6)
 │   │   ├── connections.tsx   # „Ich folge" + verdienter Chat (Chat = Phase 3, noch nicht gebaut)
 │   │   ├── feedback.tsx      # Rücklauf (morgendliche Reichweite, privat)
 │   │   ├── settings.tsx      # Einstellungen (Screen 10, bewusst minimal)
 │   │   ├── impressum|datenschutz|agb.tsx   # Rechts-Platzhalter (Gerüst: components/legal-page.tsx)
-│   │   └── story-empty-lab.tsx             # Lovable-Sandbox für den Story-Leerzustand (Mock, kein Supabase)
+│   │   └── story-empty-lab.tsx             # Lovable-Sandbox für den Leerzustand des Stadt Corso (Mock, kein Supabase)
 │   ├── components/
 │   │   ├── auth-gate.tsx     # Login-Screen + Session-Gate
-│   │   ├── city-backdrop.tsx # Geblurrte s/w Düsseldorf-Clips (Story-Leerzustand + Prompt-Splash)
+│   │   ├── city-backdrop.tsx # Geblurrte s/w Düsseldorf-Clips (Leerzustand des Stadt Corso + Prompt-Splash)
 │   │   ├── daily-prompt-splash.tsx  # Vollbild-Prompt, 1× pro Corso-Tag
 │   │   ├── dev-menu.tsx      # Admin-Dev-Menü, NUR für dominik@subworx.io (serverseitig geprüft)
 │   │   ├── follow-button.tsx, heart-burst.tsx, legal-page.tsx
 │   │   └── ui/               # shadcn/ui Komponenten (nicht anfassen)
 │   ├── hooks/
 │   │   ├── use-camera.ts     # 🔒 getUserMedia + MediaRecorder — die Live-Kamera-Pflicht
-│   │   ├── use-snap-scroll.ts# Vertikaler Snap-Feed (Discovery/Story/Ich-folge teilen ihn)
+│   │   ├── use-snap-scroll.ts# Vertikaler Snap-Feed (Discovery/Stadt Corso/Ich-folge teilen ihn)
 │   │   └── use-mobile.tsx
 │   ├── lib/
 │   │   ├── auth-context.tsx  # Session + Profil (Vorsicht: Auth-Lock, siehe STATUS)

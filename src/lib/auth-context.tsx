@@ -16,8 +16,12 @@ interface AuthContextType {
   profile: Profile | null;
   // true, solange die initiale Session-/Profil-Prüfung läuft (SSR + erster Client-Render)
   loading: boolean;
-  // Magic-Link an die E-Mail schicken
-  signInWithMagicLink: (email: string) => Promise<{ error: string | null }>;
+  // Login-Mail anfordern. Die Mail enthält BEIDES: einen 6-stelligen Code und
+  // einen Link. Der Code ist der Hauptweg — siehe Kommentar bei verifyLoginCode.
+  requestLoginCode: (email: string) => Promise<{ error: string | null }>;
+  // Den 6-stelligen Code einlösen. Erzeugt die Session GENAU DORT, wo der Code
+  // eingetippt wurde — das ist der ganze Punkt (siehe unten).
+  verifyLoginCode: (email: string, code: string) => Promise<{ error: string | null }>;
   // Profil (Handle) nach erstem Login anlegen — 1 Gesicht = 1 Handle
   createProfile: (handle: string) => Promise<{ error: string | null }>;
   // Eigene Profilfelder ändern (Anzeigename, Push-Präferenz). Aktualisiert auch
@@ -35,17 +39,43 @@ const AuthContext = createContext<AuthContextType | null>(null);
 // ewig stehen bleiben — nach dieser Zeit geht es ohne Session weiter (Login).
 const SESSION_TIMEOUT_MS = 8000;
 
-function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("auth: session check timed out")), ms);
+/**
+ * Wartet höchstens `ms` auf die Session-Prüfung und gibt danach die Oberfläche frei —
+ * ABER bricht die Prüfung nicht ab. Trudelt die Antwort später ein, wird sie noch
+ * angewandt und der Nutzer landet automatisch in der App.
+ *
+ * Vorher wurde bei Zeitüberschreitung geworfen und das Ergebnis verworfen: bei
+ * langsamem Netz sah man den Login-Screen, obwohl eine gültige Session im Speicher lag.
+ * Auf dem Handy (Funkloch, Tunnel, kalter Start) ist das kein Randfall.
+ */
+function raceTimeout<T>(promise: PromiseLike<T>, ms: number, onLate: (value: T) => void) {
+  let settled = false;
+  return new Promise<T | null>((resolve) => {
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.warn(
+        `[auth] Session-Prüfung > ${ms}ms — Oberfläche wird freigegeben, Prüfung läuft weiter.`,
+      );
+      resolve(null);
+    }, ms);
     promise.then(
       (value) => {
         clearTimeout(timer);
-        resolve(value);
+        if (settled)
+          onLate(value); // zu spät für den ersten Render, aber nicht verloren
+        else {
+          settled = true;
+          resolve(value);
+        }
       },
       (error) => {
         clearTimeout(timer);
-        reject(error);
+        console.error("[auth] Session-Prüfung fehlgeschlagen:", error);
+        if (!settled) {
+          settled = true;
+          resolve(null);
+        }
       },
     );
   });
@@ -97,17 +127,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Der Splash hängt an diesem einen Aufruf — er MUSS unter allen Umständen
     // enden, sonst kommt man nur per Reload in die App.
     void (async () => {
-      try {
-        const { data } = await withTimeout(supabase.auth.getSession(), SESSION_TIMEOUT_MS);
-        if (!active) return;
-        setSession(data.session);
-        await syncProfile(data.session?.user?.id ?? null);
-      } catch (err) {
-        // Bewusst weich: lieber der Login-Screen als ein Splash ohne Ausweg.
-        console.error("[auth] Initiale Session-Prüfung fehlgeschlagen:", err);
-      } finally {
-        if (active) setLoading(false);
+      // Nachzügler: kommt die Session erst nach dem Timeout, wird sie trotzdem
+      // übernommen — der Nutzer rutscht dann von selbst aus dem Login in die App.
+      const applyLate = (result: Awaited<ReturnType<typeof supabase.auth.getSession>>) => {
+        if (!active || !result?.data?.session) return;
+        setSession(result.data.session);
+        void syncProfile(result.data.session.user?.id ?? null);
+      };
+      const result = await raceTimeout(supabase.auth.getSession(), SESSION_TIMEOUT_MS, applyLate);
+      if (!active) return;
+      if (result) {
+        setSession(result.data.session);
+        await syncProfile(result.data.session?.user?.id ?? null);
       }
+      setLoading(false);
     })();
 
     // Auf Login/Logout reagieren.
@@ -130,18 +163,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signInWithMagicLink = useCallback(async (email: string) => {
-    // Prefer VITE_APP_URL (set to the current ngrok/prod URL in .env) so the
-    // magic-link points to the right host even when opened on a physical device.
-    // Falls back to window.location.origin for pure localhost dev.
+  /**
+   * Fordert die Login-Mail an.
+   *
+   * 🔒 `shouldCreateUser: false` — ohne das legt Supabase für JEDE eingetippte
+   *    Adresse ein Konto an, und das Einladungs-System wäre über das Login-Formular
+   *    umgehbar. Die Tür ist der Einladungs-Link, nicht dieses Feld.
+   */
+  const requestLoginCode = useCallback(async (email: string) => {
+    // VITE_APP_URL bevorzugen (ngrok/Prod-URL), damit der Link im Mail auch auf
+    // einem echten Gerät auf den richtigen Host zeigt.
     const redirectTo =
       import.meta.env.VITE_APP_URL ??
       (typeof window !== "undefined" ? window.location.origin : undefined);
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: redirectTo },
+      options: { emailRedirectTo: redirectTo, shouldCreateUser: false },
     });
-    return { error: error?.message ?? null };
+    if (!error) return { error: null };
+    // Supabase antwortet hier technisch ("Signups not allowed for otp") — für den
+    // Nutzer ist die einzig sinnvolle Aussage: du bist nicht eingeladen.
+    const raw = error.message.toLowerCase();
+    if (raw.includes("signups not allowed") || raw.includes("not found")) {
+      return {
+        error: "Diese E-Mail ist nicht eingeladen. Bitte Maxim um einen Einladungs-Link.",
+      };
+    }
+    return { error: error.message };
+  }, []);
+
+  /**
+   * Löst den 6-stelligen Code ein.
+   *
+   * Warum der Code der Hauptweg ist: Auf dem iPhone hat eine Home-Bildschirm-App
+   * einen eigenen Speicher, getrennt von Safari. Ein angetippter Login-Link öffnet
+   * IMMER in Safari — die Session landet dort und die Home-Bildschirm-App bleibt
+   * dauerhaft ausgeloggt. Ein eingetippter Code erzeugt die Session dagegen genau
+   * in der App, in der er eingetippt wurde. Der Link bleibt als Rückfall für
+   * Desktop/Android, wo dieses Problem nicht existiert.
+   */
+  const verifyLoginCode = useCallback(async (email: string, code: string) => {
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: code.replace(/\D/g, ""), // Leerzeichen/Bindestriche aus dem Einfügen dulden
+      type: "email",
+    });
+    if (!error) return { error: null };
+    const raw = error.message.toLowerCase();
+    if (raw.includes("expired")) {
+      return { error: "Dieser Code ist abgelaufen. Fordere einen neuen an." };
+    }
+    if (raw.includes("invalid")) {
+      return { error: "Code stimmt nicht. Nochmal prüfen — er steht in der Mail." };
+    }
+    return { error: error.message };
   }, []);
 
   const createProfile = useCallback(
@@ -191,7 +266,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // sonst blitzt der Handle-Screen bei bestehendem Profil kurz auf.
         // Beim Hintergrund-Refresh (Profil schon da) bleibt es aus.
         loading: loading || (!!session && !profile && profilePending),
-        signInWithMagicLink,
+        requestLoginCode,
+        verifyLoginCode,
         createProfile,
         updateProfile,
         signOut,

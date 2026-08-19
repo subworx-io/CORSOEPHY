@@ -5,7 +5,6 @@ import {
   useFollow,
   followFill,
   canRenew,
-  lastReset,
   type FollowedPerson,
 } from "@/lib/follow-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
@@ -13,6 +12,8 @@ import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
 import { MomentMenu } from "@/components/moment-menu";
+import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
+import { MomentPrompt } from "@/components/moment-prompt";
 
 export const Route = createFileRoute("/connections")({
   head: () => ({
@@ -61,12 +62,15 @@ function PersonSlide({
   now,
   videoUrl,
   postId,
+  prompt,
   isActive,
 }: {
   person: FollowedPerson;
   now: number;
   videoUrl?: string;
   postId?: string;
+  // Prompt des Moments (null, wenn für den Tag keine Historie existiert).
+  prompt?: { text: string; date: string } | null;
   isActive: boolean;
 }) {
   const { renew, unfollow, nudge } = useFollow();
@@ -89,8 +93,8 @@ function PersonSlide({
     setMuted(v.muted);
   }
 
-  // „Moment heute?" hängt am echten heutigen Video (videoUrl wird nur für Posts seit dem
-  // letzten 08:00-Reset geladen), nicht mehr am Demo-Portrait — sonst wäre der Anstups-/
+  // „Moment heute?" hängt am echten lebenden Video (videoUrl wird nur für Momente
+  // geladen, deren 24h noch laufen), nicht am Demo-Portrait — sonst wäre der Anstups-/
   // Leerzustand nie erreichbar.
   const hasMomentToday = !!videoUrl;
 
@@ -138,6 +142,8 @@ function PersonSlide({
                 </span>
               </button>
             )}
+            {/* Zu welchem Prompt ist dieser Moment entstanden? */}
+            {prompt && <MomentPrompt text={prompt.text} date={prompt.date} />}
           </>
         ) : person.src ? (
           <>
@@ -215,6 +221,13 @@ function PersonSlide({
   );
 }
 
+// Heutiger Moment einer gefolgten Person — Video + der Prompt, zu dem er entstand.
+type ConnectionMoment = {
+  url: string;
+  postId: string;
+  prompt: { text: string; date: string } | null;
+};
+
 function ConnectionsPage() {
   const { followed } = useFollow();
   const { user } = useAuth();
@@ -234,7 +247,7 @@ function ConnectionsPage() {
   const handles = people.map((p) => p.handle);
 
   // Holt den aktuellsten Post (+ signierte Video-URL) für jede gefolgte Person
-  const { data: videosByHandle = {} } = useQuery({
+  const { data: videosByHandle = {} } = useQuery<Record<string, ConnectionMoment>>({
     queryKey: ["connections-posts", handles.join(",")],
     queryFn: async () => {
       if (!handles.length) return {};
@@ -245,19 +258,21 @@ function ConnectionsPage() {
       if (!profiles?.length) return {};
 
       const authorIds = profiles.map((p) => p.id);
-      // Nur der heutige Moment zählt (seit dem letzten 08:00-Reset) — sonst würde ein alter
+      // Nur lebende Momente zählen (24h ab Post) — sonst würde ein abgelaufener
       // Clip als „Moment heute" durchgehen und den Anstups-Zustand fälschlich unterdrücken.
-      const sinceReset = new Date(lastReset(Date.now())).toISOString();
       const { data: posts } = await supabase
         .from("posts")
-        .select("id, media_path, author_id")
+        .select("id, media_path, author_id, prompt_date")
         .in("author_id", authorIds)
-        .gte("created_at", sinceReset)
+        .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false });
       if (!posts?.length) return {};
 
-      // Eine signierte URL + Post-ID pro Author (neuester Post)
-      const result: Record<string, { url: string; postId: string }> = {};
+      // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
+      const promptsByDate = await fetchPromptsByDate(posts.map((p) => p.prompt_date));
+
+      // Eine signierte URL + Post-ID + Prompt pro Author (neuester Post)
+      const result: Record<string, ConnectionMoment> = {};
       const seen = new Set<string>();
       for (const post of posts) {
         if (seen.has(post.author_id)) continue;
@@ -267,7 +282,13 @@ function ConnectionsPage() {
         const { data: urlData } = await supabase.storage
           .from("moments")
           .createSignedUrl(post.media_path, 3600);
-        if (urlData?.signedUrl) result[profile.handle] = { url: urlData.signedUrl, postId: post.id };
+        if (!urlData?.signedUrl) continue;
+        const promptText = promptsByDate[post.prompt_date];
+        result[profile.handle] = {
+          url: urlData.signedUrl,
+          postId: post.id,
+          prompt: promptText ? { text: promptText, date: post.prompt_date } : null,
+        };
       }
       return result;
     },
@@ -319,7 +340,14 @@ function ConnectionsPage() {
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
           >
-            <PersonSlide person={person} now={now} videoUrl={videosByHandle[person.handle]?.url} postId={videosByHandle[person.handle]?.postId} isActive={isActive} />
+            <PersonSlide
+              person={person}
+              now={now}
+              videoUrl={videosByHandle[person.handle]?.url}
+              postId={videosByHandle[person.handle]?.postId}
+              prompt={videosByHandle[person.handle]?.prompt}
+              isActive={isActive}
+            />
           </div>
         );
       })}
