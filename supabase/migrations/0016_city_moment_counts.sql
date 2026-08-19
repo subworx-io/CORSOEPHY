@@ -1,4 +1,4 @@
--- Corso — 0015: Gemeinschafts-Zähler auf der Discovery ("X Momente heute in Düsseldorf")
+-- Corso — 0016: Gemeinschafts-Zähler auf der Discovery ("X Momente heute in Düsseldorf")
 -- Bezug: .claude/prds/gemeinschafts-zaehler.prd.md.
 --
 -- Ein dezentes Stimmungsbild der Stadt: wie viele Momente heute (und gestern)
