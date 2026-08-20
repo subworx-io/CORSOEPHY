@@ -22,11 +22,11 @@ export default defineConfig({
       // ngrok-Tunnel: Vite blockiert sonst fremde Hosts mit 403
       allowedHosts: [".ngrok-free.app", ".ngrok.io", ".ngrok.app"],
     },
-    // React 19 production build removes jsxDEV; force production JSX transform
-    // so builds use jsx/jsxs from react/jsx-runtime instead of jsxDEV.
-    esbuild: {
-      jsx: "automatic",
-      jsxDev: false,
-    },
+    // Hier stand ein `esbuild: { jsx: "automatic", jsxDev: false }` gegen den
+    // jsxDEV-Crash. Vite 8 transformiert JSX ueber oxc, nicht esbuild — der
+    // Block war nachweislich wirkungslos (Build mit/ohne ergibt bit-identische
+    // Bundles) und liess den Typecheck scheitern, sobald das optionale Paket
+    // `esbuild` fehlt (wie auf dem CI-Runner). Den jsxDEV-Schutz leistet
+    // NODE_ENV=production in scripts/deploy.sh plus die dortige grep-Kontrolle.
   },
 });
