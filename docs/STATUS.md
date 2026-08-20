@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand: 19. August 2026.**
+**Stand: 20. August 2026.**
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -11,13 +11,15 @@
 
 **Phase 0 (Backend-Fundament) ist durch. Phase 1 (Konsum-Loop end-to-end echt) ist zu ~60 % gebaut.**
 
-Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (alles committet, letzter Commit `7baf6e7` vom 12. August), und **alle drei Server-Jobs laufen nachweislich mit echten Daten** (Beleg unten). Der Kern-Loop — posten → in Discovery erscheinen → folgen → in den Stadt Corso gezogen werden → private Zahl im Rücklauf — funktioniert vollständig ohne Mock.
+Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (alles committet und gepusht, letzter Commit `d7c6932` vom 20. August), und **alle drei Server-Jobs laufen nachweislich mit echten Daten** (Beleg unten). Der Kern-Loop — posten → in Discovery erscheinen → folgen → in den Stadt Corso gezogen werden → private Zahl im Rücklauf — funktioniert vollständig ohne Mock.
 
 **Am Abend des 19. August umgestellt:** Der feste Tagesrhythmus ist weg. Verfall läuft jetzt **pro Datensatz 24 h ab Entstehung**, der Zyklus-Wechsel (Prompt + Stadt-Corso-Ziehung) liegt auf **21:00** statt 08:00/20:00. Details unten unter „Rollender 24h-Verfall". Discovery hat dabei ihr Infinite Scroll bekommen.
 
-**Metrik-Tracking ab Tag 1 (gebaut, noch nicht angewendet):** Ein write-only Event-Log (`events` + `log_event()`, Migration `0018_events.sql`, Muster wie `post_views`/`reports`) plus Client-Instrumentierung: `app_open` (Start/Fokus, 5-min-entprellt), `story_viewed`, `moment_posted`, `follow_set` (mit `kind: follow|renew`), `nudge_sent`. Server: `draw_city_story()` schreibt zusätzlich `story_drawn` je gezogenem Slot. **Offen (Koordinator):** `follow_expired` bleibt reservierter Enum ohne Feuer-Pfad — seit `0015` gibt es keinen Verfall-Cron mehr, Verfall ist bei der Auswertung aus `follows.expires_at` ableitbar (Empfehlung: kein Marker-Job). Migration ist NICHT angewendet, Branch NICHT gepusht.
+**Metrik-Tracking ab Tag 1 (gebaut, noch nicht angewendet):** Ein write-only Event-Log (`events` + `log_event()`, Migration `0018_events.sql`, Muster wie `post_views`/`reports`) plus Client-Instrumentierung: `app_open` (Start/Fokus, 5-min-entprellt), `story_viewed`, `moment_posted`, `follow_set` (mit `kind: follow|renew`), `nudge_sent`. Server: `draw_city_story()` schreibt zusätzlich `story_drawn` je gezogenem Slot. **Offen (Koordinator):** `follow_expired` bleibt reservierter Enum ohne Feuer-Pfad — seit `0015` gibt es keinen Verfall-Cron mehr, Verfall ist bei der Auswertung aus `follows.expires_at` ableitbar (Empfehlung: kein Marker-Job). ✅ **Migration `0018_events.sql` angewendet, PR #5 gemerged (20. Aug).**
 
-**Was Phase 1 noch fehlt:** Push-Notifications.
+**Am 20. August dazugekommen:** PR #5 (Metrik-Tracking), PR #6 (Web-Push + Rücklauf) und PR #7 (Release-Workflow) sind gemerged; dazu der **Onboarding-Flow für neu eingeladene User** (`onboarding-flow.tsx`, `onboarding-handle-step.tsx`, Migration `0021_onboarding_event.sql`, angewendet). Damit ist **Phase 1 feature-vollständig** — Push ist gebaut, Discovery hat Infinite Scroll.
+
+**Release läuft ab sofort per Knopfdruck** über GitHub Actions statt von einem Rechner. Siehe `docs/RELEASE.md` und den Abschnitt „Release per Knopfdruck" unten.
 **Was den Pilot-Start blockiert:** zwei Config-Schritte von je unter 5 Minuten (siehe „Offene Punkte").
 
 ---
@@ -62,7 +64,12 @@ Nebenbeleg für die Korrektheit der Ziehung: Am 11. und 12. August gab es einwil
 
 ---
 
-## 🔧 WIP im Working Tree (19. August, unkommittiert)
+## ✅ Ehemaliges WIP (19. August) — am 20. August gemerged und deployed
+
+> Der folgende Abschnitt beschreibt Arbeit, die am 19. August noch unkommittiert im Working Tree lag.
+> **Sie ist inzwischen über PR #5/#6 in `main` und live.** Die Vermerke „nicht committet, nicht
+> deployed" weiter unten sind historisch — nicht mehr als offene Punkte lesen. Was offen bleibt,
+> ist die Prüfung am echten Gerät (Punkt 5).
 
 **Rücklauf entlang der zwei Kräfte — gebaut (19. August), Migration `0017` noch NICHT angewendet.**
 
@@ -135,8 +142,10 @@ Diese Werte wurden im Chat geteilt und sind **noch nicht rotiert**:
 
 ### 4. Phase-1-Features, die noch fehlen
 
-- **Discovery als langer Scroll-Feed** — Infinite Scroll + „heute zuerst"-Ordering (Details unten).
-- **Push-Notifications** — 21:00-Push zum Stadt Corso + Push, wenn eine gefolgte Person postet. **Ohne Push gibt es keinen strukturellen Grund zurückzukommen**; die Kill-Metrik „Daily-Open-Rate ≥ 50 %" wäre ohne Push nicht fair messbar.
+- ~~**Discovery als langer Scroll-Feed**~~ ✅ gebaut (19. Aug).
+- ~~**Push-Notifications**~~ ✅ gebaut und live (PR #6, 20. Aug).
+
+Damit ist diese Liste leer — Phase 1 ist feature-vollständig. Was bleibt, ist Beweis am echten Gerät (Punkt 5), nicht Bau.
 
 ### 5. Nicht abschließend bewiesen
 
@@ -178,6 +187,50 @@ Das Script baut mit `NODE_ENV=production`, prüft dass kein `jsxDEV` im Bundle l
 ### Warum das früher kaputt war (gelöst 2. Juli)
 
 `.env` setzt `NODE_ENV=development`. Beim `vite build` ließ das den JSX-Transform die **Dev-Runtime** nutzen → überall `jsxDEV(...)`-Aufrufe, während React als Produktion gebaut wird und `jsxDEV` auf `void 0` setzt. Beim Rendern jeder Route: `TypeError: (void 0) is not a function`. Die früheren Splash-/jsxDEV-Patches waren Flickwerk und deckten nur das Haupt-Bundle ab — deshalb kam man bis zum Login, aber jede echte Route crashte. Der Fix erzwingt `NODE_ENV=production` nur für den Build; `.env` bleibt unangetastet.
+
+---
+
+## Release per Knopfdruck (eingerichtet 20. August 2026)
+
+Release läuft nicht mehr von einem Rechner, sondern über **GitHub → Actions → Release → Run workflow**.
+Ablauf im Lauf: Typecheck → Lint (nur Bericht) → **Migrationen** → **Build + Deploy** → Bundle-Kontrolle
+→ Rauchtest → optional Tag. Erst Schema, dann Code. `main` geht auf `corso-app.pages.dev`, jeder andere
+Branch landet als Preview unter eigener URL. Vollständige Doku: `docs/RELEASE.md`.
+
+**Eingerichtet und verifiziert am 20. August:** 5 Repository-Secrets (`SUPABASE_MANAGEMENT_TOKEN`,
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `VITE_SUPABASE_ANON_KEY`, `VITE_VAPID_PUBLIC_KEY`)
+und 6 Variables (`SUPABASE_PROJECT_REF`, `VITE_SUPABASE_URL`, `VITE_APP_URL`, `VITE_PILOT_CITY`,
+`VITE_PILOT_PRICE_EUR`, `CF_PAGES_PROJECT`). Bewiesen durch einen Preview-Lauf auf
+`ci/preview-probe` (grün, eigene URL) und einen Produktions-Deploy, dessen Bundle **bit-identisch**
+zum lokalen Build ist — womit alle Secret-Werte als korrekt belegt sind.
+
+**Migrations-Ledger:** `scripts/migrate.mjs` führt `public.schema_migrations` in der DB. Gefahren wird
+nur, was im Repo liegt und dort nicht verbucht ist. Stand 20. August: **24 Dateien, 24 verbucht,
+nichts ausstehend.** Von Hand gefahrene Migrationen mit
+`node scripts/migrate.mjs --mark-applied supabase/migrations/<datei>.sql` nachtragen, nicht in die
+Baseline schreiben. Drift-Schutz: eine nachträglich veränderte, bereits angewendete Datei bricht den
+Lauf ab — Migrationen sind append-only.
+
+### 🔓 Keine Freigabe vorgeschaltet (Entscheidung 20. Aug, Dominik)
+
+Die Environment `production` hat **bewusst keine** Protection Rules: keine Required Reviewers, kein
+Wait Timer, keine Branch-Beschränkung. Jeder mit **Write**-Rolle auf dem Repo kann ohne Rückfrage
+deployen *und* die Produktions-DB migrieren. Das ist gewollt, damit das Team selbstständig ausliefern
+kann. Wer nur `Read`/`Triage` hat, sieht den Knopf gar nicht. Eigene Tokens braucht niemand — die
+Repository-Secrets gelten für alle Collaborators.
+
+### Drei Fallstricke, die dabei aufgeflogen sind
+
+1. **`bun.lock` ist verwaist.** Seit `d5acfe4` nicht nachgezogen, `@supabase/supabase-js` fehlt darin
+   komplett. Deshalb fährt CI **npm** (`npm ci` gegen `package-lock.json`). Wer `package.json` anfasst,
+   muss beide Lockfiles pflegen — oder das Projekt entscheidet sich endlich für einen Package Manager.
+2. **`vite.config.ts` trug einen toten `esbuild`-Block** (`jsx`/`jsxDev`) gegen den alten jsxDEV-Crash.
+   Vite 8 transformiert JSX über oxc; der Block war wirkungslos (Build mit/ohne = bit-identische
+   Bundles) und ließ den Typecheck scheitern, sobald das *optionale* Paket `esbuild` fehlt — wie auf
+   dem CI-Runner. Entfernt. Den jsxDEV-Schutz leistet `NODE_ENV=production` in `scripts/deploy.sh`.
+3. **`VITE_VAPID_PUBLIC_KEY` fehlte im Workflow.** Wäre nicht aufgefallen: der Build wäre grün
+   gewesen und Web-Push still tot. Ist jetzt Pflichtwert, und die Bundle-Kontrolle prüft ihn so hart
+   wie die Supabase-URL.
 
 ---
 
