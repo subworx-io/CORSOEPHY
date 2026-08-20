@@ -57,7 +57,10 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 - **Icons:** Material Symbols Outlined (Google Fonts)
 - **Charts:** Recharts
 - **Sprache:** TypeScript (strict)
-- **Package manager:** Bun
+- **Package manager:** Bun lokal — **CI/Release fährt npm** (`npm ci`).
+  Grund: `bun.lock` ist seit `d5acfe4` verwaist (es fehlt u. a. `@supabase/supabase-js`),
+  `package-lock.json` dagegen vollständig. Wer `package.json` anfasst, sollte **beide**
+  Lockfiles nachziehen — sonst bricht der Release-Workflow an `npm ci`.
 - **Backend:** **Supabase** — Auth (Magic-Link), Postgres mit RLS, Storage (Bucket `moments`), pg_cron für die Zeit-Rituale. Migrationen liegen als nummerierte SQL-Dateien in `supabase/migrations/`.
 - **Deployment:** **Cloudflare Pages** (Worker-SSR), live auf `https://corso-app.pages.dev`. Einziger Befehl: `bash scripts/deploy.sh`.
 

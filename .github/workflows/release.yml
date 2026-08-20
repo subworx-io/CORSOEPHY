@@ -65,22 +65,27 @@ jobs:
             echo "::warning::Release läuft NICHT von main, sondern von '$GITHUB_REF_NAME' — der Deploy geht als Preview raus, nicht auf corso-app.pages.dev."
           fi
 
-      - name: Bun einrichten
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Node einrichten
+        # npm, nicht bun: bun.lock ist seit d5acfe4 verwaist (u. a. fehlt
+        # @supabase/supabase-js), package-lock.json dagegen vollständig und
+        # gepflegt. Ein Release muss auf dem Lockfile bauen, das wirklich
+        # nachgezogen wird — sonst ist die Reproduzierbarkeit nur behauptet.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          bun-version: latest
+          node-version: "24"
+          cache: npm
 
       - name: Abhängigkeiten installieren
-        run: bun install --frozen-lockfile
+        run: npm ci
 
       - name: Typecheck (blockierend)
-        run: bunx tsc --noEmit
+        run: npx tsc --noEmit
 
       - name: Lint (nur Bericht)
-        # Noch nicht blockierend: main trägt ~80 offene Prettier-Verstöße.
-        # Nach einem `bun run format` kann continue-on-error hier raus.
+        # Noch nicht blockierend: main trägt ~130 offene Prettier-Verstöße.
+        # Nach einem `npm run format` kann continue-on-error hier raus.
         continue-on-error: true
-        run: bunx eslint src scripts
+        run: npx eslint src scripts
 
       # ── Schema ───────────────────────────────────────────────────────────
       - name: Migrationen anwenden
