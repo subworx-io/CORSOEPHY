@@ -1,5 +1,43 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { OnboardingFlow } from "@/components/onboarding-flow";
+import { OnboardingHandleStep } from "@/components/onboarding-handle-step";
+
+// Client-seitiger „Onboarding gesehen"-Merker. Kein Server-Merker (🔒): rein
+// lokal pro Gerät. Wert "v1" erlaubt eine spätere erzwungene Re-Show-Option
+// (z.B. bei größerem Flow-Umbau) ohne alten Merker-Kollision.
+const ONBOARDING_KEY = "corso_onboarding_seen";
+const ONBOARDING_VALUE = "v1";
+
+/**
+ * Liefert `null` solange der Client localStorage noch nicht gelesen hat
+ * (pending/SSR — wie phase:"pending" im Prompt-Splash), danach `boolean`.
+ * SSR-sicher: try/catch um localStorage (privater Modus → als „gesehen"
+ * behandeln, damit der Flow keine Sackgasse baut).
+ */
+function useOnboardingSeen(): { seen: boolean | null; markSeen: () => void } {
+  const [seen, setSeen] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    try {
+      setSeen(localStorage.getItem(ONBOARDING_KEY) === ONBOARDING_VALUE);
+    } catch {
+      // localStorage nicht verfügbar → Flow überspringen (keine Sackgasse).
+      setSeen(true);
+    }
+  }, []);
+
+  const markSeen = useCallback(() => {
+    try {
+      localStorage.setItem(ONBOARDING_KEY, ONBOARDING_VALUE);
+    } catch {
+      /* ignorieren */
+    }
+    setSeen(true);
+  }, []);
+
+  return { seen, markSeen };
+}
 
 // ⚠️ PILOT-PROVISORIUM: Meldungen für fehlgeschlagenes Einlösen eines Einladungs-Links
 // (E-Mail-freier Freundes-Pilot). Die Einlöse-Route leitet bei Fehlern auf
@@ -41,16 +79,27 @@ function useInviteError(): InviteError | null {
 
 /**
  * Auth-Gate: entscheidet, was der Nutzer sieht.
- *   loading            → neutraler Splash (SSR-sicher)
- *   keine Session      → Magic-Link-Login (Onboarding Screen 1)
- *   Session ohne Profil→ Handle-Wahl (1 Gesicht = 1 Handle)
- *   sonst              → die App
+ *   loading                 → neutraler Splash (SSR-sicher)
+ *   keine Session           → Magic-Link-Login (Onboarding Screen 1)
+ *   Onboarding-Merker pending→ Splash (bis localStorage clientseitig gelesen)
+ *   Onboarding ungesehen    → First-Run-Flow (Erklär-Screens + Handle + Nudge)
+ *   Session ohne Profil     → Handle-Wahl (Fallback: Merker gesetzt, kein Profil)
+ *   sonst                   → die App
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const { loading, session, profile } = useAuth();
+  const { seen, markSeen } = useOnboardingSeen();
 
   if (loading) return <Splash />;
   if (!session) return <LoginScreen />;
+  // Solange der Client localStorage noch nicht gelesen hat: Splash statt
+  // Flackern des Flows (Hydration-sicher, Prompt-Splash-Muster).
+  if (seen === null) return <Splash />;
+  // Ungesehen → First-Run. Der Merker wird beim ABSCHLUSS gesetzt (markSeen),
+  // nicht beim Anzeigen — ein Abbruch vor dem Ende wiederholt den Flow.
+  if (!seen) return <OnboardingFlow onComplete={markSeen} />;
+  // Fallback: Merker gesetzt, aber kein Profil (neues Gerät / geleerter
+  // Speicher). Der nüchterne Handle-Screen fängt das ab.
   if (!profile) return <HandleScreen />;
   return <>{children}</>;
 }
@@ -241,37 +290,11 @@ function LoginScreen() {
   );
 }
 
-const HANDLE_RE = /^[a-z0-9._]{2,30}$/;
-
+// Fallback-Handle-Screen: greift nur, wenn der Onboarding-Merker gesetzt ist,
+// aber kein Profil existiert (neues Gerät / geleerter Speicher). Nutzt denselben
+// extrahierten Schritt wie der Onboarding-Flow → keine Duplikat-Logik/-Drift.
 function HandleScreen() {
-  const { createProfile, signOut } = useAuth();
-  const [handle, setHandle] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const clean = handle.trim().toLowerCase().replace(/^@/, "");
-  const valid = HANDLE_RE.test(clean);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!valid) {
-      setError("2–30 Zeichen: Kleinbuchstaben, Zahlen, Punkt oder Unterstrich.");
-      return;
-    }
-    setError(null);
-    setSaving(true);
-    const { error } = await createProfile(clean);
-    if (error) {
-      // unique_violation → Handle vergeben
-      setError(
-        error.includes("duplicate") || error.includes("unique")
-          ? "Dieser Handle ist schon vergeben."
-          : error,
-      );
-      setSaving(false);
-    }
-  }
-
+  const { signOut } = useAuth();
   return (
     <Screen>
       <h1 className="text-2xl font-semibold tracking-tight">Wähl deinen Handle</h1>
@@ -279,29 +302,9 @@ function HandleScreen() {
         Ein Gesicht, ein Handle. So findet dich deine Stadt.
       </p>
 
-      <form onSubmit={submit} className="mt-8 space-y-3">
-        <div className="flex items-center rounded-xl border border-white/10 bg-white/5 px-4 focus-within:border-white/30">
-          <span className="text-white/40">@</span>
-          <input
-            autoFocus
-            autoCapitalize="none"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="dein.name"
-            value={handle.replace(/^@/, "")}
-            onChange={(e) => setHandle(e.target.value)}
-            className="w-full bg-transparent py-3 pl-1 text-white placeholder:text-white/30 outline-none"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={saving || !valid}
-          className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-black transition-opacity disabled:opacity-50"
-        >
-          {saving ? "Speichern…" : "Los geht's"}
-        </button>
-        {error && <p className="text-sm text-red-400">{error}</p>}
-      </form>
+      <div className="mt-8">
+        <OnboardingHandleStep />
+      </div>
 
       <button
         onClick={() => void signOut()}

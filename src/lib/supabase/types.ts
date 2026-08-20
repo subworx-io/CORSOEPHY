@@ -149,6 +149,7 @@ export interface MyFeedback {
 //                    follows.expires_at seit 0015, kein Cron mehr).
 //   chat_reached   — reserviert (Phase 3, Chat existiert nicht).
 //   story_drawn    — nur serverseitig in draw_city_story() geschrieben.
+//   onboarding_completed — First-Run abgeschlossen (metadata.via: "read"|"skip").
 export type EventType =
   | "app_open"
   | "moment_posted"
@@ -157,4 +158,5 @@ export type EventType =
   | "story_viewed"
   | "nudge_sent"
   | "chat_reached"
-  | "story_drawn";
+  | "story_drawn"
+  | "onboarding_completed";
