@@ -108,13 +108,14 @@ jobs:
           VITE_APP_URL: ${{ vars.VITE_APP_URL }}
           VITE_PILOT_CITY: ${{ vars.VITE_PILOT_CITY }}
           VITE_PILOT_PRICE_EUR: ${{ vars.VITE_PILOT_PRICE_EUR }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
         run: |
           # Der Build liest VITE_*-Werte aus .env (wie lokal) — deshalb hier eine
           # ephemere .env aus Secrets/Variables statt eines abweichenden Wegs.
           # NICHT enthalten: SUPABASE_SERVICE_ROLE_KEY. Der wird zur Laufzeit aus
           # den Cloudflare-Pages-Secrets gelesen und hat im Build nichts verloren.
           missing=""
-          for v in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_APP_URL VITE_PILOT_CITY; do
+          for v in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_APP_URL VITE_PILOT_CITY VITE_VAPID_PUBLIC_KEY; do
             [ -z "${!v}" ] && missing="$missing $v"
           done
           if [ -n "$missing" ]; then
@@ -127,6 +128,7 @@ jobs:
             echo "VITE_APP_URL=${VITE_APP_URL}"
             echo "VITE_PILOT_CITY=${VITE_PILOT_CITY}"
             echo "VITE_PILOT_PRICE_EUR=${VITE_PILOT_PRICE_EUR:-9}"
+            echo "VITE_VAPID_PUBLIC_KEY=${VITE_VAPID_PUBLIC_KEY}"
           } > .env
 
       - name: Build + Deploy (Cloudflare Pages)
@@ -150,6 +152,7 @@ jobs:
         if: inputs.deploy
         env:
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
         run: |
           # Ein Build ohne eingebackene Supabase-URL sieht grün aus und liefert eine
           # App, die sich nicht anmelden kann. Also hart prüfen, bevor wir jubeln.
@@ -158,6 +161,14 @@ jobs:
             exit 1
           fi
           echo "✓ Supabase-URL im Client-Bundle vorhanden."
+
+          # Gleiche Falle bei Web-Push: fehlt der VAPID-Key im Bundle, scheitert die
+          # Push-Anmeldung still — die App laeuft, nur benachrichtigt sie nie.
+          if ! grep -rqF "${VITE_VAPID_PUBLIC_KEY}" deploy/assets 2>/dev/null; then
+            echo "✗ VAPID-Public-Key nicht im Client-Bundle — Web-Push waere tot." >&2
+            exit 1
+          fi
+          echo "✓ VAPID-Public-Key im Client-Bundle vorhanden."
 
       - name: Rauchtest
         if: inputs.deploy

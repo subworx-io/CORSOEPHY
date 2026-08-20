@@ -64,6 +64,7 @@ GitHub → Repo → **Settings → Secrets and variables → Actions → Secrets
 | `CLOUDFLARE_API_TOKEN` | API-Token mit `Cloudflare Pages: Edit` | Cloudflare Dashboard → *My Profile → API Tokens → Create Token → Custom token*. Nur Permission „Account · Cloudflare Pages · Edit", Account auf euren Account einschränken. |
 | `CLOUDFLARE_ACCOUNT_ID` | 32-stellige Account-ID | Cloudflare Dashboard → Workers & Pages → rechte Spalte „Account ID". |
 | `VITE_SUPABASE_ANON_KEY` | der anon key aus deiner `.env` | Supabase → Project Settings → API. (Öffentlich im Bundle, RLS schützt — trotzdem als Secret, damit er nicht in Logs auftaucht.) |
+| `VITE_VAPID_PUBLIC_KEY` | der VAPID-Public-Key aus deiner `.env` | Steht bereits in `.env` (Web-Push, PR #6). Ohne ihn baut der Workflow ein Bundle, in dem sich niemand für Push anmelden kann — der Lauf bricht deshalb ab, wenn er fehlt. |
 
 ## 2. Repository-Variables
 
