@@ -1,0 +1,221 @@
+name: Release
+
+# Manueller Release: Actions → "Release" → "Run workflow".
+# Der Branch, den du dort auswählst, ist der Stand, der ausgeliefert wird.
+# Reihenfolge ist bewusst: erst Schema, dann Code — neuer Code darf nie auf ein
+# altes Schema treffen. Umgekehrt verträgt altes Schema kurz neuen Code nicht,
+# aber additive Migrationen (unsere Konvention) vertragen alten Code.
+
+on:
+  workflow_dispatch:
+    inputs:
+      migrations:
+        description: "Migrationen"
+        type: choice
+        default: apply
+        options:
+          - apply # ausstehende Migrationen anwenden
+          - dry-run # nur zeigen, was liefe
+          - skip # gar nicht anfassen
+      deploy:
+        description: "Nach Cloudflare Pages deployen"
+        type: boolean
+        default: true
+      tag_name:
+        description: "Optional: Git-Tag + GitHub-Release anlegen (z. B. v0.3.0)"
+        type: string
+        required: false
+
+concurrency:
+  # Zwei gleichzeitige Releases auf dieselbe DB wären ein Rennen — also nie.
+  group: release-production
+  cancel-in-progress: false
+
+permissions:
+  contents: write # nur für den optionalen Tag / das GitHub-Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Über Settings → Environments → production lassen sich hier Freigaben
+    # (required reviewers) davorschalten. Siehe docs/RELEASE.md.
+    environment: production
+    timeout-minutes: 20
+
+    steps:
+      - name: Code holen
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0 # für Tags
+
+      - name: Kontext anzeigen
+        run: |
+          {
+            echo "### Release"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Branch | \`${GITHUB_REF_NAME}\` |"
+            echo "| Commit | \`${GITHUB_SHA::12}\` |"
+            echo "| Migrationen | ${{ inputs.migrations }} |"
+            echo "| Deploy | ${{ inputs.deploy }} |"
+            echo "| Ausgelöst von | @${GITHUB_ACTOR} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::warning::Release läuft NICHT von main, sondern von '$GITHUB_REF_NAME' — der Deploy geht als Preview raus, nicht auf corso-app.pages.dev."
+          fi
+
+      - name: Bun einrichten
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - name: Abhängigkeiten installieren
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck (blockierend)
+        run: bunx tsc --noEmit
+
+      - name: Lint (nur Bericht)
+        # Noch nicht blockierend: main trägt ~80 offene Prettier-Verstöße.
+        # Nach einem `bun run format` kann continue-on-error hier raus.
+        continue-on-error: true
+        run: bunx eslint src scripts
+
+      # ── Schema ───────────────────────────────────────────────────────────
+      - name: Migrationen anwenden
+        if: inputs.migrations != 'skip'
+        env:
+          SUPABASE_MANAGEMENT_TOKEN: ${{ secrets.SUPABASE_MANAGEMENT_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -z "${SUPABASE_MANAGEMENT_TOKEN}" ]; then
+            echo "✗ Secret SUPABASE_MANAGEMENT_TOKEN fehlt — siehe docs/RELEASE.md." >&2
+            exit 1
+          fi
+          if [ "${{ inputs.migrations }}" = "dry-run" ]; then
+            node scripts/migrate.mjs --dry-run
+          else
+            node scripts/migrate.mjs
+          fi
+
+      # ── Code ─────────────────────────────────────────────────────────────
+      - name: Build-Umgebung schreiben
+        if: inputs.deploy
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_APP_URL: ${{ vars.VITE_APP_URL }}
+          VITE_PILOT_CITY: ${{ vars.VITE_PILOT_CITY }}
+          VITE_PILOT_PRICE_EUR: ${{ vars.VITE_PILOT_PRICE_EUR }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
+        run: |
+          # Der Build liest VITE_*-Werte aus .env (wie lokal) — deshalb hier eine
+          # ephemere .env aus Secrets/Variables statt eines abweichenden Wegs.
+          # NICHT enthalten: SUPABASE_SERVICE_ROLE_KEY. Der wird zur Laufzeit aus
+          # den Cloudflare-Pages-Secrets gelesen und hat im Build nichts verloren.
+          missing=""
+          for v in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY VITE_APP_URL VITE_PILOT_CITY VITE_VAPID_PUBLIC_KEY; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "✗ Fehlende Build-Werte:$missing — siehe docs/RELEASE.md." >&2
+            exit 1
+          fi
+          {
+            echo "VITE_SUPABASE_URL=${VITE_SUPABASE_URL}"
+            echo "VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}"
+            echo "VITE_APP_URL=${VITE_APP_URL}"
+            echo "VITE_PILOT_CITY=${VITE_PILOT_CITY}"
+            echo "VITE_PILOT_PRICE_EUR=${VITE_PILOT_PRICE_EUR:-9}"
+            echo "VITE_VAPID_PUBLIC_KEY=${VITE_VAPID_PUBLIC_KEY}"
+          } > .env
+
+      - name: Build + Deploy (Cloudflare Pages)
+        if: inputs.deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT || 'corso-app' }}
+          # main → Produktion (corso-app.pages.dev), jeder andere Branch → Preview-URL.
+          CF_BRANCH: ${{ github.ref_name }}
+        run: |
+          # ohne pipefail würde `| tee` einen fehlgeschlagenen Deploy grün färben
+          set -o pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID}" ]; then
+            echo "✗ CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID fehlen — siehe docs/RELEASE.md." >&2
+            exit 1
+          fi
+          bash scripts/deploy.sh | tee /tmp/deploy.log
+
+      - name: Bundle-Kontrolle
+        if: inputs.deploy
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
+        run: |
+          # Ein Build ohne eingebackene Supabase-URL sieht grün aus und liefert eine
+          # App, die sich nicht anmelden kann. Also hart prüfen, bevor wir jubeln.
+          if ! grep -rqF "${VITE_SUPABASE_URL}" deploy/assets 2>/dev/null; then
+            echo "✗ Supabase-URL nicht im Client-Bundle — VITE_-Werte haben den Build nicht erreicht." >&2
+            exit 1
+          fi
+          echo "✓ Supabase-URL im Client-Bundle vorhanden."
+
+          # Gleiche Falle bei Web-Push: fehlt der VAPID-Key im Bundle, scheitert die
+          # Push-Anmeldung still — die App laeuft, nur benachrichtigt sie nie.
+          if ! grep -rqF "${VITE_VAPID_PUBLIC_KEY}" deploy/assets 2>/dev/null; then
+            echo "✗ VAPID-Public-Key nicht im Client-Bundle — Web-Push waere tot." >&2
+            exit 1
+          fi
+          echo "✓ VAPID-Public-Key im Client-Bundle vorhanden."
+
+      - name: Rauchtest
+        if: inputs.deploy
+        run: |
+          # Bei Preview-Deploys steht die URL nur im Log; produktiv prüfen wir die
+          # echte Adresse. Ein 200 mit HTML-Rumpf reicht als Lebenszeichen.
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            url="https://corso-app.pages.dev"
+          else
+            url="$(grep -oE 'https://[a-z0-9-]+\.corso-app\.pages\.dev' /tmp/deploy.log | tail -1)"
+          fi
+          if [ -z "$url" ]; then
+            echo "::warning::Keine Deploy-URL gefunden — Rauchtest übersprungen."
+            exit 0
+          fi
+          echo "▸ GET $url"
+          for i in 1 2 3; do
+            code="$(curl -s -o /tmp/body.html -w '%{http_code}' --max-time 20 "$url" || true)"
+            [ "$code" = "200" ] && break
+            echo "  Versuch $i: HTTP $code — nochmal in 10 s"
+            sleep 10
+          done
+          if [ "$code" != "200" ]; then
+            echo "✗ $url antwortet mit HTTP $code" >&2
+            exit 1
+          fi
+          if ! grep -qi "<!doctype html" /tmp/body.html; then
+            echo "✗ Antwort ist kein HTML-Dokument" >&2
+            exit 1
+          fi
+          echo "✓ $url antwortet mit 200"
+          echo "**Live:** $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Release markieren ────────────────────────────────────────────────
+      - name: Tag + GitHub-Release
+        if: inputs.tag_name != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag_name }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::warning::Tag ${TAG} existiert bereits — übersprungen."
+            exit 0
+          fi
+          gh release create "${TAG}" --target "${GITHUB_SHA}" --title "${TAG}" --generate-notes
+          echo "**Release:** ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Aufräumen
+        if: always()
+        run: rm -f .env

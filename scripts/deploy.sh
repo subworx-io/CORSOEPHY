@@ -59,6 +59,19 @@ cat > deploy/_routes.json << 'EOF'
 EOF
 
 echo "▸ Deploy to Cloudflare Pages..."
-npx wrangler pages deploy deploy --project-name corso-app --commit-dirty=true
+# Überschreibbar, damit derselbe Ablauf lokal und im Release-Workflow gilt:
+#   CF_PAGES_PROJECT  — Pages-Projekt (Default: corso-app)
+#   CF_BRANCH         — Ziel-Branch bei Pages. Ohne Angabe erkennt wrangler den
+#                       Git-Branch; in CI ist das unzuverlässig, deshalb setzt der
+#                       Workflow ihn explizit (main = Produktion, sonst Preview).
+#   WRANGLER_VERSION  — gepinnt, damit ein Release nicht von "latest" abhängt.
+PROJECT="${CF_PAGES_PROJECT:-corso-app}"
+WRANGLER="wrangler@${WRANGLER_VERSION:-4.124.0}"
+
+if [ -n "${CF_BRANCH:-}" ]; then
+  npx -y "$WRANGLER" pages deploy deploy --project-name "$PROJECT" --commit-dirty=true --branch "$CF_BRANCH"
+else
+  npx -y "$WRANGLER" pages deploy deploy --project-name "$PROJECT" --commit-dirty=true
+fi
 
 echo "✅ Done — https://corso-app.pages.dev"

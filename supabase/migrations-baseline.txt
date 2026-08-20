@@ -1,0 +1,31 @@
+# Corso — Baseline für scripts/migrate.mjs
+#
+# Diese Migrationen lagen VOR Einführung des Ledgers (public.schema_migrations)
+# bereits auf der Produktions-DB — sie wurden über Monate von Hand mit
+# scripts/db-apply.mjs gefahren. Beim allerersten Lauf des Migrators werden sie
+# als "angewendet" verbucht, aber NICHT ausgeführt.
+#
+# Die Datei wirkt nur solange das Ledger leer ist. Danach ist sie inert:
+# nachträglich von Hand angewendete Migrationen werden mit
+#   node scripts/migrate.mjs --mark-applied supabase/migrations/<datei>.sql
+# verbucht, nicht hier eingetragen.
+#
+# Stand: 19. August 2026, gegen die Live-DB verifiziert.
+
+0001_init.sql
+0002_storage.sql
+0003_follows_expiry.sql
+0004_reach_grant_hardening.sql
+0005_city_story_draw.sql
+0006_dev_admin_controls.sql
+0007_dev_seed_real_media.sql
+0008_prompts_active_date.sql
+0009_invites.sql
+0010_post_views_feedback.sql
+0011_prompts_categories.sql
+0012_seed_prompts_v2.sql
+0013_active_date_lru.sql
+0014_profile_settings.sql
+0015_rolling_24h_expiry.sql
+0016_city_moment_counts.sql
+0017_report_block.sql
