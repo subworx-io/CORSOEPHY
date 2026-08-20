@@ -18,7 +18,10 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Corso — deine Stadt heute Abend" },
-      { name: "description", content: "Jeden Abend geht deine Stadt gemeinsam spazieren. Echte Momente, echte Menschen." },
+      {
+        name: "description",
+        content: "Jeden Abend geht deine Stadt gemeinsam spazieren. Echte Momente, echte Menschen.",
+      },
       { property: "og:title", content: "Corso — deine Stadt heute Abend" },
       { property: "og:description", content: "Jeden Abend geht deine Stadt gemeinsam spazieren." },
     ],
@@ -175,7 +178,7 @@ function Index() {
 
   const slides = useMemo(
     () => buildSlides(activeTiles.filter((t) => !followed.has(t.handle) || exiting.has(t.handle))),
-    [activeTiles, followed, exiting]
+    [activeTiles, followed, exiting],
   );
 
   // Nach dem Follow: Herz zeigen, dann die Kachel aus Discovery gleiten lassen.
@@ -305,7 +308,11 @@ function Index() {
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
-                        <FollowButton handle={slide.handle} src={slide.src ?? null} onBurst={() => handleFollowed(slide.handle)} />
+                        <FollowButton
+                          handle={slide.handle}
+                          src={slide.src ?? null}
+                          onBurst={() => handleFollowed(slide.handle)}
+                        />
                       </div>
                     </div>
                   </>
@@ -319,12 +326,17 @@ function Index() {
                     }}
                   >
                     <div className="w-20 h-20 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center">
-                      <span className="material-symbols-outlined text-white/30 text-[36px]">group</span>
+                      <span className="material-symbols-outlined text-white/30 text-[36px]">
+                        group
+                      </span>
                     </div>
                     <div>
-                      <p className="text-white text-lg font-semibold tracking-tight">Heute war noch niemand draußen</p>
+                      <p className="text-white text-lg font-semibold tracking-tight">
+                        Du bist früh dran
+                      </p>
                       <p className="mt-2 text-white/40 text-sm leading-snug max-w-[16rem] mx-auto">
-                        Sei die erste Person in der Stadt — nimm deinen Moment auf.
+                        Noch ist niemand draußen. Nimm jetzt deinen Moment auf — oder warte, bis um
+                        21 Uhr die Stadt gemeinsam spazieren geht.
                       </p>
                     </div>
                     <Link
@@ -355,13 +367,17 @@ function Index() {
       </div>
 
       {/* Top bar — safe-area-inset-top verhindert Konflikt mit Notch/Dynamic Island */}
-      <header className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
+      <header
+        className="absolute top-0 left-0 right-0 z-20"
+        style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
+      >
         <div className="flex justify-between items-start gap-4 px-6 pt-3 min-h-14 max-w-[600px] mx-auto">
           {/* Gemeinschafts-Zähler — dezentes Stimmungsbild, fängt keine Swipe-Gesten ab */}
           {cityCounts ? (
             <div className="pointer-events-none select-none drop-shadow-md leading-tight">
               <p className="text-white/80 text-sm font-semibold tracking-tight">
-                {cityCounts.today} {cityCounts.today === 1 ? "Moment" : "Momente"} heute in Düsseldorf
+                {cityCounts.today} {cityCounts.today === 1 ? "Moment" : "Momente"} heute in
+                Düsseldorf
               </p>
               <p className="text-white/40 text-xs mt-0.5">gestern: {cityCounts.yesterday}</p>
             </div>
@@ -377,7 +393,6 @@ function Index() {
           </Link>
         </div>
       </header>
-
     </div>
   );
 }
