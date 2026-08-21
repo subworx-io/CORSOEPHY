@@ -28,7 +28,11 @@ export function useSnapScroll({
   // Weltposition in Pixeln: indexRef.current * Bildschirmhöhe/-breite
   const posRef = useRef(0);
   const slidesRef = useRef<(HTMLElement | null)[]>([]);
+  // 0 = keine Snap-Animation läuft. Wird am Animationsende zurückgesetzt, damit
+  // Effekte unterscheiden können, ob sie in eine Bewegung hineinfunken würden.
   const rafRef = useRef(0);
+  // Finger (oder Maus) liegt gerade auf dem Feed.
+  const gestureRef = useRef(false);
   // Stabile Callback-Refs pro Slide-Index — verhindert React-Re-Registration bei Re-Render
   const callbacksRef = useRef<((el: HTMLElement | null) => void)[]>([]);
   // Der Feed-Container. Die Gesten-Listener hängen aus Robustheitsgründen weiter am
@@ -109,8 +113,13 @@ export function useSnapScroll({
         if (t < 1) {
           rafRef.current = requestAnimationFrame(animate);
         } else {
-          posRef.current = targetPos;
-          applyPos(targetPos);
+          // Endposition frisch messen: fährt die Browser-Leiste WÄHREND der Animation
+          // ein oder aus, stimmt das eingangs berechnete Ziel nicht mehr — der Feed
+          // bliebe sonst um die Leistenhöhe versetzt zwischen zwei Momenten stehen.
+          const finalPos = targetIdx * getDim();
+          posRef.current = finalPos;
+          applyPos(finalPos);
+          rafRef.current = 0;
         }
       };
 
@@ -119,11 +128,25 @@ export function useSnapScroll({
     [clampIndex, getDim, applyPos, commitIndex]
   );
 
-  // Initiale Positionen setzen wenn count sich ändert (z.B. neue Slides in Connections)
+  // Slide-Zahl hat sich geändert: Seite nachgeladen, Kachel nach Follow verschwunden,
+  // Leerzustand → echte Momente. Drei Fälle:
+  //  - Index zeigt ins Leere (letzte Kachel weg) → auf die neue letzte schnappen,
+  //    sonst stünde man vor einem leeren Slot.
+  //  - Geste oder Snap läuft → NUR die neuen Slides einsortieren, Position nicht
+  //    anfassen. Ein Reset auf index*dim ließ den Feed unter dem Finger springen,
+  //    wenn die nächste Seite mitten im Wischen eintraf.
+  //  - Ruhe → Position sauber auf den Index setzen.
   useEffect(() => {
-    posRef.current = indexRef.current * getDim();
+    const clamped = Math.max(0, Math.min(count - 1, indexRef.current));
+    if (clamped !== indexRef.current) {
+      snapTo(clamped);
+      return;
+    }
+    if (!gestureRef.current && rafRef.current === 0) {
+      posRef.current = indexRef.current * getDim();
+    }
     applyPos(posRef.current);
-  }, [count, getDim, applyPos]);
+  }, [count, getDim, applyPos, snapTo]);
 
   // Größenänderung: Orientierung, aber vor allem die ein-/ausfahrende Browser-Leiste
   // auf dem Handy. Der ResizeObserver am Container erwischt das zuverlässiger als
@@ -163,10 +186,13 @@ export function useSnapScroll({
       // (z.B. dem Tages-Prompt-Splash) darf den Feed nicht fernsteuern.
       if (!isInsideContainer(e.target)) {
         gestureActive = false;
+        gestureRef.current = false;
         return;
       }
       cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
       gestureActive = true;
+      gestureRef.current = true;
       startTouchPos = getPos(e);
       startWorldPos = posRef.current;
       const now = performance.now();
@@ -193,6 +219,7 @@ export function useSnapScroll({
     const onEnd = (e: TouchEvent) => {
       if (!gestureActive) return;
       gestureActive = false;
+      gestureRef.current = false;
 
       // Velocity aus Zeitfenster berechnen
       let velocityPxMs = 0;
@@ -213,18 +240,33 @@ export function useSnapScroll({
     const onCancel = () => {
       if (!gestureActive) return;
       gestureActive = false;
+      gestureRef.current = false;
       snapTo(indexRef.current);
+    };
+
+    // Sicherheitsnetz: Geht die App mitten in der Geste in den Hintergrund
+    // (Home-Geste, Anruf, App-Wechsel), kommt auf iOS nicht immer ein touchend
+    // oder touchcancel an. Ohne Snap bliebe der Feed genau dort stehen, wo der
+    // Finger war — zwischen zwei Momenten. Deshalb hier auf den nächsten
+    // Einrastpunkt schnappen.
+    const onHidden = () => {
+      if (document.visibilityState !== "hidden" || !gestureActive) return;
+      gestureActive = false;
+      gestureRef.current = false;
+      snapTo(Math.round(posRef.current / getDim()));
     };
 
     window.addEventListener("touchstart", onStart, { passive: true });
     window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("touchend", onEnd);
     window.addEventListener("touchcancel", onCancel);
+    document.addEventListener("visibilitychange", onHidden);
     return () => {
       window.removeEventListener("touchstart", onStart);
       window.removeEventListener("touchmove", onMove);
       window.removeEventListener("touchend", onEnd);
       window.removeEventListener("touchcancel", onCancel);
+      document.removeEventListener("visibilitychange", onHidden);
     };
   }, [axis, getDim, applyPos, snapTo, isInsideContainer, commitIndex, clampIndex]);
 
@@ -236,6 +278,7 @@ export function useSnapScroll({
       if (!isInsideContainer(e.target)) return;
       e.preventDefault();
       cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
       const delta = axis === "x" ? e.deltaX || e.deltaY : e.deltaY;
       posRef.current += delta;
       applyPos(posRef.current);
@@ -269,9 +312,11 @@ export function useSnapScroll({
       if (Date.now() - lastTouchEnd < 600) return;
       if (!isInsideContainer(e.target)) return;
       cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
       startX = e.clientX;
       startWorldPos = posRef.current;
       tracking = true;
+      gestureRef.current = true;
     };
     const onMove = (e: MouseEvent) => {
       if (!tracking) return;
@@ -281,6 +326,7 @@ export function useSnapScroll({
     const onUp = () => {
       if (!tracking) return;
       tracking = false;
+      gestureRef.current = false;
       if (Date.now() - lastTouchEnd < 600) {
         snapTo(indexRef.current);
         return;

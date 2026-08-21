@@ -7,6 +7,7 @@ import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { FollowButton } from "@/components/follow-button";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { supabase } from "@/lib/supabase/client";
+import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
 import { useCityMomentCounts } from "@/lib/city/use-city-moment-counts";
@@ -46,10 +47,31 @@ type TileSlide = { kind: "tile" } & Tile;
 type EmptySlide = { kind: "empty" };
 type Slide = TileSlide | EmptySlide;
 
-function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
+// Ab wann der Lade-Ring erscheint: kurze Puffer beim normalen Wischen sollen nicht
+// aufblitzen, nur echtes Warten soll als solches sichtbar sein.
+const STALL_INDICATOR_MS = 300;
+
+function VideoTile({
+  src,
+  isActive,
+  preload,
+}: {
+  src: string;
+  isActive: boolean;
+  // "auto" für den aktiven Moment und seine direkten Nachbarn (Bild liegt bereit,
+  // wenn man hinzieht), "metadata" für den Rand des Fensters.
+  preload: "auto" | "metadata";
+}) {
   const ref = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
+  // Hat das Element gerade ein Bild (readyState ≥ HAVE_CURRENT_DATA)? Fällt bei
+  // `waiting`/`emptied` zurück auf false.
+  const [ready, setReady] = useState(false);
+  const [stalled, setStalled] = useState(false);
 
+  // `src` gehört bewusst in die Abhängigkeiten: ein src-Wechsel setzt das Element
+  // zurück und PAUSIERT es (Media-Load-Algorithmus). Ohne erneutes play() bliebe der
+  // aktive Moment nach einem Refetch als Standbild stehen.
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
@@ -58,7 +80,23 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
     } else {
       v.pause();
     }
-  }, [isActive]);
+  }, [isActive, src]);
+
+  // Anfangszustand aus dem Element lesen — bei einem Cache-Treffer ist das Bild
+  // schon da, bevor der erste Event-Handler hängt.
+  useEffect(() => {
+    const v = ref.current;
+    if (v && v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isActive || ready) {
+      setStalled(false);
+      return;
+    }
+    const t = setTimeout(() => setStalled(true), STALL_INDICATOR_MS);
+    return () => clearTimeout(t);
+  }, [isActive, ready]);
 
   function toggleMute() {
     const v = ref.current;
@@ -75,8 +113,20 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
         playsInline
         muted
         loop
+        preload={preload}
+        onLoadedData={() => setReady(true)}
+        onCanPlay={() => setReady(true)}
+        onPlaying={() => setReady(true)}
+        onWaiting={() => setReady(false)}
+        onEmptied={() => setReady(false)}
         className="absolute inset-0 h-full w-full object-cover"
       />
+      {/* Dezenter Lade-Ring — nur wenn der aktive Moment wirklich auf Daten wartet */}
+      {stalled && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <div className="h-9 w-9 rounded-full border-2 border-white/15 border-t-white/80 animate-spin" />
+        </div>
+      )}
       {isActive && (
         <button
           onClick={toggleMute}
@@ -102,10 +152,20 @@ const buildSlides = (tiles: Tile[]): Slide[] =>
 // Dauer, die eine gerade gefolgte Kachel noch sichtbar bleibt: Herz-Burst (700ms) + Wegblenden.
 const EXIT_MS = 1100;
 
-// Momente pro Nachlade-Schritt. Klein halten: jede Kachel zieht eine signierte URL.
+// Momente pro Nachlade-Schritt (Posts + Prompts + signierte URLs = 3 Requests pro Seite).
 const PAGE_SIZE = 20;
 // So viele Kacheln vor dem Ende wird nachgeladen, damit nie eine Lücke entsteht.
 const PREFETCH_MARGIN = 3;
+// Nur der aktive Moment ± VIDEO_WINDOW bekommt ein <video>-Element. Vorher luden
+// alle 20+ Kacheln einer Seite gleichzeitig — der Clip, den man gerade ansieht,
+// konkurrierte mit 19 anderen um die Leitung, und iOS drosselt viele Media-
+// Elemente ohnehin. Zwei Slides Vorlauf reichen, eine Wischgeste bewegt ~eine.
+const VIDEO_WINDOW = 2;
+// Solange bleibt der Feed nach einem Screen-/App-Wechsel ohne Neuladen stehen.
+// Ein Refetch sortiert neue Momente oben ein — mitten im Wischen rutscht dann die
+// Kachel unter dem Finger weiter. Nach einer Minute darf das passieren, nach einem
+// kurzen Blick in „Ich folge" nicht.
+const FEED_STALE_MS = 60_000;
 
 function Index() {
   const { burstHandle, triggerBurst } = useHeartBurst();
@@ -137,32 +197,35 @@ function Index() {
         .range(from, from + PAGE_SIZE - 1);
       if (error || !data?.length) return [] as Tile[];
       // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
-      const promptsByDate = await fetchPromptsByDate(data.map((p) => p.prompt_date));
-      const withUrls = await Promise.all(
-        data.map(async (post): Promise<Tile | null> => {
-          const { data: urlData } = await supabase.storage
-            .from("moments")
-            .createSignedUrl(post.media_path, 3600);
-          if (!urlData?.signedUrl) return null;
-          return {
+      // Prompt-Texte und signierte URLs je in EINER Abfrage, parallel. Die URLs
+      // kommen aus dem Cache (signed-urls.ts): ein Refetch liefert dieselben URLs
+      // wie zuvor, die <video>-Elemente laden also nicht neu.
+      const [promptsByDate, urlsByPath] = await Promise.all([
+        fetchPromptsByDate(data.map((p) => p.prompt_date)),
+        getSignedMomentUrls(data.map((p) => p.media_path)),
+      ]);
+      return data.flatMap((post): Tile[] => {
+        const videoUrl = urlsByPath[post.media_path];
+        if (!videoUrl) return [];
+        return [
+          {
             handle: (post.profiles as unknown as { handle: string }).handle,
-            videoUrl: urlData.signedUrl,
+            videoUrl,
             postId: post.id,
             authorId: post.author_id,
             promptDate: post.prompt_date,
             promptText: promptsByDate[post.prompt_date] ?? null,
-          };
-        }),
-      );
-      return withUrls.filter((t): t is Tile => t !== null);
+          },
+        ];
+      });
     },
     // Volle Seite → es könnte noch mehr geben. Kürzere Seite → Ende des Topfes.
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === PAGE_SIZE ? allPages.length : undefined,
     enabled: !!user,
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-    refetchOnMount: true,
+    // Mount und Fokus holen weiterhin nach (Defaults), aber erst wenn der Stand
+    // älter als FEED_STALE_MS ist — nicht bei jedem kurzen Tab-Wechsel.
+    staleTime: FEED_STALE_MS,
   });
 
   // Nur echte Posts aus der Stadt — kein Demo-Fallback mehr (F&F-Pilot: echt statt Fake).
@@ -227,13 +290,20 @@ function Index() {
       {/* Slides */}
       {slides.map((slide, i) => {
         const offset = i - currentIndex;
+        const distance = Math.abs(offset);
         const isActive = offset === 0;
-        const isNeighbor = Math.abs(offset) === 1;
+        const isNeighbor = distance === 1;
         const isExiting = slide.kind === "tile" && exiting.has(slide.handle);
+        // Video-Fenster: außerhalb bleibt die Slide-Hülle stehen (der Snap-Hook
+        // positioniert sie weiter), nur das <video> darin wird nicht gemountet.
+        const mountVideo = distance <= VIDEO_WINDOW;
+        const preload = distance <= 1 ? "auto" : "metadata";
 
         return (
           <div
-            key={slide.kind === "tile" ? slide.handle : slide.kind}
+            // Key = Post, nicht Handle: bleibt über Refetches stabil und kollidiert
+            // nicht, falls eine Person über die Zyklus-Grenze zwei Momente hat.
+            key={slide.kind === "tile" ? (slide.postId ?? slide.handle) : slide.kind}
             ref={slideRef(i)}
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
@@ -259,7 +329,9 @@ function Index() {
                 {slide.kind === "tile" ? (
                   <>
                     {slide.videoUrl ? (
-                      <VideoTile src={slide.videoUrl} isActive={isActive} />
+                      mountVideo && (
+                        <VideoTile src={slide.videoUrl} isActive={isActive} preload={preload} />
+                      )
                     ) : (
                       <img
                         src={slide.src}

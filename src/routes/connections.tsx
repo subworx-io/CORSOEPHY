@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
 import { MomentMenu } from "@/components/moment-menu";
 import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
+import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { MomentPrompt } from "@/components/moment-prompt";
 
 export const Route = createFileRoute("/connections")({
@@ -268,24 +269,28 @@ function ConnectionsPage() {
         .order("created_at", { ascending: false });
       if (!posts?.length) return {};
 
-      // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
-      const promptsByDate = await fetchPromptsByDate(posts.map((p) => p.prompt_date));
-
-      // Eine signierte URL + Post-ID + Prompt pro Author (neuester Post)
-      const result: Record<string, ConnectionMoment> = {};
-      const seen = new Set<string>();
+      // Pro Author nur der neueste lebende Post (Liste ist created_at desc sortiert).
+      const newestByAuthor = new Map<string, (typeof posts)[number]>();
       for (const post of posts) {
-        if (seen.has(post.author_id)) continue;
-        seen.add(post.author_id);
+        if (!newestByAuthor.has(post.author_id)) newestByAuthor.set(post.author_id, post);
+      }
+      const newest = Array.from(newestByAuthor.values());
+
+      // Prompt-Texte und signierte URLs je in EINER Abfrage, parallel. Die URLs sind
+      // gecacht (signed-urls.ts) — ein Refetch tauscht das <video src> nicht aus.
+      const [promptsByDate, urlsByPath] = await Promise.all([
+        fetchPromptsByDate(newest.map((p) => p.prompt_date)),
+        getSignedMomentUrls(newest.map((p) => p.media_path)),
+      ]);
+
+      const result: Record<string, ConnectionMoment> = {};
+      for (const post of newest) {
         const profile = profiles.find((p) => p.id === post.author_id);
-        if (!profile) continue;
-        const { data: urlData } = await supabase.storage
-          .from("moments")
-          .createSignedUrl(post.media_path, 3600);
-        if (!urlData?.signedUrl) continue;
+        const url = urlsByPath[post.media_path];
+        if (!profile || !url) continue;
         const promptText = promptsByDate[post.prompt_date];
         result[profile.handle] = {
-          url: urlData.signedUrl,
+          url,
           postId: post.id,
           prompt: promptText ? { text: promptText, date: post.prompt_date } : null,
         };
