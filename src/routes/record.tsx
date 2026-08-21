@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCamera } from "@/hooks/use-camera";
+import { usePinchZoom } from "@/hooks/use-pinch-zoom";
 import { useAuth } from "@/lib/auth-context";
 import { uploadMoment } from "@/lib/supabase/upload";
 import { useTodayPrompt } from "@/lib/prompts/use-today-prompt";
@@ -42,6 +43,27 @@ function RecordPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 🔒 Pinch-Zoom nur als echter Kamera-Zoom (siehe use-camera) — deshalb nur
+  // aktiv, wenn ein Live-Stream läuft und die Hardware zoomen kann.
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const pinching = usePinchZoom({
+    targetRef: stageRef,
+    enabled: cam.canZoom && (cam.status === "live" || cam.status === "recording"),
+    zoom: cam.zoom,
+    onZoom: cam.setZoom,
+  });
+
+  // Zoomfaktor-Anzeige: sichtbar während der Geste, blendet kurz danach aus.
+  const [zoomBadge, setZoomBadge] = useState(false);
+  useEffect(() => {
+    if (pinching) {
+      setZoomBadge(true);
+      return;
+    }
+    const timer = setTimeout(() => setZoomBadge(false), 800);
+    return () => clearTimeout(timer);
+  }, [pinching]);
+
   async function handleUseClip() {
     if (!cam.recordedBlob || !user) return;
     setUploadStatus("uploading");
@@ -71,7 +93,8 @@ function RecordPage() {
       {/* Kamera-Bühne: full-bleed mit sanfter Rundung; oben unter der Notch,
           unten knapp über der schwebenden BottomNav. */}
       <div
-        className="absolute overflow-hidden rounded-[2.25rem] bg-neutral-900"
+        ref={stageRef}
+        className="absolute touch-none overflow-hidden rounded-[2.25rem] bg-neutral-900"
         style={{
           top: "calc(env(safe-area-inset-top) + 0.75rem)",
           left: "0.75rem",
@@ -124,6 +147,15 @@ function RecordPage() {
           >
             <span className="material-symbols-outlined text-[20px]">cameraswitch</span>
           </button>
+        )}
+
+        {/* Zoomfaktor-Anzeige während der Pinch-Geste */}
+        {zoomBadge && (cam.status === "live" || cam.status === "recording") && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-40 z-30 flex justify-center">
+            <span className="rounded-full bg-black/50 px-3 py-1.5 text-[13px] font-medium tabular-nums backdrop-blur-md">
+              {cam.zoom.toFixed(1)}×
+            </span>
+          </div>
         )}
 
         {/* Init-Zustand: Berechtigung wird angefragt / Kamera startet */}

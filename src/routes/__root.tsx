@@ -11,30 +11,44 @@ import {
 import { useEffect, type ReactNode } from "react";
 import { DevMenu } from "../components/dev-menu";
 import { Toaster } from "../components/ui/sonner";
+import { useUnseenBadges } from "../hooks/use-unseen-badges";
 
 const TABS = [
-  { to: "/" as const, label: "Discovery", icon: "explore" },
+  { to: "/" as const, label: "Discovery", icon: "explore", badge: "discovery" as const },
   { to: "/connections" as const, label: "Ich folge", icon: "favorite" },
-  { to: "/story" as const, label: "Stadt Corso", icon: "movie" },
+  { to: "/story" as const, label: "Stadt Corso", icon: "movie", badge: "story" as const },
   { to: "/record" as const, label: "Aufnahme", icon: "videocam" },
   { to: "/feedback" as const, label: "Rücklauf", icon: "trending_up" },
 ];
 
+// Kleiner weißer Punkt oben rechts am Tab: „hier gibt es etwas, das du noch nicht
+// gesehen hast". Bewusst ohne Zahl — nur ein Hinweis, kein Zähler.
+function UnseenDot() {
+  return (
+    <span className="pointer-events-none absolute top-1.5 right-1.5 flex h-2 w-2" aria-hidden>
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+    </span>
+  );
+}
+
 function BottomNav() {
   const location = useLocation();
   const pathname = location.pathname;
+  const unseen = useUnseenBadges(pathname);
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none px-4" style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}>
       <div className="pointer-events-auto inline-flex items-center gap-1 p-1.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl">
         {TABS.map((item) => {
           const isActive = pathname === item.to;
+          const showDot = !isActive && item.badge != null && unseen[item.badge];
           return (
             <Link
               key={item.to}
               to={item.to}
-              aria-label={item.label}
-              className={`flex items-center justify-center h-10 rounded-full transition-all ${
+              aria-label={showDot ? `${item.label} – Neues` : item.label}
+              className={`relative flex items-center justify-center h-10 rounded-full transition-all ${
                 isActive
                   ? "bg-white text-black font-semibold px-3 gap-1.5"
                   : "text-white/70 hover:text-white w-10"
@@ -47,6 +61,7 @@ function BottomNav() {
                 {item.icon}
               </span>
               {isActive && <span className="text-[13px]">{item.label}</span>}
+              {showDot && <UnseenDot />}
             </Link>
           );
         })}

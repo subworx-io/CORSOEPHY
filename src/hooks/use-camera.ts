@@ -19,6 +19,17 @@ interface CameraError {
   detail: string;
 }
 
+// Hardware-Zoom des Kamera-Tracks (Pinch-Geste). Noch nicht in lib.dom typisiert.
+interface ZoomRange {
+  min: number;
+  max: number;
+  step: number;
+}
+type ZoomCapabilities = MediaTrackCapabilities & {
+  zoom?: { min?: number; max?: number; step?: number };
+};
+type ZoomConstraintSet = MediaTrackConstraintSet & { zoom?: number };
+
 // iOS Safari nimmt am liebsten mp4/H.264. webm ist Fallback für Android/Desktop.
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "";
@@ -42,8 +53,7 @@ function describeError(err: unknown): CameraError {
     case "SecurityError":
       return {
         title: "Kamera-Zugriff verweigert",
-        detail:
-          "Erlaube den Zugriff in den Einstellungen → Safari → Kamera und lade die App neu.",
+        detail: "Erlaube den Zugriff in den Einstellungen → Safari → Kamera und lade die App neu.",
       };
     case "NotFoundError":
     case "DevicesNotFoundError":
@@ -72,10 +82,13 @@ export function useCamera() {
   const chunksRef = useRef<BlobPart[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordedUrlRef = useRef<string | null>(null);
+  const zoomRangeRef = useRef<ZoomRange | null>(null);
 
   const [status, setStatus] = useState<CameraStatus>("idle");
   const [error, setError] = useState<CameraError | null>(null);
   const [facingMode, setFacingMode] = useState<FacingMode>("user");
+  const [zoom, setZoomState] = useState(1);
+  const [zoomRange, setZoomRange] = useState<ZoomRange | null>(null);
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -98,6 +111,34 @@ export function useCamera() {
       URL.revokeObjectURL(recordedUrlRef.current);
       recordedUrlRef.current = null;
     }
+  }, []);
+
+  // Liest die Zoom-Fähigkeit des Video-Tracks (nicht jede Kamera kann das).
+  // 🔒 Bewusst nur echter Hardware-Zoom via applyConstraints: der landet auch im
+  // aufgenommenen Clip. Ein CSS-Scale-Fallback würde nur die Preview zoomen,
+  // die Aufnahme aber nicht — Preview und Moment müssen identisch bleiben.
+  const readZoomCapability = useCallback((stream: MediaStream) => {
+    if (streamRef.current !== stream) return; // Stream wurde inzwischen ersetzt
+    const track = stream.getVideoTracks()[0];
+    const caps = (track?.getCapabilities?.() ?? {}) as ZoomCapabilities;
+    const z = caps.zoom;
+    if (z && typeof z.max === "number" && z.max > (z.min ?? 1)) {
+      const range: ZoomRange = { min: z.min ?? 1, max: z.max, step: z.step ?? 0.1 };
+      zoomRangeRef.current = range;
+      setZoomRange(range);
+      const settings = (track.getSettings?.() ?? {}) as MediaTrackSettings & { zoom?: number };
+      setZoomState(settings.zoom ?? range.min);
+    }
+  }, []);
+
+  // Pinch-Zoom: Wert auf den Hardware-Bereich klemmen und auf den Track anwenden.
+  const setZoom = useCallback((value: number) => {
+    const range = zoomRangeRef.current;
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!range || !track) return;
+    const clamped = Math.min(range.max, Math.max(range.min, value));
+    setZoomState(clamped);
+    track.applyConstraints({ advanced: [{ zoom: clamped } as ZoomConstraintSet] }).catch(() => {}); // z. B. während eines Kamera-Wechsels — Zoom ist nice-to-have
   }, []);
 
   const start = useCallback(
@@ -130,6 +171,15 @@ export function useCamera() {
         stopStream();
         streamRef.current = stream;
         setFacingMode(mode);
+        // Zoom pro Stream neu ermitteln (Front-/Rückkamera unterscheiden sich).
+        zoomRangeRef.current = null;
+        setZoomRange(null);
+        setZoomState(1);
+        readZoomCapability(stream);
+        // Manche Geräte melden die Zoom-Capability erst kurz nach dem Start.
+        setTimeout(() => {
+          if (!zoomRangeRef.current) readZoomCapability(stream);
+        }, 400);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           // iOS: muss inline + muted abspielen, sonst Vollbild-Player oder Block.
@@ -142,7 +192,7 @@ export function useCamera() {
         setStatus("error");
       }
     },
-    [facingMode, stopStream],
+    [facingMode, stopStream, readZoomCapability],
   );
 
   const stopRecording = useCallback(() => {
@@ -155,7 +205,10 @@ export function useCamera() {
   const startRecording = useCallback(() => {
     const stream = streamRef.current;
     if (!stream || typeof MediaRecorder === "undefined") {
-      setError({ title: "Aufnahme nicht möglich", detail: "MediaRecorder wird nicht unterstützt." });
+      setError({
+        title: "Aufnahme nicht möglich",
+        detail: "MediaRecorder wird nicht unterstützt.",
+      });
       return;
     }
     revokeRecorded();
@@ -222,6 +275,9 @@ export function useCamera() {
     status,
     error,
     facingMode,
+    zoom,
+    canZoom: zoomRange !== null,
+    setZoom,
     recordedUrl,
     recordedBlob,
     elapsedMs,
