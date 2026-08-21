@@ -152,6 +152,7 @@ Der Corso-Zyklus läuft **21:00 → 21:00** (Europe/Berlin). Wichtig: der Zyklus
 |---|---|---|
 | **21:00** | Stadt-Corso + Zyklus-Start | Ziehung der max. 8 Momente **und** neuer Prompt, im selben Moment |
 | **21:00–20:59** | Content-Phase | Posten, Discovery füllt sich, Anstupsen möglich |
+| **20:45** | Anlauf zur Ziehung | Vorab-Push an alle („Gleich geht deine Stadt spazieren"), Story-Screen zeigt bis 21:00 den Countdown-Vorhang statt der auslaufenden Stadt Corso *(ergänzt 21. Aug 2026)* |
 | **19–22 Uhr (variabel)** | Privater Corso (Push) | `[ENTSCHEIDUNG OFFEN]` |
 | **laufend** | Individueller Verfall | Jeder Moment und jeder Follow stirbt 24 h nach seiner Entstehung — asynchron, jeder Nutzer hat seine eigene Uhr |
 | **21:00 (Folgetag)** | Nächster Corso | Neue Ziehung ersetzt die alte, neuer Prompt |

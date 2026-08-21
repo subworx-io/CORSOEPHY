@@ -135,7 +135,7 @@ function NotificationsSection({ profile }: { profile: Profile }) {
               ? "In den Einstellungen deines Geräts für Corso erlauben."
               : staleOnThisDevice
                 ? "Auf diesem Gerät gerade nicht aktiv — einmal aus- und wieder einschalten."
-                : "Um 21:00, wenn deine Stadt spazieren geht."}
+                : "Um 20:45 und 21:00, wenn deine Stadt spazieren geht."}
           </p>
         </div>
         <Switch

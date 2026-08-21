@@ -8,8 +8,9 @@ import { FollowButton } from "@/components/follow-button";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { recordView } from "@/lib/record-view";
 import { logEvent } from "@/lib/events";
-import { corsoDay, nextCycleStart } from "@/lib/corso-day";
+import { corsoDay, cycleStart, nextCycleStart } from "@/lib/corso-day";
 import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
+import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { MomentPrompt } from "@/components/moment-prompt";
 import { MomentMenu } from "@/components/moment-menu";
 
@@ -31,6 +32,93 @@ const CITY = (import.meta.env.VITE_PILOT_CITY as string | undefined) ?? "Düssel
 // Beides ist derselbe Zeitpunkt, deshalb dieselbe Funktion.
 const nextStoryTarget = (now: number) => nextCycleStart(new Date(now));
 const storyEndsAt = nextStoryTarget;
+
+// Die Ziehung läuft per pg_cron UM 21:00 — also einige Sekunden nach dem Ende des
+// Countdowns, nicht punktgenau davor. Solange die Story nach dem Zyklus-Start noch
+// leer ist, fragt der Screen in diesem Fenster regelmäßig nach, damit die Clips
+// auftauchen, während man zuschaut. Danach gilt: heute kein einwilligender Moment.
+const DRAW_GRACE_MS = 10 * 60 * 1000;
+const DRAW_POLL_MS = 10_000;
+
+// Vorhang vor der Ziehung (Entscheidung 21. Aug 2026): In den letzten 15 Minuten
+// vor 21:00 zeigt der Screen den Countdown mit dem Düsseldorf-Hintergrund statt
+// der auslaufenden Stadt Corso — das Ritual bekommt einen sichtbaren Anlauf.
+// Passend dazu geht um 20:45 der Vorab-Push raus (0022_city_story_soon_push.sql).
+const CURTAIN_BEFORE_MS = 15 * 60 * 1000;
+
+const isCurtainTime = (now: number) => nextCycleStart(new Date(now)) - now <= CURTAIN_BEFORE_MS;
+
+/**
+ * true in den letzten CURTAIN_BEFORE_MS vor dem Zyklus-Wechsel. Schaltet per
+ * Timer exakt an den beiden Kanten um (Fensterbeginn, 21:00) — kein Sekunden-
+ * Ticker, der den ganzen Screen samt Videos jede Sekunde neu rendern würde.
+ */
+function useDrawCurtain() {
+  const [curtain, setCurtain] = useState(() => isCurtainTime(Date.now()));
+
+  useEffect(() => {
+    let id = 0;
+    const arm = () => {
+      window.clearTimeout(id);
+      const now = Date.now();
+      const cycle = nextCycleStart(new Date(now));
+      const up = cycle - now <= CURTAIN_BEFORE_MS;
+      setCurtain(up);
+      // Nächste Kante: Vorhang fällt um 21:00, sonst geht er bei 21:00 − 15 min hoch.
+      const edge = up ? cycle : cycle - CURTAIN_BEFORE_MS;
+      id = window.setTimeout(arm, Math.max(0, edge - now) + 250);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") arm();
+    };
+    arm();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  return curtain;
+}
+
+/**
+ * Der Corso-Tag als State, der exakt beim Zyklus-Wechsel (21:00) umspringt.
+ * Hängt er nur im Query-Key als `corsoDay()`-Aufruf, bleibt er auf dem alten Tag,
+ * bis irgendetwas den Screen neu rendert — beim Zuschauen auf den Countdown
+ * passiert das nie, die Story erschien erst nach einem Tab-Wechsel.
+ */
+function useCorsoDay() {
+  const [day, setDay] = useState(() => corsoDay());
+
+  useEffect(() => {
+    let id = 0;
+    const sync = () => setDay((prev) => (prev === corsoDay() ? prev : corsoDay()));
+    const arm = () => {
+      window.clearTimeout(id);
+      // Kleiner Puffer, damit der Timer sicher NACH dem Wechsel feuert.
+      const delay = Math.max(0, nextCycleStart() - Date.now()) + 250;
+      id = window.setTimeout(() => {
+        sync();
+        arm();
+      }, delay);
+    };
+    // Kommt die App aus dem Hintergrund, können Timer verschlafen haben.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      sync();
+      arm();
+    };
+    arm();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  return day;
+}
 
 // Tickt sekündlich und liefert die verbleibende Zeit bis zum Ziel.
 function useTimeLeft(targetOf: (now: number) => number) {
@@ -129,10 +217,15 @@ function StoryPage() {
     logEvent("story_viewed");
   }, [user]);
 
+  // Springt um 21:00 um → neuer Query-Key → sofortiger Fetch der frischen Ziehung.
+  const day = useCorsoDay();
+  // Letzte 15 Minuten vor der Ziehung: Countdown-Vorhang statt der alten Story.
+  const curtain = useDrawCurtain();
+
   // Die stadtweit eingefrorene Auswahl des heutigen Corso-Tags. Alle Nutzer der
   // Stadt lesen exakt dieselben Slots (serverseitig um 21:00 gezogen).
   const { data: clips = [], isLoading } = useQuery({
-    queryKey: ["city-story", corsoDay(), CITY, user?.id],
+    queryKey: ["city-story", day, CITY, user?.id],
     queryFn: async () => {
       if (!user) return [];
       // Gelesen wird über city_story() (SECURITY DEFINER), NICHT direkt über die
@@ -145,30 +238,38 @@ function StoryPage() {
       if (error || !rows.length) return [];
 
       // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
-      const promptsByDate = await fetchPromptsByDate(rows.map((row) => row.prompt_date));
+      // Prompt-Texte und signierte URLs je in EINER Abfrage, parallel. Die URLs sind
+      // gecacht (signed-urls.ts) — der Fokus-Refetch tauscht das <video src> nicht aus.
+      const [promptsByDate, urlsByPath] = await Promise.all([
+        fetchPromptsByDate(rows.map((row) => row.prompt_date)),
+        getSignedMomentUrls(rows.map((row) => row.media_path)),
+      ]);
 
-      const withUrls = await Promise.all(
-        rows.map(async (row): Promise<StoryClip | null> => {
-          const { data: urlData } = await supabase.storage
-            .from("moments")
-            .createSignedUrl(row.media_path, 3600);
-          if (!urlData?.signedUrl) return null;
-          return {
+      return rows.flatMap((row): StoryClip[] => {
+        const videoUrl = urlsByPath[row.media_path];
+        if (!videoUrl) return [];
+        return [
+          {
             slot: row.slot,
             handle: row.handle,
-            videoUrl: urlData.signedUrl,
+            videoUrl,
             postId: row.post_id,
             authorId: row.author_id,
             promptDate: row.prompt_date ?? null,
             promptText: row.prompt_date ? (promptsByDate[row.prompt_date] ?? null) : null,
-          };
-        }),
-      );
-      return withUrls.filter((c): c is StoryClip => c !== null);
+          },
+        ];
+      });
     },
     enabled: !!user,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
+    // Kurz nach 21:00 und noch leer → alle paar Sekunden nachfragen, bis die
+    // Ziehung da ist. Mit Clips oder außerhalb des Fensters: kein Polling.
+    refetchInterval: (query) => {
+      if ((query.state.data?.length ?? 0) > 0) return false;
+      return Date.now() - cycleStart() < DRAW_GRACE_MS ? DRAW_POLL_MS : false;
+    },
   });
 
   const { currentIndex, slideRef, containerRef } = useSnapScroll({
@@ -186,9 +287,10 @@ function StoryPage() {
     return () => clearTimeout(t);
   }, [currentIndex, clips]);
 
-  // Noch keine Story (vor 21:00 oder kein einwilligender Clip): ehrlicher
-  // Leerzustand statt Mock. Kein "peinlich leer" durch Fake-Auffüllen (PRD).
-  if (!isLoading && clips.length === 0) {
+  // Noch keine Story (kein einwilligender Clip) oder Vorhang-Fenster vor der
+  // Ziehung: ehrlicher Leerzustand mit Countdown statt Mock. Kein "peinlich
+  // leer" durch Fake-Auffüllen (PRD).
+  if (curtain || (!isLoading && clips.length === 0)) {
     return <StoryEmpty />;
   }
 
@@ -409,7 +511,21 @@ function StoryEmpty() {
 // Großer Countdown auf die nächste 21:00 — das Gegenstück zum kleinen „läuft
 // noch"-Badge, solange die Story noch nicht begonnen hat.
 function StoryCountdown() {
-  const { hours, minutes, seconds } = useTimeLeft(nextStoryTarget);
+  const { hours, minutes, seconds, total } = useTimeLeft(nextStoryTarget);
+
+  // Direkt nach 21:00 läuft die Ziehung noch (und dieser Screen pollt). Statt
+  // eines Countdowns, der auf 23:59:59 springt: sagen, was gerade passiert.
+  const sinceCycleStart = 24 * 60 * 60 * 1000 - total;
+  if (sinceCycleStart >= 0 && sinceCycleStart < DRAW_GRACE_MS) {
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <span className="text-2xl font-semibold tracking-tight text-white animate-pulse">
+          Die Stadt enthüllt sich …
+        </span>
+        <span className="text-xs text-white/40">Die Momente erscheinen gleich hier.</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-end gap-3 tabular-nums">

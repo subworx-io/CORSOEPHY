@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand: 20. August 2026.**
+**Stand: 21. August 2026.**
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -34,6 +34,7 @@ Alles hier wurde an diesem Tag **gegen die echte DB und die echte Deployment-Umg
 |---|---|---|
 | `city-story-draw-summer` / `-winter` | `0 19` / `0 20` | Stadt-Corso-Ziehung um **21:00 Berlin**. Beide Slots feuern täglich, `run_city_story_draw()` prüft selbst die Berliner Stunde → DST-sicher. |
 | `reach-snapshot-summer` / `-winter` | `5 19` / `5 20` | Basislinie für die „seit gestern"-Deltas, jetzt am **Zyklus-Start (21:05)** statt morgens. Gleicher Stunden-Guard. |
+| `city-story-soon-summer` / `-winter` | `45 18` / `45 19` | **Vorab-Push um 20:45 Berlin** („Gleich geht deine Stadt spazieren", `0022`, angewendet 21. Aug). Gleicher Stunden-Guard (=20). Gleicher Push-`tag` wie der 21:01-Ritual-Push → wird von ihm auf dem Gerät ersetzt, nicht gestapelt. |
 | ~~`expire-follows-daily`~~ | — | **Ersatzlos entfallen.** Verfall wird nicht mehr markiert, sondern in jeder Query über `expires_at > now()` gerechnet. |
 
 Historischer Beleg (vor der Umstellung): echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Momenten. Der Mechanismus ist also mit echtem Content bewiesen, nur die Uhrzeit hat sich verschoben.
@@ -58,6 +59,7 @@ Nebenbeleg für die Korrektheit der Ziehung: Am 11. und 12. August gab es einwil
 ### Code-Stand geprüft
 
 - **Discovery** (`src/routes/index.tsx`): `useInfiniteQuery` mit `range()`-Seiten à 20 und Filter `expires_at > now()`, neueste zuerst. Infinite Scroll ist seit 19. August **gebaut**; nachgeladen wird 3 Kacheln vor dem Ende.
+- **„Neu“-Punkt an den Tabs (21. August, `src/hooks/use-unseen-badges.ts` + `__root.tsx`):** kleiner weißer, pulsierender Punkt oben rechts am Discovery- bzw. Stadt-Corso-Tab, wenn seit dem letzten Besuch ein neuer fremder lebender Moment bzw. eine neue Ziehung des laufenden Corso-Tags da ist. Pro Tab wird nur der jüngste `created_at` gepollt (1 Zeile, 60 s + Fokus) und mit einem `localStorage`-Merker (`corso_seen_discovery_at` / `corso_seen_story_at`) verglichen — Merker pro Gerät, kein Server-State, keine Zahl. Der offene Tab zieht den Merker laufend nach; der Punkt kommt erst wieder, wenn danach etwas Neueres auftaucht. Nur per Typecheck geprüft, noch nicht auf dem Handy.
 - **Push:** keine Service-Worker- oder `PushManager`-Referenz im Code, nur `public/manifest.json`. Push ist **nicht** gebaut.
 - **Hintergrund-Videos** `public/empty-bg-4…9.mp4` sind in Git versioniert (Entscheidung 16. Juli: plain git statt LFS — für den Pilot ausreichend, frische Clones funktionieren ohne Zusatzschritt).
 - **Der alte Feature-Batch ist versioniert.** Frühere STATUS-Versionen warnten vor einem großen unkommittierten Batch im Working Tree — der wurde mit `ced0823` committet, die Warnung ist erledigt und wurde entfernt. Was aktuell unkommittiert ist, steht im WIP-Abschnitt unten und ist neu.
@@ -150,8 +152,10 @@ Damit ist diese Liste leer — Phase 1 ist feature-vollständig. Was bleibt, ist
 ### 5. Nicht abschließend bewiesen
 
 - Der **Scroll-Fix vom 12. August** ist nicht auf einem echten Handy verifiziert (nur Typecheck + Build grün, Ursachen im Code belegt).
+- Der **Discovery-Flüssigkeits-Fix vom 21. August** (gecachte Batch-URLs, Video-Fenster ±2, Re-Play nach src-Wechsel, Hook-Härtung — siehe Chronik) ist ebenfalls nur per Typecheck + Build geprüft. Auf dem Handy prüfen: Tab wechseln und zurück → läuft das aktive Video sofort weiter? Nach einem Follow auf der letzten Kachel → schnappt der Feed auf die neue letzte?
 - Der **Splash-Hänger-Fix** braucht zur endgültigen Bestätigung einen Aufruf >1 h nach dem letzten Login (Token-Lebensdauer).
 - Ein **echter Zwei-Geräte-Test** des Einladungs-Links (Freund kommt rein? zweiter Klick blockiert?) steht aus — hängt an Punkt 2.
+- Der **Pinch-Zoom im Aufnahme-Screen (21. August)** ist nur per Typecheck/Lint geprüft, nicht auf dem Handy: offen ist, ob iOS Safari `zoom` für Front- **und** Rückkamera meldet und ob der Zoom in der fertigen Aufnahme ankommt (erwartet: ja, da Hardware-Zoom auf dem Track). Test über `bun run dev:mobile`.
 
 ---
 
@@ -161,7 +165,7 @@ Damit ist diese Liste leer — Phase 1 ist feature-vollständig. Was bleibt, ist
 |---|---|---|
 | `index.tsx` | **Discovery** (Entdeckungs-Feed, vertikaler Swipe) | Echte Momente aus der DB, Follow schreibt in die DB, kein Mock-Fallback (ehrlicher Leerzustand). Eigene Momente raus (`author_id ≠ auth.uid()`), gefolgte Personen verlassen den Feed. Zahnrad oben rechts → `/settings`. **Offen:** hartes `limit 20` ohne Pagination/Tages-Ordering. |
 | `story.tsx` | **Stadt Corso** (21:00-Ritual) | Liest die stadtweit eingefrorene Auswahl über `city_story()`; serverseitige gewichtete Ziehung um 21:00 via pg_cron. Leerzustand mit atmosphärischem Video-Hintergrund (cross-fadende s/w Düsseldorf-Clips, körnig, Blue-Hour-Tint, `blur(5px)`) + großem `Std:Min:Sek`-Countdown auf die nächste 21:00. Läuft die Story, zeigt eine dezente Pille oben „Stadt Corso · noch X h Y min" bis zur nächsten Ziehung. 🔒 Keine Follower-/Reaktions-Zahlen. |
-| `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Freigabe für den Stadt Corso als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. 🔒 Kein Galerie-Upload. |
+| `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Freigabe für den Stadt Corso als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. **Pinch-Zoom (21. Aug):** Zwei-Finger-Geste auf dem Live-Bild (auch während der Aufnahme) → echter **Hardware-Zoom** via `track.applyConstraints({ zoom })`, landet damit im Clip; bewusst **kein CSS-Scale-Fallback**, weil der nur die Vorschau zoomen würde, nicht die Aufnahme. Nur aktiv, wenn `getCapabilities().zoom` vorhanden (Front-Kameras können das oft nicht), sonst passiert stumm nichts. Zoomfaktor-Pille blendet während der Geste ein. Hooks: `use-camera.ts` (`zoom`/`canZoom`/`setZoom`), `use-pinch-zoom.ts` (Geste). 🔒 Kein Galerie-Upload. |
 | `connections.tsx` | **„Ich folge"** / verdienter Chat | Echter Follow-Graph. Anstupsen + Follow-Erneuern schreiben in die DB. Entfolgen per Tippen auf „folgst du heute" (`unfollow()` setzt `expires_at = now()`) → Person taucht wieder in Discovery auf. Verdienter Chat = Phase 3, noch nicht gebaut. |
 | `feedback.tsx` | **Rücklauf** (private Bilanz + Self-Screen) | Entlang der zwei Kräfte (PRD §1), bezogen auf **deinen laufenden Moment**: oben „Gewonnen" (**Views** · **sind geblieben** · Stadt-Corso-Auftritt mit Vollbild-Moment), unten „Auf der Kippe" (**Follower**, die in den nächsten 12 h neu entscheiden). Kein „seit gestern"-Delta mehr. Rekord-Marker + Serie. Kopf trägt Handle/Anzeigename und den Weg in die Einstellungen (löst PRD Screen 9 ab). Ohne lebenden Moment: Zahlen eingefroren, Video weg. Zeigt den **Prompt, zu dem der Moment entstand** (`posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text`). |
 | `settings.tsx` | **Einstellungen** (Screen 10, minimal) | Vier bewusst schmale Blöcke: Benachrichtigungen (`push_enabled`-Switch), Sicherheit (Blockierte-Personen-Platzhalter), Rechtliches (`/impressum`, `/datenschutz`, `/agb`), Account (Anzeigename, Abmelden, manuelle Kontolöschung per Mailto). ✅ Seit `0014` (19. Aug angewendet) voll funktionsfähig — Push-Präferenz und Anzeigename schreiben durch. |
@@ -438,6 +442,40 @@ Zum gefahrlosen visuellen Iterieren gibt es eigenständige Vorschau-Routen mit M
 ---
 
 ## Chronik der gelösten Bugs
+
+<details>
+<summary><strong>21. August — Discovery: Hänger nach Screen-Wechsel, zähes Laden</strong></summary>
+
+**Symptom:** Nach einem Tab- oder App-Wechsel zurück in Discovery stand der Feed gelegentlich zwischen zwei Momenten bzw. der aktive Moment lief nicht weiter; Clips brauchten spürbar, bis sie Bild hatten.
+
+**Ursache 1 — jeder Refetch tauschte alle Video-URLs.** `staleTime: 0` + `refetchOnMount/WindowFocus` lösten bei jeder Rückkehr einen Refetch aus, und `createSignedUrl()` liefert jedes Mal ein **neues Token**. Damit änderte sich das `src` jedes `<video>` → Browser lädt alle Clips von vorn und **pausiert das laufende Video** (Media-Load-Algorithmus), `play()` wurde aber nur bei `isActive`-Wechsel aufgerufen. **Fix:** `src/lib/supabase/signed-urls.ts` — Modul-Cache pro `media_path` (erneuert erst <10 min Restlaufzeit), gebündelt über `createSignedUrls()` (1 Request pro Seite statt 20). In Discovery, Ich-folge und Stadt Corso im Einsatz. Discovery zusätzlich `staleTime: 60 s`, `VideoTile` ruft `play()` auch bei `src`-Wechsel.
+
+**Ursache 2 — 20+ `<video>` luden gleichzeitig** (die „offene Restspur" vom 12. August). **Fix:** nur aktiver Moment ± 2 bekommt ein `<video>` (`VIDEO_WINDOW`), direkte Nachbarn mit `preload="auto"`, Rand mit `metadata`. Die Slide-Hülle bleibt für den Snap-Hook stehen. Dezenter Lade-Ring, wenn der aktive Clip >300 ms wirklich auf Daten wartet.
+
+**Ursache 3 — Snap-Hook grätschte sich selbst rein (`use-snap-scroll.ts`).** Bei jeder Änderung der Slide-Zahl (Seite nachgeladen, Kachel nach Follow weg) wurde die Position hart auf `index × Höhe` gesetzt — auch mitten in Geste oder Snap-Animation (Sprung unter dem Finger). Der Index wurde nie geklemmt: Follow auf der letzten Kachel → leerer Slot. Das Snap-Ziel wurde zu Animationsbeginn in der alten Höhe berechnet — fuhr die Browser-Leiste währenddessen ein/aus, blieb der Feed um die Leistenhöhe versetzt stehen. Verlorene Gesten (App in den Hintergrund ohne `touchend`) blieben ohne Snap liegen. **Fix:** `gestureRef` + `rafRef === 0` als Ruhe-Kriterium, Index-Klemmung mit Snap, Endposition wird am Animationsende frisch gemessen, `visibilitychange` schließt offene Gesten ab.
+
+**Nebenbei:** Slide-Key in Discovery ist jetzt `postId` statt `handle` (stabil über Refetches, kollisionsfrei über die Zyklus-Grenze).
+</details>
+
+<details>
+<summary><strong>21. August — Vorhang + Vorab-Push 15 Minuten vor der Ziehung</strong></summary>
+
+**Entscheidung (Dominik, 21. Aug):** Der Countdown-Screen mit dem Düsseldorf-Hintergrund war seit dem rollenden 24h-Zyklus praktisch unsichtbar — die Stadt Corso steht 24 h, um 21:00 ersetzt die nächste Ziehung die alte ohne Lücke. Er blieb nur für „heute hat niemand freigegeben" und das Sekundenfenster um 21:00. Jetzt bekommt das Ritual einen sichtbaren Anlauf:
+
+- **Client (`story.tsx`):** `useDrawCurtain()` — in den **letzten 15 Minuten vor 21:00** zeigt der Story-Screen den Countdown-Vorhang statt der auslaufenden Stadt Corso (`CURTAIN_BEFORE_MS`). Schaltet per Timer an den beiden Kanten um, kein Sekunden-Ticker über dem Video-Feed; `visibilitychange` synchronisiert nach Hintergrund-Aufenthalt. Um 21:00 fällt der Vorhang, der Key springt auf den neuen Tag, die Ziehung wird gepollt (siehe nächster Eintrag).
+- **Push (`0022_city_story_soon_push.sql`, angewendet):** neue Sorte `city_story_soon`, `enqueue_city_story_soon_push()` an alle mit `push_enabled` + Gerät, Cron `city-story-soon-summer/-winter` (`45 18` / `45 19` UTC, Stunden-Guard 20) → **20:45 Berlin**. Text: „Gleich geht deine Stadt spazieren — Um 21:00 wird der Stadt Corso gezogen. Noch 15 Minuten für deinen Moment." Ziel `/story`. 🔒 keine Zahl. Gleicher `tag` wie der Ritual-Push → der 21:01-Push ersetzt ihn auf dem Sperrbildschirm. Einstellungen-Text angepasst („Um 20:45 und 21:00 …").
+- **Nicht live beobachtet:** erster echter Lauf ist der nächste Abend um 20:45. Prüfen: kommt der Push, zeigt `/story` ab 20:45 den Vorhang, fällt er um 21:00?
+</details>
+
+<details>
+<summary><strong>21. August — Stadt Corso erschien um 21:00 erst nach Tab-Wechsel</strong></summary>
+
+**Symptom:** Wer den Countdown auf dem Story-Screen verfolgte, sah um 21:00 keine Clips — erst nach Wechsel in einen anderen Tab und zurück.
+
+**Ursache:** `StoryPage` rechnete `corsoDay()` nur beim Rendern in den Query-Key und rendert selbst nie neu (nur der Countdown-Kindkomponent tickt). Der Key blieb also auf dem alten Tag, die Query hatte weder Intervall noch Trigger; erst ein Neu-Mount nach `staleTime` (60 s) holte die Ziehung. Zusätzlich läuft die Ziehung per pg_cron *um* 21:00 — ein Fetch exakt um 21:00:00 käme ohnehin zu früh.
+
+**Fix (`story.tsx`):** `useCorsoDay()` — Tag als State mit Timer auf den nächsten Zyklus-Start (+ `visibilitychange`-Resync) → Key springt um 21:00 um → sofortiger Fetch. `refetchInterval`: solange die Story leer ist **und** weniger als 10 min seit Zyklus-Start vergangen sind, alle 10 s nachfragen (`DRAW_GRACE_MS`/`DRAW_POLL_MS`); sonst kein Polling. Leerzustand zeigt in diesem Fenster „Die Stadt enthüllt sich …" statt eines Countdowns, der auf 23:59:59 springt. Nicht live um 21:00 beobachtet — nur Typecheck/Lint.
+</details>
 
 <details>
 <summary><strong>12. August — Scroll-Verhalten in Discovery/Stadt Corso/Ich-folge repariert</strong></summary>
