@@ -16,9 +16,10 @@ import { Route as RecordRouteImport } from './routes/record'
 import { Route as ImpressumRouteImport } from './routes/impressum'
 import { Route as FeedbackRouteImport } from './routes/feedback'
 import { Route as DatenschutzRouteImport } from './routes/datenschutz'
-import { Route as ConnectionsRouteImport } from './routes/connections'
+import { Route as CircleRouteImport } from './routes/circle'
 import { Route as AgbRouteImport } from './routes/agb'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CircleRedeemTokenRouteImport } from './routes/circle-redeem.$token'
 
 const StoryEmptyLabRoute = StoryEmptyLabRouteImport.update({
   id: '/story-empty-lab',
@@ -55,9 +56,9 @@ const DatenschutzRoute = DatenschutzRouteImport.update({
   path: '/datenschutz',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ConnectionsRoute = ConnectionsRouteImport.update({
-  id: '/connections',
-  path: '/connections',
+const CircleRoute = CircleRouteImport.update({
+  id: '/circle',
+  path: '/circle',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgbRoute = AgbRouteImport.update({
@@ -70,11 +71,16 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CircleRedeemTokenRoute = CircleRedeemTokenRouteImport.update({
+  id: '/circle-redeem/$token',
+  path: '/circle-redeem/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agb': typeof AgbRoute
-  '/connections': typeof ConnectionsRoute
+  '/circle': typeof CircleRoute
   '/datenschutz': typeof DatenschutzRoute
   '/feedback': typeof FeedbackRoute
   '/impressum': typeof ImpressumRoute
@@ -82,11 +88,12 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/story': typeof StoryRoute
   '/story-empty-lab': typeof StoryEmptyLabRoute
+  '/circle-redeem/$token': typeof CircleRedeemTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agb': typeof AgbRoute
-  '/connections': typeof ConnectionsRoute
+  '/circle': typeof CircleRoute
   '/datenschutz': typeof DatenschutzRoute
   '/feedback': typeof FeedbackRoute
   '/impressum': typeof ImpressumRoute
@@ -94,12 +101,13 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/story': typeof StoryRoute
   '/story-empty-lab': typeof StoryEmptyLabRoute
+  '/circle-redeem/$token': typeof CircleRedeemTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agb': typeof AgbRoute
-  '/connections': typeof ConnectionsRoute
+  '/circle': typeof CircleRoute
   '/datenschutz': typeof DatenschutzRoute
   '/feedback': typeof FeedbackRoute
   '/impressum': typeof ImpressumRoute
@@ -107,13 +115,14 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/story': typeof StoryRoute
   '/story-empty-lab': typeof StoryEmptyLabRoute
+  '/circle-redeem/$token': typeof CircleRedeemTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/agb'
-    | '/connections'
+    | '/circle'
     | '/datenschutz'
     | '/feedback'
     | '/impressum'
@@ -121,11 +130,12 @@ export interface FileRouteTypes {
     | '/settings'
     | '/story'
     | '/story-empty-lab'
+    | '/circle-redeem/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/agb'
-    | '/connections'
+    | '/circle'
     | '/datenschutz'
     | '/feedback'
     | '/impressum'
@@ -133,11 +143,12 @@ export interface FileRouteTypes {
     | '/settings'
     | '/story'
     | '/story-empty-lab'
+    | '/circle-redeem/$token'
   id:
     | '__root__'
     | '/'
     | '/agb'
-    | '/connections'
+    | '/circle'
     | '/datenschutz'
     | '/feedback'
     | '/impressum'
@@ -145,12 +156,13 @@ export interface FileRouteTypes {
     | '/settings'
     | '/story'
     | '/story-empty-lab'
+    | '/circle-redeem/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgbRoute: typeof AgbRoute
-  ConnectionsRoute: typeof ConnectionsRoute
+  CircleRoute: typeof CircleRoute
   DatenschutzRoute: typeof DatenschutzRoute
   FeedbackRoute: typeof FeedbackRoute
   ImpressumRoute: typeof ImpressumRoute
@@ -158,6 +170,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   StoryRoute: typeof StoryRoute
   StoryEmptyLabRoute: typeof StoryEmptyLabRoute
+  CircleRedeemTokenRoute: typeof CircleRedeemTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -211,11 +224,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DatenschutzRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/connections': {
-      id: '/connections'
-      path: '/connections'
-      fullPath: '/connections'
-      preLoaderRoute: typeof ConnectionsRouteImport
+    '/circle': {
+      id: '/circle'
+      path: '/circle'
+      fullPath: '/circle'
+      preLoaderRoute: typeof CircleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agb': {
@@ -232,13 +245,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/circle-redeem/$token': {
+      id: '/circle-redeem/$token'
+      path: '/circle-redeem/$token'
+      fullPath: '/circle-redeem/$token'
+      preLoaderRoute: typeof CircleRedeemTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgbRoute: AgbRoute,
-  ConnectionsRoute: ConnectionsRoute,
+  CircleRoute: CircleRoute,
   DatenschutzRoute: DatenschutzRoute,
   FeedbackRoute: FeedbackRoute,
   ImpressumRoute: ImpressumRoute,
@@ -246,6 +266,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   StoryRoute: StoryRoute,
   StoryEmptyLabRoute: StoryEmptyLabRoute,
+  CircleRedeemTokenRoute: CircleRedeemTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -37,8 +37,11 @@ export interface Post {
   id: string;
   author_id: string;
   prompt_date: string; // Corso-Zyklus (21:00→21:00), in dem der Moment entstand
-  media_path: string; // Pfad im Storage-Bucket 'moments'
+  media_path: string; // Pfad im Storage-Bucket 'moments' (bei Fotos: das erste Foto)
   media_type: MediaType;
+  // Foto-Momente (0023): vollständige, geordnete Foto-Liste (inkl. media_path),
+  // max. 5. Bei Videos NULL.
+  media_paths: string[] | null;
   city_story_consent: boolean; // 🔒 Einwilligung pro Post
   created_at: string;
   // Lebensende des Moments: created_at + 24h, per DB-Trigger erzwungen (0015).
@@ -113,6 +116,31 @@ export interface Block {
   id: string;
   blocker_id: string;
   blocked_id: string;
+  created_at: string;
+}
+
+// Circle-Verbindung (0003 Schema, befüllt seit 0024): beständig, gegenseitig,
+// verfällt NIE. Entsteht serverseitig (Trigger), wenn sich zwei Menschen an
+// genug Corso-Tagen gegenseitig gefolgt sind — die Schwelle ist bewusst nicht
+// clientseitig abfragbar (app_config + follow_mutual_days sind ohne Lesepfad).
+// announced_*_at: hat die jeweilige Seite die Circle-Ankündigung gesehen
+// (serverseitig pro Person, gesetzt via RPC acknowledge_circle()).
+export interface Connection {
+  id: string;
+  user_a_id: string; // kanonisch: user_a_id < user_b_id
+  user_b_id: string;
+  connected_at: string;
+  announced_a_at: string | null;
+  announced_b_at: string | null;
+}
+
+// Chat-Nachricht (0024) — lebt ausschließlich im Circle. RLS: nur die beiden
+// Partner der Verbindung lesen/schreiben; Block sperrt serverseitig (Trigger).
+export interface CircleMessage {
+  id: string;
+  connection_id: string;
+  sender_id: string;
+  body: string;
   created_at: string;
 }
 

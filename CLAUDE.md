@@ -38,13 +38,15 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 - Kein Unit-/E2E-Framework konfiguriert. Vorhanden sind Security-Smoke-Tests: `scripts/security-test-*.mjs`.
 
 ### Kern-Mechaniken (nicht verhandelbar)
-- 🔒 Live-Kamera-Pflicht — kein Galerie-Upload, keine Filter
+- 🔒 Live-Kamera-Pflicht — kein Galerie-Upload, keine Filter (gilt für Foto UND Video)
 - 🔒 Follower-Zahlen sind für andere unsichtbar
 - 🔒 Kein Publikums-Verfall durch Zahlung verlängerbar
 - 🔒 Einwilligung pro Moment, ob für den Stadt Corso freigegeben
+- 🔒 Circle-Schwelle und Gegenseitigkeits-Zähler sind für Nutzer unsichtbar (kein Lesepfad) — der Circle-Eintritt ist eine Überraschung
 - Verfallendes Publikum: Follow = 24h **ab dem Follow** (individuelle Uhr pro Datensatz, kein stadtweiter Reset), danach aktiver Re-Entscheid; Erneuern ab 12h möglich
 - Moment = 24h ab dem Upload, danach überall weg; genau ein lebender Moment pro Person
-- Verdienter Chat: erst nach 3–4 gegenseitigen Moment-Austauschen
+- **Zwei Achsen (seit 2. Sep 2026, PRD §4.4/§4.8):** Achse 1 „Stadt" (Discovery + „Ich folge", flüchtige Follows; sichtbar nur wer einen lebenden Moment hat) · Achse 2 „Circle" (beständig, gegenseitig, entsteht serverseitig nach 5 Corso-Tagen gegenseitigen Folgens — Default via `app_config`, verfällt nie, unbegrenzt; zweiter Eintrittsweg: persönlicher Einladungs-Link `/c/<token>`, Migration 0026)
+- Verdienter Chat: lebt ausschließlich im Circle, wird mit dem Circle-Eintritt frei (`circle_messages`)
 
 ## Stack
 
@@ -80,11 +82,11 @@ CORSO_EPHY/
 ├── src/
 │   ├── routes/               # file-based routing — Konventionen: src/routes/README.md
 │   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider, AuthGate, Prompt-Splash
-│   │   ├── index.tsx         # Discovery-Screen (Entdeckungs-Feed, Swipe vertikal)
-│   │   ├── record.tsx        # Aufnahme-Screen (Live-Kamera + Prompt)
-│   │   ├── story.tsx         # Stadt Corso (21:00 Ritual, Swipe vertikal — UX/Optik wie Discovery, PRD §4.6)
-│   │   ├── connections.tsx   # „Ich folge" + verdienter Chat (Chat = Phase 3, noch nicht gebaut)
-│   │   ├── feedback.tsx      # Rücklauf (morgendliche Reichweite, privat)
+│   │   ├── index.tsx         # „Stadt" (Toggle: Discovery ⇄ Ich folge; Feeds in components/discovery-feed.tsx + following-feed.tsx)
+│   │   ├── record.tsx        # Aufnahme („Kamera": Tippen=Foto/Halten=Video, Live-Kamera + Prompt)
+│   │   ├── story.tsx         # Stadt Corso (Nav-Label „Corso"; 21:00 Ritual, Swipe vertikal, PRD §4.6)
+│   │   ├── circle.tsx        # Circle (Achse 2): Partner-Leiste + moment-gated Feed + Chat (circle-chat.tsx)
+│   │   ├── feedback.tsx      # „Du" (Rücklauf: private Bilanz + Self-Screen)
 │   │   ├── settings.tsx      # Einstellungen (Screen 10, bewusst minimal)
 │   │   ├── impressum|datenschutz|agb.tsx   # Rechts-Platzhalter (Gerüst: components/legal-page.tsx)
 │   │   └── story-empty-lab.tsx             # Lovable-Sandbox für den Leerzustand des Stadt Corso (Mock, kein Supabase)
@@ -101,7 +103,8 @@ CORSO_EPHY/
 │   │   └── use-mobile.tsx
 │   ├── lib/
 │   │   ├── auth-context.tsx  # Session + Profil (Vorsicht: Auth-Lock, siehe STATUS)
-│   │   ├── follow-context.tsx# Follow/Renew/Unfollow/Nudge — alle DB-Writes zentral hier
+│   │   ├── follow-context.tsx# Follow/Renew/Unfollow — alle Follow-DB-Writes zentral hier (Circle-Zähler hängt per DB-Trigger daran)
+│   │   ├── circle/           # use-circle.ts — Circle-Verbindungen, Partner-IDs, acknowledge
 │   │   ├── corso-day.ts      # Der 21:00-Zyklusschnitt — überall benutzen, nie neu berechnen
 │   │   ├── record-view.ts    # Anonyme Ansichten-Erfassung (500-ms-Verweil-Schwelle)
 │   │   ├── prompts/          # useTodayPrompt → RPC get_today_prompt()

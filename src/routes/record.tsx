@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCamera } from "@/hooks/use-camera";
 import { usePinchZoom } from "@/hooks/use-pinch-zoom";
 import { useAuth } from "@/lib/auth-context";
-import { uploadMoment } from "@/lib/supabase/upload";
+import { uploadMoment, uploadPhotoMoment } from "@/lib/supabase/upload";
 import { useTodayPrompt } from "@/lib/prompts/use-today-prompt";
 import { logEvent } from "@/lib/events";
 
@@ -64,6 +64,18 @@ function RecordPage() {
     return () => clearTimeout(timer);
   }, [pinching]);
 
+  // … auch beim Daumen-Slide-Zoom (Auslöser gedrückt halten + hochschieben):
+  // jede Zoom-Änderung blendet die Anzeige kurz ein.
+  const prevZoomRef = useRef(cam.zoom);
+  useEffect(() => {
+    if (prevZoomRef.current === cam.zoom) return;
+    prevZoomRef.current = cam.zoom;
+    if (cam.status !== "recording" && cam.status !== "live") return;
+    setZoomBadge(true);
+    const timer = setTimeout(() => setZoomBadge(false), 800);
+    return () => clearTimeout(timer);
+  }, [cam.zoom, cam.status]);
+
   async function handleUseClip() {
     if (!cam.recordedBlob || !user) return;
     setUploadStatus("uploading");
@@ -82,9 +94,48 @@ function RecordPage() {
     }
   }
 
+  async function handleUsePhotos() {
+    if (cam.photos.length === 0 || !user) return;
+    setUploadStatus("uploading");
+    setUploadError(null);
+    const { post, error } = await uploadPhotoMoment(
+      cam.photos.map((p) => p.blob),
+      user.id,
+      cityStory,
+    );
+    if (error) {
+      setUploadStatus("error");
+      setUploadError(error);
+    } else {
+      logEvent("moment_posted", post ? { post_id: post.id } : null);
+      setUploadStatus("done");
+      await queryClient.invalidateQueries({ queryKey: ["discovery"] });
+      setTimeout(() => void navigate({ to: "/" }), 1200);
+    }
+  }
+
+  // Kurzer weißer Blitz als Aufnahme-Feedback beim Foto.
+  const [flash, setFlash] = useState(false);
+  function handleCapturePhoto() {
+    // Erstes Foto schaltet intern in den Foto-Modus (aktiviert u.a. den
+    // Digital-Zoom-Fallback aus use-camera; die UI selbst ist modeless).
+    if (cam.photos.length === 0) cam.setMode("photo");
+    setFlash(true);
+    setTimeout(() => setFlash(false), 180);
+    void cam.capturePhoto();
+  }
+
   const initializing = cam.status === "idle" || cam.status === "starting";
   const showVideo =
     cam.status === "live" || cam.status === "recording" || cam.status === "recorded";
+  // Spiegelung (Frontkamera, nur live) und Digital-Zoom teilen sich den Transform.
+  const previewTransform =
+    [
+      cam.facingMode === "user" && cam.status !== "recorded" ? "scaleX(-1)" : "",
+      cam.digitalZoom > 1 ? `scale(${cam.digitalZoom})` : "",
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined;
   const showControls = showVideo; // keine Steuerung im Init-/Fehler-Zustand
   const recordProgress = Math.min(cam.elapsedMs / cam.maxMs, 1);
 
@@ -111,7 +162,10 @@ function RecordPage() {
           }}
         />
 
-        {/* Live-Preview / Wiedergabe — Struktur & Props unverändert */}
+        {/* Live-Preview / Wiedergabe — Spiegelung (Frontkamera) und Digital-Zoom
+            (Foto-Modus ohne Hardware-Zoom) leben zusammen im style-Transform.
+            Der Digital-Zoom skaliert die Preview exakt um den Faktor, den die
+            Aufnahme croppt — Preview und Moment bleiben identisch. */}
         <video
           ref={cam.videoRef}
           playsInline
@@ -122,7 +176,14 @@ function RecordPage() {
           src={cam.status === "recorded" && cam.recordedUrl ? cam.recordedUrl : undefined}
           className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
             showVideo ? "opacity-100" : "opacity-0"
-          } ${cam.facingMode === "user" && cam.status !== "recorded" ? "scale-x-[-1]" : ""}`}
+          }`}
+          style={{ transform: previewTransform }}
+        />
+
+        {/* Foto-Blitz — kurzes Aufleuchten als Auslöse-Feedback */}
+        <div
+          className="pointer-events-none absolute inset-0 z-40 bg-white transition-opacity"
+          style={{ opacity: flash ? 0.7 : 0, transitionDuration: flash ? "0ms" : "300ms" }}
         />
 
         {/* Prompt des Tages — dezentes Overlay oben, in jedem Zustand sichtbar */}
@@ -194,19 +255,45 @@ function RecordPage() {
         {showControls && (
           <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col items-center gap-4 bg-gradient-to-t from-black/60 via-black/20 to-transparent px-5 pb-6 pt-16">
             {/* Einwilligung für den Stadt Corso — kompakte Pille statt Card-Balken.
-                Erscheint erst nach der Aufnahme (recorded), direkt über
-                Verwenden/Neu: entschieden wird beim Sichten des Takes. */}
-            {cam.status === "recorded" && (
+                Erscheint erst, wenn es etwas zu sichten gibt (Clip aufgenommen bzw.
+                erstes Foto im Stapel): entschieden wird beim Sichten des Takes. */}
+            {(cam.status === "recorded" || cam.photos.length > 0) && (
               <CityStoryToggle value={cityStory} onToggle={() => setCityStory((v) => !v)} />
             )}
 
-            <CameraControls
-              cam={cam}
-              recordProgress={recordProgress}
-              uploadStatus={uploadStatus}
-              uploadError={uploadError}
-              onUseClip={() => void handleUseClip()}
-            />
+            {/* Modeless (Entscheidung Dominik, 2. Sep): EIN Auslöser — Tippen
+                legt ein Foto auf den Stapel, Halten nimmt Video auf. Sobald der
+                Stapel Fotos enthält, ist der Moment ein Foto-Moment (kein Video
+                mehr, bis der Stapel geleert ist). */}
+            {cam.status === "recorded" ? (
+              <RecordedControls
+                cam={cam}
+                uploadStatus={uploadStatus}
+                uploadError={uploadError}
+                onUseClip={() => void handleUseClip()}
+              />
+            ) : cam.photos.length > 0 ? (
+              <PhotoControls
+                cam={cam}
+                uploadStatus={uploadStatus}
+                uploadError={uploadError}
+                onCapture={handleCapturePhoto}
+                onUsePhotos={() => void handleUsePhotos()}
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-2.5">
+                <UnifiedShutter
+                  cam={cam}
+                  recordProgress={recordProgress}
+                  onPhoto={handleCapturePhoto}
+                />
+                {cam.status === "live" && (
+                  <p className="text-[11px] font-medium text-white/50">
+                    Tippen für ein Foto · Halten für Video
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -259,70 +346,105 @@ function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => 
   );
 }
 
-function CameraControls({
+// Ab dieser Druckdauer wird aus dem Tipp ein Video (darunter: Foto). Kurz genug,
+// dass Video sich sofort anfühlt, lang genug, dass ein normaler Tipp nie
+// versehentlich aufnimmt.
+const HOLD_TO_RECORD_MS = 300;
+
+// EIN Auslöser statt Modus-Umschalter (Entscheidung Dominik, 2. Sep):
+// Tippen = Foto auf den Stapel, Halten = Video (nur solange der Stapel leer ist —
+// diese Komponente wird gar nicht erst gerendert, sobald Fotos liegen).
+function UnifiedShutter({
   cam,
   recordProgress,
-  uploadStatus,
-  uploadError,
-  onUseClip,
+  onPhoto,
 }: {
   cam: ReturnType<typeof useCamera>;
   recordProgress: number;
-  uploadStatus: "idle" | "uploading" | "done" | "error";
-  uploadError: string | null;
-  onUseClip: () => void;
+  onPhoto: () => void;
 }) {
-  // Clip aufgenommen: verwerfen oder hochladen — flankierende Rundbuttons.
-  if (cam.status === "recorded") {
-    const uploading = uploadStatus === "uploading";
-    const done = uploadStatus === "done";
-    return (
-      <div className="flex flex-col items-center gap-3">
-        {uploadError && <p className="text-center text-sm text-red-400">{uploadError}</p>}
-        <div className="flex items-end justify-center gap-10">
-          <div className="flex flex-col items-center gap-1.5">
-            <button
-              onClick={cam.retake}
-              disabled={uploading || done}
-              aria-label="Neu aufnehmen"
-              className="flex h-14 w-14 items-center justify-center rounded-full border border-white/15 bg-white/12 text-white transition-transform active:scale-95 disabled:opacity-40"
-            >
-              <span className="material-symbols-outlined text-[24px]">replay</span>
-            </button>
-            <span className="text-[11px] text-white/70">Neu</span>
-          </div>
-          <div className="flex flex-col items-center gap-1.5">
-            <button
-              onClick={onUseClip}
-              disabled={uploading || done}
-              aria-label="Verwenden"
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black transition-transform active:scale-95 disabled:opacity-60"
-            >
-              <span
-                className={`material-symbols-outlined text-[28px] ${uploading ? "animate-spin" : ""}`}
-              >
-                {done ? "check_circle" : uploading ? "progress_activity" : "check"}
-              </span>
-            </button>
-            <span className="text-[11px] text-white/70">
-              {done ? "Fertig" : uploading ? "Lädt…" : "Verwenden"}
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Live / Recording: klassischer runder Auslöser mit Fortschrittsring.
+  const holdTimer = useRef<number | null>(null);
+  const startedRecordingRef = useRef(false);
+  // Slide-Zoom (Snapchat-Muster): Daumen während der Aufnahme hochschieben =
+  // reinzoomen, runter = wieder raus. Baseline ist der Zoom beim Drücken.
+  const pressYRef = useRef(0);
+  const zoomStartRef = useRef(1);
   const recording = cam.status === "recording";
+
+  // Verwaisten Hold-Timer beim Unmount aufräumen.
+  useEffect(() => {
+    return () => {
+      if (holdTimer.current) window.clearTimeout(holdTimer.current);
+    };
+  }, []);
+
+  const clearHold = () => {
+    if (holdTimer.current) {
+      window.clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+    }
+  };
+
+  const beginPress = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (cam.status !== "live") return;
+    // Pointer einfangen: das pointerup kommt auch dann bei uns an, wenn der
+    // Finger während der Aufnahme vom Auslöser rutscht.
+    e.currentTarget.setPointerCapture(e.pointerId);
+    startedRecordingRef.current = false;
+    pressYRef.current = e.clientY;
+    zoomStartRef.current = cam.zoom;
+    holdTimer.current = window.setTimeout(() => {
+      holdTimer.current = null;
+      startedRecordingRef.current = true;
+      // 🔒 Video kennt keinen Digital-Zoom-Fallback (Preview müsste sonst vom
+      // Clip abweichen) — setMode("video") setzt ihn zurück, bevor es losgeht.
+      cam.setMode("video");
+      cam.startRecording();
+    }, HOLD_TO_RECORD_MS);
+  };
+
+  // Während der Aufnahme folgt der Zoom dem Daumen (der Pointer ist auf dem
+  // Auslöser gefangen, die Events kommen also auch neben dem Button noch an).
+  // 220 px nach oben = Verdopplung — exponentiell fühlt sich wie in nativen
+  // Kamera-Apps an. Ohne Hardware-Zoom passiert stumm nichts (setZoom no-opt,
+  // gleiche Regel wie beim Pinch: kein CSS-Fallback für Video).
+  const movePress = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!startedRecordingRef.current || !cam.canZoom) return;
+    const dy = pressYRef.current - e.clientY; // hoch = positiv
+    cam.setZoom(zoomStartRef.current * Math.pow(2, dy / 220));
+  };
+
+  const endPress = () => {
+    const held = startedRecordingRef.current;
+    clearHold();
+    startedRecordingRef.current = false;
+    if (held || cam.status === "recording") {
+      cam.stopRecording();
+    } else if (cam.status === "live") {
+      onPhoto();
+    }
+  };
+
+  const cancelPress = () => {
+    clearHold();
+    if (startedRecordingRef.current || cam.status === "recording") {
+      cam.stopRecording();
+    }
+    startedRecordingRef.current = false;
+  };
+
   return (
     <button
-      onClick={recording ? cam.stopRecording : cam.startRecording}
-      aria-label={recording ? "Aufnahme stoppen" : "Moment aufnehmen"}
-      className="relative transition-transform active:scale-95"
-      style={{ width: "4.75rem", height: "4.75rem" }}
+      onPointerDown={beginPress}
+      onPointerMove={movePress}
+      onPointerUp={endPress}
+      onPointerCancel={cancelPress}
+      onContextMenu={(e) => e.preventDefault()}
+      aria-label="Tippen für ein Foto, Halten für Video — beim Halten hochschieben zum Zoomen"
+      className="relative select-none transition-transform active:scale-95"
+      style={{ width: "4.75rem", height: "4.75rem", touchAction: "none", WebkitUserSelect: "none" }}
     >
-      {/* Fortschrittsring während der Aufnahme */}
+      {/* Fortschrittsring während der Video-Aufnahme */}
       <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100">
         <circle
           cx="50"
@@ -347,12 +469,180 @@ function CameraControls({
           />
         )}
       </svg>
-      {/* Innerer Auslöser: Kreis (live) ↔ Quadrat (recording) */}
+      {/* Innerer Auslöser: weißer Kreis (Foto) ↔ rotes Quadrat (Video läuft) */}
       <span
-        className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-red-500 transition-all duration-200 ${
-          recording ? "h-6 w-6 rounded-md" : "h-14 w-14 rounded-full"
+        className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ${
+          recording ? "h-6 w-6 rounded-md bg-red-500" : "h-14 w-14 rounded-full bg-white"
         }`}
       />
     </button>
+  );
+}
+
+// Foto-Stapel begonnen: Auslöser bleibt nach jedem Foto nutzbar (bis MAX_PHOTOS), der
+// Stapel wächst als Thumbnail-Strip. Jedes Foto einzeln entfernbar; „Verwenden"
+// lädt den ganzen Stapel als EINEN Moment hoch.
+function PhotoControls({
+  cam,
+  uploadStatus,
+  uploadError,
+  onCapture,
+  onUsePhotos,
+}: {
+  cam: ReturnType<typeof useCamera>;
+  uploadStatus: "idle" | "uploading" | "done" | "error";
+  uploadError: string | null;
+  onCapture: () => void;
+  onUsePhotos: () => void;
+}) {
+  const uploading = uploadStatus === "uploading";
+  const done = uploadStatus === "done";
+  const hasPhotos = cam.photos.length > 0;
+  const full = cam.photos.length >= cam.maxPhotos;
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      {uploadError && <p className="text-center text-sm text-red-400">{uploadError}</p>}
+
+      {/* Aufgenommene Fotos — leicht gedrehter Mini-Stapel, × entfernt einzeln */}
+      {hasPhotos && (
+        <div className="flex items-end justify-center">
+          {cam.photos.map((p, i) => (
+            <div
+              key={p.url}
+              className="relative"
+              style={{
+                transform: `rotate(${i % 2 === 0 ? 2 : -2}deg)`,
+                marginLeft: i === 0 ? 0 : "-0.4rem",
+                zIndex: i,
+              }}
+            >
+              <img
+                src={p.url}
+                alt=""
+                draggable={false}
+                className="h-16 w-12 rounded-lg border border-white/25 object-cover shadow-lg"
+              />
+              {!uploading && !done && (
+                <button
+                  onClick={() => cam.removePhoto(i)}
+                  aria-label={`Foto ${i + 1} entfernen`}
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white/25 bg-black/80"
+                >
+                  <span className="material-symbols-outlined text-[12px] text-white">close</span>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center justify-center gap-10">
+        {/* linke Spalte: Zähler, hält den Auslöser mittig */}
+        <div className="flex w-14 flex-col items-center">
+          {hasPhotos && (
+            <span className="text-[11px] tabular-nums text-white/60">
+              {cam.photos.length}/{cam.maxPhotos}
+            </span>
+          )}
+        </div>
+
+        {/* Auslöser — weißer Kreis (Foto), gedimmt wenn der Stapel voll ist */}
+        <button
+          onClick={onCapture}
+          disabled={full || uploading || done}
+          aria-label="Foto aufnehmen"
+          className="relative transition-transform active:scale-95 disabled:opacity-40"
+          style={{ width: "4.75rem", height: "4.75rem" }}
+        >
+          <svg className="absolute inset-0" viewBox="0 0 100 100">
+            <circle
+              cx="50"
+              cy="50"
+              r="46"
+              fill="none"
+              stroke="rgba(255,255,255,0.25)"
+              strokeWidth="4"
+            />
+          </svg>
+          <span className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+        </button>
+
+        {/* rechte Spalte: Verwenden — erscheint mit dem ersten Foto */}
+        <div className="flex w-14 flex-col items-center gap-1.5">
+          {hasPhotos && (
+            <>
+              <button
+                onClick={onUsePhotos}
+                disabled={uploading || done}
+                aria-label="Verwenden"
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black transition-transform active:scale-95 disabled:opacity-60"
+              >
+                <span
+                  className={`material-symbols-outlined text-[26px] ${uploading ? "animate-spin" : ""}`}
+                >
+                  {done ? "check_circle" : uploading ? "progress_activity" : "check"}
+                </span>
+              </button>
+              <span className="text-[11px] text-white/70">
+                {done ? "Fertig" : uploading ? "Lädt…" : "Verwenden"}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Clip aufgenommen: verwerfen oder hochladen — flankierende Rundbuttons.
+// (Der Live-/Recording-Auslöser lebt jetzt im UnifiedShutter.)
+function RecordedControls({
+  cam,
+  uploadStatus,
+  uploadError,
+  onUseClip,
+}: {
+  cam: ReturnType<typeof useCamera>;
+  uploadStatus: "idle" | "uploading" | "done" | "error";
+  uploadError: string | null;
+  onUseClip: () => void;
+}) {
+  const uploading = uploadStatus === "uploading";
+  const done = uploadStatus === "done";
+  return (
+    <div className="flex flex-col items-center gap-3">
+      {uploadError && <p className="text-center text-sm text-red-400">{uploadError}</p>}
+      <div className="flex items-end justify-center gap-10">
+        <div className="flex flex-col items-center gap-1.5">
+          <button
+            onClick={cam.retake}
+            disabled={uploading || done}
+            aria-label="Neu aufnehmen"
+            className="flex h-14 w-14 items-center justify-center rounded-full border border-white/15 bg-white/12 text-white transition-transform active:scale-95 disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-[24px]">replay</span>
+          </button>
+          <span className="text-[11px] text-white/70">Neu</span>
+        </div>
+        <div className="flex flex-col items-center gap-1.5">
+          <button
+            onClick={onUseClip}
+            disabled={uploading || done}
+            aria-label="Verwenden"
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black transition-transform active:scale-95 disabled:opacity-60"
+          >
+            <span
+              className={`material-symbols-outlined text-[28px] ${uploading ? "animate-spin" : ""}`}
+            >
+              {done ? "check_circle" : uploading ? "progress_activity" : "check"}
+            </span>
+          </button>
+          <span className="text-[11px] text-white/70">
+            {done ? "Fertig" : uploading ? "Lädt…" : "Verwenden"}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }

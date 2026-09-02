@@ -49,6 +49,15 @@ export default {
         return await redeemInvite(request);
       }
 
+      // Circle-Einladungs-Links: /c/<token> = Landeseite (wer lädt ein? +
+      // E-Mail-Beitritt), /circle-join/<token> = Magic-Link-Erzeugung. Läuft
+      // serverseitig, weil der Worker den service_role-Key hält und die
+      // Landeseite auch komplett ohne Session funktionieren muss.
+      if (url.pathname.startsWith("/c/") || url.pathname.startsWith("/circle-join/")) {
+        const { handleCircleInvite } = await import("./lib/circle-invites/server");
+        return await handleCircleInvite(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

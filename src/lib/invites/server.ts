@@ -25,7 +25,7 @@ if (typeof window !== "undefined") {
  * neu genug ist — darauf darf sich der Pilot nicht verlassen.
  * Deshalb: erst das CF-Binding, dann process.env (lokale .env / Node).
  */
-function serverEnv(name: string): string | undefined {
+export function serverEnv(name: string): string | undefined {
   const bag = (globalThis as { __env__?: Record<string, string | undefined> }).__env__;
   const fromCloudflare = bag?.[name];
   if (typeof fromCloudflare === "string" && fromCloudflare.length > 0) return fromCloudflare;
@@ -37,7 +37,7 @@ function serverEnv(name: string): string | undefined {
 // ausschließlich aus der Server-Umgebung (CF-Secret / lokale .env).
 const SUPABASE_URL_FALLBACK = "https://uuhrylkvwosflyypbdbj.supabase.co";
 
-function admin(): SupabaseClient {
+export function admin(): SupabaseClient {
   const key = serverEnv("SUPABASE_SERVICE_ROLE_KEY");
   if (!key) {
     throw new Error(

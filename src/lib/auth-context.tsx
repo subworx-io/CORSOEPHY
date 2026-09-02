@@ -245,7 +245,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const normalized = handle.startsWith("@") ? handle : `@${handle}`;
       const { data, error } = await supabase
         .from("profiles")
-        .insert({ id: session.user.id, handle: normalized })
+        .insert({
+          id: session.user.id,
+          handle: normalized,
+          // Der im Onboarding gewählte Name ist auch der Start-Anzeigename —
+          // vorher blieb display_name leer und das Feld in den Einstellungen
+          // wirkte, als wäre der Onboarding-Name verloren gegangen.
+          display_name: normalized.replace(/^@/, ""),
+        })
         .select("*")
         .single();
       if (error) return { error: error.message };

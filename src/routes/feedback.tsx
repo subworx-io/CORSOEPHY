@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { promptDayLabel } from "@/lib/prompts/prompt-history";
+import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { CityStoryHitSplash } from "@/components/city-story-hit-splash";
+import { PhotoStackTile } from "@/components/photo-stack";
 import type { MyFeedback } from "@/lib/supabase/types";
 
 export const Route = createFileRoute("/feedback")({
@@ -23,6 +25,8 @@ export const Route = createFileRoute("/feedback")({
 interface FeedbackData {
   feedback: MyFeedback;
   videoUrl: string | null;
+  // Foto-Moment (0023): geordnete Foto-URLs — gesetzt statt videoUrl.
+  photoUrls: string[] | null;
   cityStoryConsent: boolean;
   // Der Prompt, zu dem dieser Moment entstanden ist. null, wenn für den Tag keine
   // Historie existiert — dann lieber nichts zeigen als den falschen Prompt.
@@ -52,6 +56,7 @@ function FeedbackPage() {
       // per RLS auch für den Autor weg (0015) — der Screen friert dann nur die
       // Zahlen ein, nicht den Moment selbst.
       let videoUrl: string | null = null;
+      let photoUrls: string[] | null = null;
       let consent = false;
       let promptText: string | null = null;
       let promptDate: string | null = null;
@@ -59,15 +64,21 @@ function FeedbackPage() {
       if (feedback.moment_id) {
         const { data: post } = await supabase
           .from("posts")
-          .select("media_path, city_story_consent, prompt_date")
+          .select("media_path, media_type, media_paths, city_story_consent, prompt_date")
           .eq("id", feedback.moment_id)
           .maybeSingle();
 
         if (post?.media_path) {
-          const { data: urlData } = await supabase.storage
-            .from("moments")
-            .createSignedUrl(post.media_path, 3600);
-          videoUrl = urlData?.signedUrl ?? null;
+          const isPhoto = post.media_type === "photo";
+          const paths: string[] =
+            isPhoto && post.media_paths?.length ? post.media_paths : [post.media_path];
+          const urlsByPath = await getSignedMomentUrls(paths);
+          const urls = paths.map((p) => urlsByPath[p]).filter((u): u is string => !!u);
+          if (isPhoto) {
+            photoUrls = urls.length ? urls : null;
+          } else {
+            videoUrl = urls[0] ?? null;
+          }
           consent = post.city_story_consent;
           promptDate = post.prompt_date;
         }
@@ -87,7 +98,7 @@ function FeedbackPage() {
         }
       }
 
-      return { feedback, videoUrl, cityStoryConsent: consent, promptText, promptDate };
+      return { feedback, videoUrl, photoUrls, cityStoryConsent: consent, promptText, promptDate };
     },
     enabled: !!user,
     staleTime: 0,
@@ -166,30 +177,36 @@ function FeedbackPage() {
       </div>
 
       {/* --- Dein Moment ------------------------------------------------ */}
-      {hasMoment && live && data.videoUrl && (
+      {hasMoment && live && (data.videoUrl || data.photoUrls) && (
         <div className="mt-4 px-4">
           <div
             className="relative aspect-[4/5] overflow-hidden rounded-[1.75rem]"
             style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.08)" }}
           >
-            <video
-              ref={videoRef}
-              src={data.videoUrl}
-              playsInline
-              muted
-              loop
-              className="absolute inset-0 h-full w-full object-cover"
-            />
+            {data.photoUrls ? (
+              <PhotoStackTile urls={data.photoUrls} isActive />
+            ) : (
+              <>
+                <video
+                  ref={videoRef}
+                  src={data.videoUrl ?? undefined}
+                  playsInline
+                  muted
+                  loop
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
 
-            <button
-              onClick={toggleMute}
-              className="absolute top-4 left-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 backdrop-blur-md active:scale-95 transition-transform"
-              aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
-            >
-              <span className="material-symbols-outlined text-white text-[18px]">
-                {muted ? "volume_off" : "volume_up"}
-              </span>
-            </button>
+                <button
+                  onClick={toggleMute}
+                  className="absolute top-4 left-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 backdrop-blur-md active:scale-95 transition-transform"
+                  aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
+                >
+                  <span className="material-symbols-outlined text-white text-[18px]">
+                    {muted ? "volume_off" : "volume_up"}
+                  </span>
+                </button>
+              </>
+            )}
 
             {data.cityStoryConsent && (
               <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-md">
@@ -218,7 +235,7 @@ function FeedbackPage() {
 
       {/* Moment abgelaufen (oder im Corso, aber per RLS nicht mehr lesbar):
           keine Wiedergabe, nur die eingefrorene Bilanz. */}
-      {hasMoment && (!live || !data.videoUrl) && (
+      {hasMoment && (!live || (!data.videoUrl && !data.photoUrls)) && (
         <div className="mt-4 px-5">
           <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] px-5 py-4">
             <div className="flex items-center gap-2 text-white/40">

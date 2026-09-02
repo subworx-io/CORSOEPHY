@@ -237,11 +237,15 @@ function LegalLink({ to, label }: { to: "/impressum" | "/datenschutz" | "/agb"; 
 
 function AccountSection({ profile }: { profile: Profile }) {
   const { updateProfile, signOut } = useAuth();
-  const [name, setName] = useState(profile.display_name ?? "");
+  // Bestandskonten von vor dem Onboarding-Fix haben display_name = NULL —
+  // dann zeigt das Feld den Handle als faktischen Anzeigenamen vor, statt leer
+  // zu wirken. Gespeichert wird erst, wenn der Nutzer wirklich ändert.
+  const fallbackName = profile.display_name ?? profile.handle.replace(/^@/, "");
+  const [name, setName] = useState(fallbackName);
   const [saving, setSaving] = useState(false);
 
   const trimmed = name.trim();
-  const current = profile.display_name ?? "";
+  const current = fallbackName;
   const changed = trimmed !== current;
   const valid = trimmed.length >= 1 && trimmed.length <= NAME_MAX;
   const canSave = changed && valid && !saving;

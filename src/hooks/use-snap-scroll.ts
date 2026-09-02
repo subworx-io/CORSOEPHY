@@ -12,6 +12,22 @@ function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
 }
 
+// Ab dieser Fingerbewegung (px) entscheidet sich die Achse einer Geste.
+const AXIS_LOCK_SLOP = 10;
+
+/**
+ * Quer zur Feed-Achse wischen (Swipe-Follow): Der Feed meldet die horizontale
+ * Geste an den Aufrufer, statt sie zu schlucken. Die ERSTE eindeutige
+ * Bewegungsrichtung sperrt die Geste auf ihre Achse — ein Wisch ist entweder
+ * Scrollen ODER Folgen, nie beides gleichzeitig (kein Zittern unterm Finger).
+ */
+export interface SwipeXHandlers {
+  /** Finger bewegt sich horizontal — dx relativ zum Gestenstart (px, rechts > 0). */
+  move: (index: number, dx: number) => void;
+  /** Geste beendet — dx final, velocityX in px/ms (rechts > 0). */
+  end: (index: number, dx: number, velocityX: number) => void;
+}
+
 /**
  * Physik-basiertes Snap-Scroll: Bild folgt direkt dem Finger,
  * nach dem Loslassen schnappt es mit RAF + easeOutCubic ein.
@@ -19,9 +35,12 @@ function easeOutCubic(t: number) {
 export function useSnapScroll({
   count,
   axis = "y",
+  onSwipeX,
 }: {
   count: number;
   axis?: "x" | "y";
+  /** Nur für axis "y" ausgewertet: horizontale Wisch-Gesten (Swipe-Follow). */
+  onSwipeX?: SwipeXHandlers;
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const indexRef = useRef(0);
@@ -169,17 +188,27 @@ export function useSnapScroll({
     };
   }, [getDim, applyPos]);
 
-  // Touch: Finger folgt direkt, Velocity-Projektion beim Loslassen
+  // Swipe-X-Handler in einem Ref spiegeln: die Gesten-Listener bleiben stabil
+  // gebunden, auch wenn der Aufrufer die Callbacks pro Render neu erzeugt.
+  const swipeXRef = useRef<SwipeXHandlers | undefined>(onSwipeX);
+  swipeXRef.current = onSwipeX;
+
+  // Touch: Finger folgt direkt, Velocity-Projektion beim Loslassen.
+  // Achsen-Lock: die erste eindeutige Bewegungsrichtung entscheidet, ob die
+  // Geste den Feed scrollt (Feed-Achse) oder als Quer-Wisch (Swipe-Follow) an
+  // onSwipeX geht — danach wechselt die Geste die Achse nicht mehr.
   useEffect(() => {
     let startTouchPos = 0;
+    let startCrossPos = 0;
     let startWorldPos = 0;
+    let swipeIndex = 0;
+    let axisLock: "none" | "main" | "cross" = "none";
     let history: { pos: number; t: number }[] = [];
     let gestureActive = false;
 
-    const getPos = (e: TouchEvent) =>
-      axis === "y" ? e.touches[0].clientY : e.touches[0].clientX;
-    const getEndPos = (e: TouchEvent) =>
-      axis === "y" ? e.changedTouches[0].clientY : e.changedTouches[0].clientX;
+    const getPos = (e: TouchEvent) => (axis === "y" ? e.touches[0].clientY : e.touches[0].clientX);
+    const getCross = (e: TouchEvent) =>
+      axis === "y" ? e.touches[0].clientX : e.touches[0].clientY;
 
     const onStart = (e: TouchEvent) => {
       // Nur Gesten, die im Feed beginnen. Ein Wisch auf einem Overlay darüber
@@ -193,8 +222,13 @@ export function useSnapScroll({
       rafRef.current = 0;
       gestureActive = true;
       gestureRef.current = true;
+      axisLock = "none";
       startTouchPos = getPos(e);
+      startCrossPos = getCross(e);
       startWorldPos = posRef.current;
+      // Der Quer-Wisch gilt für den Slide, auf dem die Geste BEGINNT — auch wenn
+      // der aktive Index währenddessen theoretisch wechseln könnte.
+      swipeIndex = indexRef.current;
       const now = performance.now();
       history = [{ pos: startTouchPos, t: now }];
     };
@@ -204,6 +238,32 @@ export function useSnapScroll({
       e.preventDefault();
       const now = performance.now();
       const cur = getPos(e);
+      const cross = getCross(e);
+
+      // Achse noch offen → bei genug Bewegung festlegen. Quer gewinnt nur, wenn
+      // ein onSwipeX-Handler da ist (sonst bleibt alles wie bisher vertikal).
+      if (axisLock === "none") {
+        const dMain = Math.abs(cur - startTouchPos);
+        const dCross = Math.abs(cross - startCrossPos);
+        if (Math.max(dMain, dCross) < AXIS_LOCK_SLOP) return;
+        axisLock = dCross > dMain && swipeXRef.current ? "cross" : "main";
+        if (axisLock === "cross") {
+          // Vertikale Startbewegung (unter dem Slop) zurücknehmen — der Feed
+          // bleibt exakt auf seinem Einrastpunkt stehen.
+          posRef.current = startWorldPos;
+          applyPos(posRef.current);
+          history = [{ pos: cross, t: now }];
+        }
+      }
+
+      if (axisLock === "cross") {
+        history.push({ pos: cross, t: now });
+        const cutoff = now - 100;
+        while (history.length > 1 && history[0].t < cutoff) history.shift();
+        swipeXRef.current?.move(swipeIndex, cross - startCrossPos);
+        return;
+      }
+
       history.push({ pos: cur, t: now });
       // Nur letzten 100ms behalten
       const cutoff = now - 100;
@@ -221,6 +281,19 @@ export function useSnapScroll({
       gestureActive = false;
       gestureRef.current = false;
 
+      if (axisLock === "cross") {
+        const endCross = axis === "y" ? e.changedTouches[0].clientX : e.changedTouches[0].clientY;
+        let velocityPxMs = 0;
+        if (history.length >= 2) {
+          const oldest = history[0];
+          const newest = history[history.length - 1];
+          const dt = newest.t - oldest.t;
+          if (dt > 0) velocityPxMs = (newest.pos - oldest.pos) / dt;
+        }
+        swipeXRef.current?.end(swipeIndex, endCross - startCrossPos, velocityPxMs);
+        return;
+      }
+
       // Velocity aus Zeitfenster berechnen
       let velocityPxMs = 0;
       if (history.length >= 2) {
@@ -237,10 +310,19 @@ export function useSnapScroll({
       snapTo(targetIdx);
     };
 
+    const abortSwipeX = () => {
+      // Quer-Geste abgebrochen → Karte zurückfedern lassen (dx 0, keine Velocity).
+      swipeXRef.current?.end(swipeIndex, 0, 0);
+    };
+
     const onCancel = () => {
       if (!gestureActive) return;
       gestureActive = false;
       gestureRef.current = false;
+      if (axisLock === "cross") {
+        abortSwipeX();
+        return;
+      }
       snapTo(indexRef.current);
     };
 
@@ -253,6 +335,10 @@ export function useSnapScroll({
       if (document.visibilityState !== "hidden" || !gestureActive) return;
       gestureActive = false;
       gestureRef.current = false;
+      if (axisLock === "cross") {
+        abortSwipeX();
+        return;
+      }
       snapTo(Math.round(posRef.current / getDim()));
     };
 
@@ -296,6 +382,68 @@ export function useSnapScroll({
       if (snapId) clearTimeout(snapId);
     };
   }, [axis, getDim, applyPos, snapTo, isInsideContainer]);
+
+  // Maus-Drag für den Quer-Wisch (Swipe-Follow) auf Desktop: ohne Folgen-Button
+  // wäre Folgen mit der Maus sonst unmöglich. Vertikales Maus-Ziehen bleibt wie
+  // bisher ohne Funktion (Scrollen am Desktop läuft über das Mausrad).
+  useEffect(() => {
+    if (axis !== "y") return;
+    let tracking = false;
+    let lock: "none" | "cross" | "dead" = "none";
+    let startX = 0;
+    let startY = 0;
+    let swipeIndex = 0;
+    let history: { pos: number; t: number }[] = [];
+
+    const onDown = (e: MouseEvent) => {
+      if (!swipeXRef.current) return;
+      if (!isInsideContainer(e.target)) return;
+      tracking = true;
+      lock = "none";
+      startX = e.clientX;
+      startY = e.clientY;
+      swipeIndex = indexRef.current;
+      history = [{ pos: e.clientX, t: performance.now() }];
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!tracking) return;
+      if (lock === "none") {
+        const dx = Math.abs(e.clientX - startX);
+        const dy = Math.abs(e.clientY - startY);
+        if (Math.max(dx, dy) < AXIS_LOCK_SLOP) return;
+        lock = dx > dy ? "cross" : "dead";
+      }
+      if (lock !== "cross") return;
+      e.preventDefault();
+      const now = performance.now();
+      history.push({ pos: e.clientX, t: now });
+      const cutoff = now - 100;
+      while (history.length > 1 && history[0].t < cutoff) history.shift();
+      swipeXRef.current?.move(swipeIndex, e.clientX - startX);
+    };
+    const onUp = (e: MouseEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      if (lock !== "cross") return;
+      let velocityPxMs = 0;
+      if (history.length >= 2) {
+        const oldest = history[0];
+        const newest = history[history.length - 1];
+        const dt = newest.t - oldest.t;
+        if (dt > 0) velocityPxMs = (newest.pos - oldest.pos) / dt;
+      }
+      swipeXRef.current?.end(swipeIndex, e.clientX - startX, velocityPxMs);
+    };
+
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [axis, isInsideContainer]);
 
   // Maus-Drag horizontal für Stadt Corso auf Desktop
   useEffect(() => {
@@ -346,6 +494,25 @@ export function useSnapScroll({
     };
   }, [axis, getDim, applyPos, snapTo, isInsideContainer]);
 
+  // Index + Position OHNE Animation hart setzen. Für den unsichtbaren Umbau nach
+  // einem Swipe-Follow: erst scrollt der Feed animiert zum nächsten Moment
+  // (snapTo), dann wird die gefolgte Kachel aus der Liste genommen — alle
+  // nachfolgenden Slides rücken einen Index auf, der sichtbare Moment ist aber
+  // derselbe. realign() zieht Index/Position im selben Tick nach, damit der
+  // Frame identisch bleibt (kein Sprung, kein zweiter Scroll).
+  const realign = useCallback(
+    (idx: number) => {
+      const clamped = clampIndex(idx);
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      indexRef.current = clamped;
+      posRef.current = clamped * getDim();
+      applyPos(posRef.current);
+      setCurrentIndex(clamped);
+    },
+    [clampIndex, getDim, applyPos],
+  );
+
   // Stabile Callback-Ref-Factory — React ruft den Callback nicht erneut auf bei Re-Render
   const slideRef = useCallback(
     (i: number) => {
@@ -366,5 +533,5 @@ export function useSnapScroll({
     [axis, getDim]
   );
 
-  return { currentIndex, slideRef, containerRef };
+  return { currentIndex, slideRef, containerRef, snapTo, realign };
 }

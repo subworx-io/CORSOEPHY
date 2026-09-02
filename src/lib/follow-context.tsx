@@ -27,6 +27,11 @@ interface FollowContextType {
   nudge: (handle: string) => void;
   // Dev/Test: den lokalen Stand aus der DB neu laden (verwirft optimistische Änderungen).
   reset: () => void;
+  // „Neu"-Punkt am „Ich folge"-Toggle: seit dem letzten Blick in den Feed ist
+  // ein neuer Follow dazugekommen. Bewusst nur In-Session-State — der Punkt
+  // sagt „schau kurz rein", er ist kein persistenter Zähler.
+  hasUnseenFollow: boolean;
+  markFollowsSeen: () => void;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -149,9 +154,14 @@ export function FollowProvider({ children }: { children: ReactNode }) {
 
   const isFollowing = (handle: string) => followed.has(handle);
 
+  // Frisch gefolgt, „Ich folge" noch nicht wieder besucht → Punkt am Toggle.
+  const [hasUnseenFollow, setHasUnseenFollow] = useState(false);
+  const markFollowsSeen = useCallback(() => setHasUnseenFollow(false), []);
+
   // Folgen: optimistisch lokal einfügen, dann in die DB schreiben und reconcilen.
   const follow = useCallback(
     (person: { handle: string; src?: string | null }) => {
+      setHasUnseenFollow(true);
       setFollowed((prev) => {
         if (prev.has(person.handle)) return prev;
         return new Map(prev).set(person.handle, {
@@ -273,7 +283,19 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   }, [load]);
 
   return (
-    <FollowContext.Provider value={{ followed, isFollowing, follow, unfollow, renew, nudge, reset }}>
+    <FollowContext.Provider
+      value={{
+        followed,
+        isFollowing,
+        follow,
+        unfollow,
+        renew,
+        nudge,
+        reset,
+        hasUnseenFollow,
+        markFollowsSeen,
+      }}
+    >
       {children}
     </FollowContext.Provider>
   );

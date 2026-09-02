@@ -14,6 +14,25 @@
   animation: heart-burst 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
+/* Stadt Corso: die frische Ziehung tritt auf, wenn man den Countdown live
+   verfolgt (story.tsx setzt die Animation nur auf den Moment im Blick). */
+@keyframes storyReveal {
+  0% {
+    opacity: 0;
+    transform: scale(1.08) translateY(18px);
+    filter: blur(14px) brightness(1.3);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0px) brightness(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
 /*
  * Design system definition.
  *
@@ -147,10 +166,18 @@
     border-color: var(--color-border);
   }
 
-  /* Notch-Bereich dunkel + kein iOS Rubber-Band-Scroll */
+  /* Notch-Bereich dunkel + kein iOS Rubber-Band-Scroll.
+     `height: 100%` + `overflow: hidden` legen das Dokument als Scroll-Ziel komplett
+     still: WebKit-Bug 222654 lässt Wischgesten in installierten Home-Screen-PWAs
+     sonst intermittierend auf das (leere) Dokument statt auf den inneren
+     `overflow-y-auto`-Scroller latchen — Rücklauf/Einstellungen wirken dann
+     eingefroren. Die App scrollt das Dokument nie (Root-Wrapper ist h-dvh +
+     overflow-hidden), der Verzicht kostet also nichts. */
   html {
     background-color: oklch(0.08 0 0);
     overscroll-behavior: none;
+    height: 100%;
+    overflow: hidden;
   }
 
   body {
@@ -159,7 +186,8 @@
     font-family: "Inter", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior: none;
-    min-height: 100dvh;
+    height: 100%;
+    overflow: hidden;
   }
 
   .material-symbols-outlined {

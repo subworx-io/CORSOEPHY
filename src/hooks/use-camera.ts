@@ -4,6 +4,35 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Max. Clip-Länge — rohe, kurze Momente (PRD: ungeschnitten, nicht überproduziert).
 export const MAX_RECORD_MS = 15_000;
 
+// Ein Foto-Moment kann aus mehreren Fotos bestehen (PRD: „Foto oder vertikales
+// Video"; Mehrfach-Fotos Entscheidung 2. Sep). Cap spiegelt den DB-Check (0023).
+export const MAX_PHOTOS = 5;
+
+// Digital-Zoom-Fallback NUR für Fotos: Preview wird per CSS skaliert und die
+// Aufnahme exakt gleich aus dem Frame gecroppt — Preview und Moment bleiben
+// identisch. Für Video gibt es bewusst KEINEN Digital-Fallback (CSS würde nur
+// die Preview zoomen, nicht die Aufnahme — siehe readZoomCapability).
+const DIGITAL_ZOOM_MAX = 3;
+
+export type CaptureMode = "video" | "photo";
+
+export interface CapturedPhoto {
+  url: string; // Objekt-URL für die Vorschau
+  blob: Blob;
+}
+
+// Audio bewusst OHNE Sprachverarbeitung aufnehmen: die getUserMedia-Defaults
+// (echoCancellation/noiseSuppression/autoGainControl = an) sind für Telefonate
+// gebaut. In lauter Umgebung (Musik, Straße) pumpt die automatische Verstärkung
+// und die Rauschunterdrückung zerhackt den Klang — genau das „grauenhafte" Audio.
+// Die native Kamera-App nimmt ebenfalls unbearbeitet auf. Echo droht nicht: die
+// Preview ist während der Aufnahme stumm, beim Stopp wird der Stream beendet.
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+};
+
 export type CameraStatus =
   | "idle" // noch nicht gestartet (wartet auf User-Geste)
   | "starting" // getUserMedia läuft
@@ -93,6 +122,13 @@ export function useCamera() {
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
+  const [mode, setModeState] = useState<CaptureMode>("video");
+  const modeRef = useRef<CaptureMode>("video");
+  const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
+  const photosRef = useRef<CapturedPhoto[]>([]);
+  const [digitalZoom, setDigitalZoomState] = useState(1);
+  const digitalZoomRef = useRef(1);
+
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -132,13 +168,24 @@ export function useCamera() {
   }, []);
 
   // Pinch-Zoom: Wert auf den Hardware-Bereich klemmen und auf den Track anwenden.
+  // Ohne Hardware-Zoom greift im FOTO-Modus der Digital-Fallback (Preview-Scale +
+  // identischer Crop bei der Aufnahme) — bei Video passiert weiterhin stumm nichts.
   const setZoom = useCallback((value: number) => {
     const range = zoomRangeRef.current;
     const track = streamRef.current?.getVideoTracks()[0];
-    if (!range || !track) return;
-    const clamped = Math.min(range.max, Math.max(range.min, value));
-    setZoomState(clamped);
-    track.applyConstraints({ advanced: [{ zoom: clamped } as ZoomConstraintSet] }).catch(() => {}); // z. B. während eines Kamera-Wechsels — Zoom ist nice-to-have
+    if (range && track) {
+      const clamped = Math.min(range.max, Math.max(range.min, value));
+      setZoomState(clamped);
+      track
+        .applyConstraints({ advanced: [{ zoom: clamped } as ZoomConstraintSet] })
+        .catch(() => {}); // z. B. während eines Kamera-Wechsels — Zoom ist nice-to-have
+      return;
+    }
+    if (modeRef.current === "photo") {
+      const clamped = Math.min(DIGITAL_ZOOM_MAX, Math.max(1, value));
+      digitalZoomRef.current = clamped;
+      setDigitalZoomState(clamped);
+    }
   }, []);
 
   const start = useCallback(
@@ -166,7 +213,7 @@ export function useCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: mode },
-          audio: true,
+          audio: AUDIO_CONSTRAINTS,
         });
         stopStream();
         streamRef.current = stream;
@@ -175,6 +222,8 @@ export function useCamera() {
         zoomRangeRef.current = null;
         setZoomRange(null);
         setZoomState(1);
+        digitalZoomRef.current = 1;
+        setDigitalZoomState(1);
         readZoomCapability(stream);
         // Manche Geräte melden die Zoom-Capability erst kurz nach dem Start.
         setTimeout(() => {
@@ -216,7 +265,12 @@ export function useCamera() {
     chunksRef.current = [];
 
     const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    // Audio-Bitrate explizit setzen: Plattform-Defaults sind teils sprachoptimiert
+    // niedrig — 128 kbit/s trägt auch Musik/laute Umgebung ordentlich.
+    const recorder = new MediaRecorder(stream, {
+      ...(mimeType ? { mimeType } : {}),
+      audioBitsPerSecond: 128_000,
+    });
     recorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {
@@ -257,16 +311,81 @@ export function useCamera() {
     void start();
   }, [revokeRecorded, start]);
 
+  // ── Foto-Aufnahme ────────────────────────────────────────────────────────
+  // 🔒 Auch Fotos entstehen NUR aus dem Live-Stream: der aktuelle Frame des
+  // <video>-Elements wird auf ein Canvas gezeichnet. Kein Galerie-Pfad, keine
+  // Filter. Der Digital-Zoom croppt exakt das, was die Preview zeigt.
+  const capturePhoto = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || !streamRef.current || video.videoWidth === 0) return;
+    if (photosRef.current.length >= MAX_PHOTOS) return;
+
+    const z = zoomRangeRef.current ? 1 : digitalZoomRef.current; // Hardware-Zoom steckt schon im Frame
+    const sw = video.videoWidth / z;
+    const sh = video.videoHeight / z;
+    const sx = (video.videoWidth - sw) / 2;
+    const sy = (video.videoHeight - sh) / 2;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(sw);
+    canvas.height = Math.round(sh);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.9),
+    );
+    if (!blob) return;
+
+    const photo: CapturedPhoto = { url: URL.createObjectURL(blob), blob };
+    photosRef.current = [...photosRef.current, photo];
+    setPhotos(photosRef.current);
+  }, []);
+
+  const removePhoto = useCallback((index: number) => {
+    const photo = photosRef.current[index];
+    if (!photo) return;
+    URL.revokeObjectURL(photo.url);
+    photosRef.current = photosRef.current.filter((_, i) => i !== index);
+    setPhotos(photosRef.current);
+  }, []);
+
+  const clearPhotos = useCallback(() => {
+    photosRef.current.forEach((p) => URL.revokeObjectURL(p.url));
+    photosRef.current = [];
+    setPhotos([]);
+  }, []);
+
+  // Moduswechsel Video ↔ Foto. Zurück zu Video setzt den Digital-Zoom zurück —
+  // er existiert für Video nicht (die Aufnahme würde sonst von der Preview
+  // abweichen). Aufgenommene Fotos überleben den Wechsel nicht (bewusst simpel:
+  // ein Moment ist entweder Video oder Foto-Stapel).
+  const setMode = useCallback(
+    (next: CaptureMode) => {
+      modeRef.current = next;
+      setModeState(next);
+      if (next === "video") {
+        digitalZoomRef.current = 1;
+        setDigitalZoomState(1);
+        clearPhotos();
+      }
+    },
+    [clearPhotos],
+  );
+
   const switchCamera = useCallback(() => {
     void start(facingMode === "user" ? "environment" : "user");
   }, [facingMode, start]);
 
-  // Vollständiges Aufräumen beim Unmount: Tracks stoppen, Blob-URL freigeben.
+  // Vollständiges Aufräumen beim Unmount: Tracks stoppen, Blob-URLs freigeben.
   useEffect(() => {
     return () => {
       clearTimer();
       stopStream();
       revokeRecorded();
+      photosRef.current.forEach((p) => URL.revokeObjectURL(p.url));
+      photosRef.current = [];
     };
   }, [clearTimer, stopStream, revokeRecorded]);
 
@@ -275,9 +394,20 @@ export function useCamera() {
     status,
     error,
     facingMode,
-    zoom,
-    canZoom: zoomRange !== null,
+    // Ohne Hardware-Zoom zeigt `zoom` im Foto-Modus den Digital-Zoom.
+    zoom: zoomRange !== null ? zoom : digitalZoom,
+    canZoom: zoomRange !== null || mode === "photo",
     setZoom,
+    // > 1 nur im Foto-Modus ohne Hardware-Zoom — die Preview muss dann per CSS
+    // um genau diesen Faktor skaliert werden (Crop bei der Aufnahme ist identisch).
+    digitalZoom,
+    mode,
+    setMode,
+    photos,
+    capturePhoto,
+    removePhoto,
+    clearPhotos,
+    maxPhotos: MAX_PHOTOS,
     recordedUrl,
     recordedBlob,
     elapsedMs,

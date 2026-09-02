@@ -71,10 +71,15 @@ export function MomentMenu({ reportedUserId, reportedPostId, handle }: MomentMen
     setSubmitting(true);
     try {
       await block(reportedUserId);
+      // Erst das Sheet schließen, DANN den Follow-Stand nachziehen: reloadFollows()
+      // lässt die Kachel (samt diesem Menü) aus dem Feed fallen. Unmontiert das
+      // Sheet im offenen Zustand, kann Radix sein `pointer-events: none` am <body>
+      // hinterlassen — die nativ scrollenden Screens (Rücklauf/Einstellungen)
+      // wären dann bis zum Neustart tot.
+      setOpen(false);
       // Serverseitig sind die gegenseitigen Follows weg — lokalen Follow-Stand nachziehen,
       // damit die Person sofort aus "Ich folge" fällt.
       reloadFollows();
-      setOpen(false);
       toast.success(`${handle} blockiert.`);
     } catch {
       toast.error("Konnte nicht blockiert werden. Bitte erneut versuchen.");

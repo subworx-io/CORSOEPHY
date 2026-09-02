@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand: 21. August 2026.**
+**Stand: 2. September 2026.**
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -18,6 +18,32 @@ Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (
 **Metrik-Tracking ab Tag 1 (gebaut, noch nicht angewendet):** Ein write-only Event-Log (`events` + `log_event()`, Migration `0018_events.sql`, Muster wie `post_views`/`reports`) plus Client-Instrumentierung: `app_open` (Start/Fokus, 5-min-entprellt), `story_viewed`, `moment_posted`, `follow_set` (mit `kind: follow|renew`), `nudge_sent`. Server: `draw_city_story()` schreibt zusätzlich `story_drawn` je gezogenem Slot. **Offen (Koordinator):** `follow_expired` bleibt reservierter Enum ohne Feuer-Pfad — seit `0015` gibt es keinen Verfall-Cron mehr, Verfall ist bei der Auswertung aus `follows.expires_at` ableitbar (Empfehlung: kein Marker-Job). ✅ **Migration `0018_events.sql` angewendet, PR #5 gemerged (20. Aug).**
 
 **Am 20. August dazugekommen:** PR #5 (Metrik-Tracking), PR #6 (Web-Push + Rücklauf) und PR #7 (Release-Workflow) sind gemerged; dazu der **Onboarding-Flow für neu eingeladene User** (`onboarding-flow.tsx`, `onboarding-handle-step.tsx`, Migration `0021_onboarding_event.sql`, angewendet). Damit ist **Phase 1 feature-vollständig** — Push ist gebaut, Discovery hat Infinite Scroll.
+
+**Am 2. September (abends) dazugekommen — Feedback-Batch Dominik, gebaut und deployed (`bash scripts/deploy.sh`), noch nicht committet:**
+- **Foto-Momente** (PRD sah „Foto oder vertikales Video" schon immer vor; `media_type='photo'` existierte seit `0001` ungenutzt): Aufnahme-Screen hat jetzt einen Video↔Foto-Umschalter, Fotos entstehen 🔒 ausschließlich aus dem Live-Stream (Canvas-Frame-Grab, kein Galerie-Pfad). **Mehrere Fotos pro Moment** (max. 5, Entscheidung Dominik 2. Sep — ⚠️ von Maxim gegenzuzeichnen), im Feed als **überlappender Foto-Stapel** (`src/components/photo-stack.tsx`: Auto-Weiterblättern + Tippen, geteilt von Discovery/Stadt Corso/Ich folge/Rücklauf). Migration **`0023_photo_moments.sql` angewendet + im Ledger verbucht** (`posts.media_paths text[]`, `city_story()` liefert zusätzlich `media_type`/`media_paths`; Grants gegen die Live-DB verifiziert). Upload: `uploadPhotoMoment()` in `upload.ts`; Video-Upsert setzt `media_paths` explizit auf NULL (Re-Post über eine Foto-Zeile).
+- **Zoom bei Fotos:** Pinch nutzt denselben Hardware-Zoom wie Video; **nur im Foto-Modus** gibt es zusätzlich einen Digital-Fallback (CSS-Scale der Preview + exakt gleicher Canvas-Crop bei der Aufnahme — Preview==Moment bleibt gewahrt; für Video weiterhin bewusst kein CSS-Fallback).
+- **Audio-Fix:** `use-camera.ts` fordert Audio ohne `echoCancellation`/`noiseSuppression`/`autoGainControl` an (die Telefonie-Defaults zerlegten laute Umgebungen — das „grauenhafte" Audio) und setzt `audioBitsPerSecond: 128000`.
+- **Stadt Corso erscheint jetzt wirklich live um 21:00** (`story.tsx`): Im 10-min-Fenster nach Zyklus-Start wird IMMER gepollt, auch wenn schon Daten da sind — vorher schaltete „Daten da → Polling aus" bei vorgehender Client-Uhr das Polling auf der ALTEN Ziehung ab (der gemeldete „erst nach Tab-Wechsel"-Hänger). Dazu **Enthüllungs-Animation** (`storyReveal` in `styles.css`), wenn die Ziehung während des Zuschauens hereinkommt.
+- **Anzeigename aus dem Onboarding:** `createProfile()` setzt `display_name` = gewählter Handle; Einstellungen zeigen bei Alt-Konten (display_name NULL) den Handle als Vorbelegung.
+
+**Am 2. September (abends) dazugekommen: der Zwei-Achsen-Umbau** (Auftrag Dominik, Details im Abschnitt „Zwei-Achsen-Modell & Circle" unten): neuer Nav-Schnitt **Stadt · Story · Kamera · Circle · Du**, „Stadt" mit Discovery/„Ich folge"-Toggle (sichtbar nur, wer einen lebenden Moment hat), der **Circle** als beständige Achse 2 mit versteckter 5-Tage-Gegenseitigkeits-Schwelle, **Chat im Circle**, Circle-Ankündigungs-Splash, Aufnahme auf **Tippen=Foto/Halten=Video** umgestellt (auf dem Foto-Batch vom selben Tag aufgesetzt). Migration `0024_circle.sql` ist **angewendet + im Ledger verbucht**, Trigger-Mechanik gegen die Live-DB end-to-end verifiziert, Security-Negativtest Layer 1 grün (`scripts/security-test-circle.mjs`). PRD auf v0.5 nachgezogen (Eigner-Freigabe durch Dominik). **Anstupsen ist geparkt** (UI raus, Backend bleibt). Unkommittiert im Working Tree, nicht deployed.
+
+**Ebenfalls 2. September (spät): Folgen per Swipe** (Entscheidung Dominik; gebaut von der Parallel-Session): Der Folgen-Button ist überall raus (`follow-button.tsx` gelöscht), Folgen/Erneuern passiert per Quer-Wisch auf der Kachel. `use-snap-scroll.ts` kann jetzt `onSwipeX` (Achsen-Lock: erste eindeutige Richtung entscheidet vertikales Scrollen vs. Quer-Wisch, Touch + Maus-Drag), dazu `use-swipe-follow.ts` (Commit ab 30 % Kachelbreite oder Flick, Gummiband bei „nicht erlaubt", `--swipe-progress`-CSS-Var) und `swipe-follow-overlay.tsx` (Overlay + Hinweis-Chip). Verdrahtet in Discovery (Folgen, Karte fliegt raus), Stadt Corso (Folgen, Karte bleibt, Status-Pille) und „Ich folge" (Erneuern ab 12 h). DB-Writes weiterhin zentral über `follow()`/`renew()`/`unfollow()` aus dem follow-context — der Circle-Zähler hängt am DB-Trigger und ist davon unberührt. ⚠️ Nur tsc/Build-geprüft, Gesten am Gerät ungetestet.
+
+**Nachbatch (2. Sep, noch später — Feedback-Runde, deployed):**
+- **Swipe jetzt beidseitig:** rechts = folgen/erneuern, links = **entfolgen** („Ich folge": Karte fliegt links raus, `unfollow()` bewusst erst NACH der Exit-Animation; Stadt Corso: Spring-back, Status-Pille wechselt). Der Entfolgen-Tap auf der Pille ist entfernt — die Pille ist jetzt passiver Status.
+- **Foto-Stapel-Stacking-Fix:** `photo-stack.tsx` bekam `isolate` am Root — vorher lagen die z-indizierten Foto-Karten ÜBER Handle/Prompt/Hinweis der Kachel (Name unsichtbar; in der ersten Deploy-Version verdeckten sie sogar den damaligen Follow-Button → „kann nicht folgen").
+- **Auto-Weiterscrollen nach Follow in Discovery:** Karte fliegt raus → `snapTo(nächster)` → Kachel entfernt + `realign()` im selben Tick (neue Exports `snapTo`/`realign` aus `use-snap-scroll`, `SWIPE_EXIT_MS` aus `use-swipe-follow`).
+- Am Gerät ungetestet, nichts committet.
+
+**Nachbatch 2 (2. Sep, noch später — Circle-Links & Feinschliff, deployed):**
+- **Circle-Einladungs-Links** (Konzept-Erweiterung, Entscheidung Dominik: zweiter Eintrittsweg in den Circle neben dem 5-Tage-Ritual; PRD §4.8 nachgezogen): Migration `0026_circle_invites.sql` (`circle_invites` + `create_circle_invite`/`redeem_circle_invite`; Circle-Bildung konsistent zur 0024-Mechanik: `on conflict do nothing`, beidseitiger Block-Check → `invalid`, `chat_reached` pro Person mit `metadata.connection_id` + **`via='circle_invite'`** zur Trennung der Eintrittswege in der Auswertung, `announced_*` bleibt NULL → der CircleSplash feuert auch hier) + `0027` (Fix: `extensions.gen_random_bytes` — der `search_path`-Pin verdeckte pgcrypto; 0026 war schon verbucht, daher append-only nachgezogen). Beide angewendet + verbucht.
+- **Server/Routes:** `/c/<token>` Landeseite + `POST /circle-join/<token>` (CF-Worker, service_role; `src/lib/circle-invites/server.ts`, `admin`/`serverEnv` aus `invites/server.ts` jetzt exportiert), App-Route `/circle-redeem/$token` (löst per RPC ein → `/circle`). UI: Leerzustand des Circle mit zentralem Teilen-Button, sonst `person_add` rechts an der Partner-Leiste; `?chat`-Deep-Link unverändert.
+- **Verifiziert:** Zwei-User-Beweis per simulierten JWT-Claims (create → redeem = `connected`, zurückgerollt), Grants dicht (anon ✗, Tokens nicht auflistbar), live: `/c/<fake>` → 404-Seite, `/c/<echt>` → personalisierte Seite; Test-Token gelöscht. ⚠️ Der `/circle-join`-Pfad für KOMPLETT neue E-Mails (generateLink-Signup) ist — wie beim Invite-Flow — bis zum echten Zwei-Geräte-Test unbewiesen.
+- **Kleineres:** weißer Unseen-Punkt am „Ich folge"-Toggle (`hasUnseenFollow`/`markFollowsSeen` im follow-context) · Router `defaultPreload: 'intent'` + BottomNav `preload='render'` gegen den Kamera-Chunk-Puffer · **Slide-Zoom beim Video-Halten** (Snapchat-Stil: Finger nach oben ziehen, 220 px = Verdopplung, nur Hardware-Zoom) · Nav-Label **„Story" → „Corso"** · Stadt-Zähler als Glas-Pille unten mittig statt Textzeile unterm Toggle.
+- Alles am Gerät ungetestet, nichts committet.
+
+**Deployed am 2. September (spät abends, zwei Läufe):** Der komplette Stand — Foto-Batch, Zwei-Achsen-Umbau/Circle, Swipe-Follow und der Feedback-Nachbatch (beidseitiger Swipe, Stacking-Fix, Auto-Weiterscrollen) — ist per `bash scripts/deploy.sh` live auf `corso-app.pages.dev` (Smoke-Check 200). Migrationen `0023` + `0024` waren bereits vorher angewendet (erst Schema, dann Code). Weiterhin **nichts committet** — der gesamte Batch liegt im Working Tree.
 
 **Release läuft ab sofort per Knopfdruck** über GitHub Actions statt von einem Rechner. Siehe `docs/RELEASE.md` und den Abschnitt „Release per Knopfdruck" unten.
 **Was den Pilot-Start blockiert:** zwei Config-Schritte von je unter 5 Minuten (siehe „Offene Punkte").
@@ -155,7 +181,9 @@ Damit ist diese Liste leer — Phase 1 ist feature-vollständig. Was bleibt, ist
 - Der **Discovery-Flüssigkeits-Fix vom 21. August** (gecachte Batch-URLs, Video-Fenster ±2, Re-Play nach src-Wechsel, Hook-Härtung — siehe Chronik) ist ebenfalls nur per Typecheck + Build geprüft. Auf dem Handy prüfen: Tab wechseln und zurück → läuft das aktive Video sofort weiter? Nach einem Follow auf der letzten Kachel → schnappt der Feed auf die neue letzte?
 - Der **Splash-Hänger-Fix** braucht zur endgültigen Bestätigung einen Aufruf >1 h nach dem letzten Login (Token-Lebensdauer).
 - Ein **echter Zwei-Geräte-Test** des Einladungs-Links (Freund kommt rein? zweiter Klick blockiert?) steht aus — hängt an Punkt 2.
+- Der **PWA-Scroll-Fix vom 2. September** (Rücklauf ließ sich oft nicht scrollen) ist nur per Typecheck + Build geprüft. Auf dem iPhone (installierte PWA) prüfen: im Rücklauf erst über Video/Kopfbereich wischen, dann sofort scrollen — vorher der zuverlässigste Weg, den Hänger zu provozieren.
 - Der **Pinch-Zoom im Aufnahme-Screen (21. August)** ist nur per Typecheck/Lint geprüft, nicht auf dem Handy: offen ist, ob iOS Safari `zoom` für Front- **und** Rückkamera meldet und ob der Zoom in der fertigen Aufnahme ankommt (erwartet: ja, da Hardware-Zoom auf dem Track). Test über `bun run dev:mobile`.
+- Der **Feedback-Batch vom 2. September** (Foto-Momente, Audio-Fix, Stadt-Corso-Live-Erscheinen, Anzeigename) ist nur per Typecheck + Production-Build geprüft — nichts davon am Gerät. Prüfen: Foto-Stapel aufnehmen/ansehen (Discovery + eigener Rücklauf), Audio-Aufnahme in lauter Umgebung, um 21:00 auf dem Story-Screen zuschauen (erscheint die Ziehung mit Animation ohne Tab-Wechsel?), Onboarding-Name in Einstellungen → Account.
 
 ---
 
@@ -163,11 +191,11 @@ Damit ist diese Liste leer — Phase 1 ist feature-vollständig. Was bleibt, ist
 
 | Route | Screen | Stand |
 |---|---|---|
-| `index.tsx` | **Discovery** (Entdeckungs-Feed, vertikaler Swipe) | Echte Momente aus der DB, Follow schreibt in die DB, kein Mock-Fallback (ehrlicher Leerzustand). Eigene Momente raus (`author_id ≠ auth.uid()`), gefolgte Personen verlassen den Feed. Zahnrad oben rechts → `/settings`. **Offen:** hartes `limit 20` ohne Pagination/Tages-Ordering. |
+| `index.tsx` | **„Stadt"** (Toggle: Discovery ⇄ Ich folge, seit 2. Sep) | Dünner Screen: halbdurchsichtiger Toggle oben mittig + Stadt-Zähler darunter; die Feeds leben in `components/discovery-feed.tsx` (Infinite Scroll, nur Fremde, Circle-Partner raus, ehrlicher Leerzustand) und `components/following-feed.tsx` (nur Gefolgte MIT lebendem Moment, GlassHeart/Erneuern/Entfolgen, kein Anstupsen mehr). Das Settings-Zahnrad ist raus — der Weg führt über „Du". |
 | `story.tsx` | **Stadt Corso** (21:00-Ritual) | Liest die stadtweit eingefrorene Auswahl über `city_story()`; serverseitige gewichtete Ziehung um 21:00 via pg_cron. Leerzustand mit atmosphärischem Video-Hintergrund (cross-fadende s/w Düsseldorf-Clips, körnig, Blue-Hour-Tint, `blur(5px)`) + großem `Std:Min:Sek`-Countdown auf die nächste 21:00. Läuft die Story, zeigt eine dezente Pille oben „Stadt Corso · noch X h Y min" bis zur nächsten Ziehung. 🔒 Keine Follower-/Reaktions-Zahlen. |
-| `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Freigabe für den Stadt Corso als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. **Pinch-Zoom (21. Aug):** Zwei-Finger-Geste auf dem Live-Bild (auch während der Aufnahme) → echter **Hardware-Zoom** via `track.applyConstraints({ zoom })`, landet damit im Clip; bewusst **kein CSS-Scale-Fallback**, weil der nur die Vorschau zoomen würde, nicht die Aufnahme. Nur aktiv, wenn `getCapabilities().zoom` vorhanden (Front-Kameras können das oft nicht), sonst passiert stumm nichts. Zoomfaktor-Pille blendet während der Geste ein. Hooks: `use-camera.ts` (`zoom`/`canZoom`/`setZoom`), `use-pinch-zoom.ts` (Geste). 🔒 Kein Galerie-Upload. |
-| `connections.tsx` | **„Ich folge"** / verdienter Chat | Echter Follow-Graph. Anstupsen + Follow-Erneuern schreiben in die DB. Entfolgen per Tippen auf „folgst du heute" (`unfollow()` setzt `expires_at = now()`) → Person taucht wieder in Discovery auf. Verdienter Chat = Phase 3, noch nicht gebaut. |
-| `feedback.tsx` | **Rücklauf** (private Bilanz + Self-Screen) | Entlang der zwei Kräfte (PRD §1), bezogen auf **deinen laufenden Moment**: oben „Gewonnen" (**Views** · **sind geblieben** · Stadt-Corso-Auftritt mit Vollbild-Moment), unten „Auf der Kippe" (**Follower**, die in den nächsten 12 h neu entscheiden). Kein „seit gestern"-Delta mehr. Rekord-Marker + Serie. Kopf trägt Handle/Anzeigename und den Weg in die Einstellungen (löst PRD Screen 9 ab). Ohne lebenden Moment: Zahlen eingefroren, Video weg. Zeigt den **Prompt, zu dem der Moment entstand** (`posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text`). |
+| `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Freigabe für den Stadt Corso als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. **Pinch-Zoom (21. Aug):** Zwei-Finger-Geste auf dem Live-Bild (auch während der Aufnahme) → echter **Hardware-Zoom** via `track.applyConstraints({ zoom })`, landet damit im Clip; bewusst **kein CSS-Scale-Fallback**, weil der nur die Vorschau zoomen würde, nicht die Aufnahme. Nur aktiv, wenn `getCapabilities().zoom` vorhanden (Front-Kameras können das oft nicht), sonst passiert stumm nichts. Zoomfaktor-Pille blendet während der Geste ein. Hooks: `use-camera.ts` (`zoom`/`canZoom`/`setZoom`), `use-pinch-zoom.ts` (Geste). **Tippen/Halten (2. Sep):** EIN Auslöser statt Modus-Umschalter — Tippen legt ein Foto auf den Stapel (bis 5, `PhotoControls`), Halten (≥300 ms) nimmt Video auf (`UnifiedShutter`, Pointer-Capture gegen abrutschende Finger); vor Video-Start wird der Foto-Digital-Zoom zurückgesetzt (Preview = Aufnahme). 🔒 Kein Galerie-Upload. |
+| `circle.tsx` | **Circle** (Achse 2, seit 2. Sep) | Beständige Partner-Leiste oben (Chat-Einstieg für ALLE Partner, auch ohne Moment) + moment-gated Snap-Feed (nur Partner mit lebendem Moment, „Nachricht"-Pill statt Folgen). Chat als Vollbild-Overlay (`components/circle-chat.tsx`, Polling 4 s, RLS + Block-Trigger serverseitig). Circle-Ankündigung als Vollbild-Splash (`components/circle-splash.tsx`, serverseitiger Gesehen-Stand via `acknowledge_circle()`). 🔒 Kein Zähler, keine Schwelle sichtbar. *(`connections.tsx` ist gelöscht — „Ich folge" lebt jetzt im Stadt-Screen.)* |
+| `feedback.tsx` | **„Du"** (Nav-Label seit 2. Sep; Rücklauf: private Bilanz + Self-Screen) | Entlang der zwei Kräfte (PRD §1), bezogen auf **deinen laufenden Moment**: oben „Gewonnen" (**Views** · **sind geblieben** · Stadt-Corso-Auftritt mit Vollbild-Moment), unten „Auf der Kippe" (**Follower**, die in den nächsten 12 h neu entscheiden). Kein „seit gestern"-Delta mehr. Rekord-Marker + Serie. Kopf trägt Handle/Anzeigename und den Weg in die Einstellungen (löst PRD Screen 9 ab). Ohne lebenden Moment: Zahlen eingefroren, Video weg. Zeigt den **Prompt, zu dem der Moment entstand** (`posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text`). |
 | `settings.tsx` | **Einstellungen** (Screen 10, minimal) | Vier bewusst schmale Blöcke: Benachrichtigungen (`push_enabled`-Switch), Sicherheit (Blockierte-Personen-Platzhalter), Rechtliches (`/impressum`, `/datenschutz`, `/agb`), Account (Anzeigename, Abmelden, manuelle Kontolöschung per Mailto). ✅ Seit `0014` (19. Aug angewendet) voll funktionsfähig — Push-Präferenz und Anzeigename schreiben durch. |
 | `impressum/datenschutz/agb.tsx` | Rechts-Platzhalter | Gemeinsames Gerüst `src/components/legal-page.tsx`, Inhalt „folgt". |
 
@@ -210,7 +238,8 @@ zum lokalen Build ist — womit alle Secret-Werte als korrekt belegt sind.
 
 **Migrations-Ledger:** `scripts/migrate.mjs` führt `public.schema_migrations` in der DB. Gefahren wird
 nur, was im Repo liegt und dort nicht verbucht ist. Stand 20. August: **24 Dateien, 24 verbucht,
-nichts ausstehend.** Von Hand gefahrene Migrationen mit
+nichts ausstehend.** Stand 2. September: **`0023`–`0027` dazugekommen, alle angewendet und
+verbucht — weiterhin nichts ausstehend.** Von Hand gefahrene Migrationen mit
 `node scripts/migrate.mjs --mark-applied supabase/migrations/<datei>.sql` nachtragen, nicht in die
 Baseline schreiben. Drift-Schutz: eine nachträglich veränderte, bereits angewendete Datei bricht den
 Lauf ab — Migrationen sind append-only.
@@ -238,6 +267,22 @@ Repository-Secrets gelten für alle Collaborators.
 
 ---
 
+## Zwei-Achsen-Modell & Circle (Umbau 2. September 2026)
+
+**Auftrag Dominik (mit Eigner-Freigabe fürs PRD, jetzt v0.5).** Das Ein-Achsen-Follow-System ist einem Zwei-Achsen-Modell gewichen:
+
+- **Achse 1 „Stadt" (Broadcast, flüchtig):** Discovery + „Ich folge" unter EINEM Menüpunkt (Toggle). Follows verfallen unverändert nach 24 h (Trigger aus `0015`, nichts daran geändert). Neue Sichtbarkeitsregel: **im „Ich folge"-Feed steht nur, wer einen lebenden Moment hat** — die Verbindung bleibt, die Kachel nicht. Bewusste Konsequenz: Erneuern geht nur an sichtbaren Kacheln.
+- **Achse 2 „Circle" (beständig, gegenseitig):** entsteht **serverseitig** über den AFTER-Trigger `follows_record_mutual` auf `follows` (Migration `0024_circle.sql`): Bei jeder Follow-Aktion wird geprüft, ob die Gegenrichtung gerade aktiv ist → dann zählt der Corso-Tag als „gegenseitiger Tag" (`follow_mutual_days`, Dedupe pro Paar+Tag per unique-Constraint, dadurch nicht durch Entfolgen/Neu-Folgen ertricksbar). Ab der Schwelle (`app_config.circle_threshold`, Default **5** Tage insgesamt, Lücken pausieren) wird eine `connections`-Zeile angelegt (Bestand aus `0003`, verfällt nie) + je ein `chat_reached`-Event pro Person (= Kill-Metrik „verdiente Chats"). Ein Block stoppt Anbahnung und Chat in beide Richtungen.
+- 🔒 **Zähler und Schwelle haben keinen Client-Lesepfad** (RLS ohne Policy + Grants entzogen, Muster `invites`) — der Circle-Eintritt ist eine Überraschung. Ankündigung beim nächsten App-Öffnen als Vollbild-Splash, Gesehen-Stand serverseitig pro Person (`connections.announced_a/b_at` via `acknowledge_circle()`).
+- **Chat:** `circle_messages` (RLS: nur die beiden Partner; BEFORE-Trigger `circle_messages_block_guard` gegen Blocks, pinnt `created_at`). UI: Overlay im Circle-Screen, Polling 4 s, kein Realtime, kein Edit/Delete.
+- **Alt-Daten:** Zähler startete bei 0 (Entscheidung Dominik) — bestehende Test-Follows zählen nicht rückwirkend.
+- **Dev-Werkzeuge** (Dev-Menü, admin-gated): `dev_menu_seed_circle_progress(handle, tage)` seedet rückwirkende Gegenseitigkeits-Tage (Circle entsteht dann über den ECHTEN Trigger-Pfad beim nächsten gegenseitigen Follow), `dev_menu_reset_circle(handle)` räumt Verbindung+Zähler+Chat des Paars für den nächsten Testlauf.
+- **Verifiziert (2. Sep, gegen die Live-DB):** Struktur/Grants (Zähler+Config für anon/authenticated unlesbar, Trigger vorhanden, Schwelle=5) und funktionaler End-to-End-Test (einseitig zählt nicht; 4 geseedete Tage + gegenseitiger Follow → Tag 5 → Circle + 2×`chat_reached`; nach Circle-Bildung zählt nichts weiter; Testdaten restlos entfernt). Security-Negativtest `scripts/security-test-circle.mjs` Layer 1 (anon) grün; **Layer 2 (zwei eingeloggte User) steht aus** — braucht zwei echte JWTs.
+- **Anstupsen geparkt:** UI entfernt (hatte nur auf den Leerkacheln von „Ich folge" einen Ort), `nudges` + Limits + Block-Guard bleiben im Backend; `nudge()` im follow-context ist derzeit ungenutzt.
+- ⚠️ **Nicht am Gerät geprüft:** Toggle-UX, Circle-Splash-Timing (Kollision mit Prompt-Splash um 21:00 per z-Index gelöst, ungetestet), Chat-Eingabe mit iOS-Tastatur in der PWA, Tippen/Halten-Auslöser auf iOS (Pointer-Events).
+
+---
+
 ## Architektur & Mechanik im Detail
 
 ### Ziehung für den Stadt Corso (live seit 15. Juli, `0005_city_story_draw.sql`)
@@ -250,6 +295,7 @@ Repository-Secrets gelten für alle Collaborators.
 - **Zeit:** pg_cron `city-story-draw-summer` (19:00 UTC) + `city-story-draw-winter` (20:00 UTC); `run_city_story_draw()` prüft selbst `= 21 Uhr Berlin` und no-opt sonst → DST-sicher exakt 21:00.
 - **Lesepfad:** über `city_story()` (SECURITY DEFINER), nicht direkt über die Tabelle — die eingefrorenen Stadt Corso überlebt den 24h-Verfall ihrer Clips. 🔒 Nur Anzeige-Daten, keine Zahlen.
 - **Dev-Werkzeuge (nur Test):** `select draw_city_story('Düsseldorf', true);`, Seed `select dev_seed_city_story('{0,0,1,3,8,20,60,150}');`, Aufräumen `select dev_clear_city_story_test();`.
+- **Dev-Seed mit echten Foto-Assets (2. Sep, `0025_dev_seed_photo_media.sql`, angewendet + im Ledger):** `dev_seed_city_story()` recycelt keine echten Momente mehr, sondern seedet FOTO-Momente aus 4 versionierten Portraits (`supabase/seed/dev-moments/dev-moment-1…4.jpg`, einmalig per `scripts/upload-dev-moments.mjs` nach `moments/dev-seed/` hochgeladen — bereits ausgeführt); jeder 3. Kandidat als Stapel aus 2–3 Bildern, freundlicher Abbruch falls die Dateien im Bucket fehlen. Signatur unverändert → der `dev_menu_seed_test_clips`-Wrapper läuft weiter. End-to-end gegen die Live-DB getestet (seed → korrekte `photo`/`media_paths`-Zeilen → clear entfernt alles). Reine DB-/Asset-Sache, kein Client-Deploy nötig. Nichts committet.
 - **In-App-Dev-Menü** (`0006` + `src/components/dev-menu.tsx`): Ribbon-Button **nur für `dominik@subworx.io`**, Drawer mit fünf Aktionen (Stadt Corso ziehen / zurücksetzen / Follows verfallen / Fake-Momente seeden / Fake-Daten löschen), jede mit Bestätigungs-Schritt. Läuft über Admin-gegatete `dev_menu_*`-Wrapper (`is_dev_admin()` prüft die E-Mail serverseitig).
 - **🔒 Security-Fix in `0006`:** Supabase-Default-Grants hatten die Roh-Funktionen aus `0005` faktisch für **jeden** `authenticated`/`anon` aufrufbar gemacht (ein `revoke from public` griff nicht gegen die expliziten Rollen-Grants). `0006` sperrt `execute` für anon/authenticated zu — nur postgres/service_role und die Admin-Wrapper rufen sie noch auf. Verifiziert via `has_function_privilege`.
 - **Zukunftssicher:** Ziehung läuft pro Stadt (`profiles.city`); weitere Städte brauchen keine Migration.
@@ -442,6 +488,24 @@ Zum gefahrlosen visuellen Iterieren gibt es eigenständige Vorschau-Routen mit M
 ---
 
 ## Chronik der gelösten Bugs
+
+<details>
+<summary><strong>2. September — Rücklauf ließ sich in der PWA oft nicht scrollen</strong></summary>
+
+**Symptom:** Der Rücklauf-Screen (und potenziell Einstellungen) reagierte intermittierend nicht auf Wischgesten — nur in der installierten Home-Screen-PWA, nie im Safari-Tab. Die Feed-Screens waren nie betroffen.
+
+**Warum nur der Rücklauf:** Rücklauf und Einstellungen sind die einzigen Screens mit nativem Browser-Scrollen (`overflow-y-auto`). Discovery/Stadt Corso/Ich-folge scrollen per JS-Transform (`use-snap-scroll.ts`) und sind gegen native Scroll-Blocker immun.
+
+**Ursache (Hauptverdacht, WebKit-Bug 222654):** In installierten Home-Screen-PWAs „latcht" die Wischgeste intermittierend auf das Dokument statt auf den inneren Scroller. Da das Dokument bei Corso nichts zu scrollen hat, passiert: nichts — die Latch-Zeit ist laut Bug-Thread „gerade lang genug, dass Nutzer denken, die Seite sei eingefroren". **Fix:** `html, body { height: 100%; overflow: hidden }` in `styles.css` — das Dokument ist damit kein Scroll-Kandidat mehr (der dokumentierte Workaround; die App scrollt das Dokument ohnehin nie, Root-Wrapper ist `h-dvh overflow-hidden`).
+
+**Zwei Härtungen gegen die zweite Verdachtsklasse (hängengebliebene Overlay-Locks):**
+- `moment-menu.tsx`: `setOpen(false)` vor `reloadFollows()` — vorher unmontierte das Radix-Sheet im offenen Zustand (Kachel fällt aus dem Feed), was `pointer-events: none` am `<body>` hinterlassen kann (gleiche Bug-Klasse wie der vaul-Drawer-Freeze).
+- `__root.tsx`: Sicherheitsnetz bei jedem Routenwechsel — `document.body.style.pointerEvents = ""` (das DevMenu-Muster, jetzt global).
+
+**Diagnose-Einzeiler** für den nächsten Hänger (Web-Inspector, auch für die PWA): `getComputedStyle(document.body).pointerEvents` → `"none"` = Overlay-Lock-Leck; sonst WebKit-Latch oder es gibt schlicht nichts zu scrollen (`scrollHeight === clientHeight`).
+
+**Deployed 2. September** (`bash scripts/deploy.sh`), am Gerät noch nicht verifiziert (siehe „Nicht abschließend bewiesen").
+</details>
 
 <details>
 <summary><strong>21. August — Discovery: Hänger nach Screen-Wechsel, zähes Laden</strong></summary>

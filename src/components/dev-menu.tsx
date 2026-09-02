@@ -93,6 +93,28 @@ const ACTIONS: DevAction[] = [
     desc: "Entfernt alle synthetischen Test-Konten samt ihrer Momente, Follows und Slots im Stadt Corso wieder.",
   },
   {
+    key: "circleseed",
+    rpc: "dev_menu_seed_circle_progress",
+    label: "Circle-Fortschritt seeden",
+    icon: "group_add",
+    desc: "Trägt für das Paar (du, Handle) rückwirkend Gegenseitigkeits-Tage ein — damit der Circle ohne tagelanges Warten testbar ist. Der Circle entsteht dann über den ECHTEN Pfad: beim nächsten gegenseitigen Follow. Mit 4 Tagen reicht also ein gegenseitiger Follow heute.",
+    inputs: [
+      { name: "p_other_handle", label: "Handle des Partners", placeholder: "@testuser", max: 40 },
+      { name: "p_days", label: "Rückwirkende Tage", placeholder: "4", max: 2 },
+    ],
+  },
+  {
+    key: "circlereset",
+    rpc: "dev_menu_reset_circle",
+    label: "Circle-Test zurücksetzen",
+    icon: "group_remove",
+    desc: "Entfernt für das Paar (du, Handle) die Circle-Verbindung samt Chat-Verlauf und leert den Gegenseitigkeits-Zähler — für den nächsten Testdurchlauf.",
+    danger: true,
+    inputs: [
+      { name: "p_other_handle", label: "Handle des Partners", placeholder: "@testuser", max: 40 },
+    ],
+  },
+  {
     key: "broadcast",
     rpc: "dev_menu_broadcast_push",
     label: "Nachricht an alle senden",

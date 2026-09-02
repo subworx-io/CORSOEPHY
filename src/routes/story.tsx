@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
-import { FollowButton } from "@/components/follow-button";
+import { useSwipeFollow } from "@/hooks/use-swipe-follow";
+import { useFollow } from "@/lib/follow-context";
+import { SwipeFollowOverlay, SwipeHintChip } from "@/components/swipe-follow-overlay";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { recordView } from "@/lib/record-view";
 import { logEvent } from "@/lib/events";
@@ -13,6 +15,7 @@ import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { MomentPrompt } from "@/components/moment-prompt";
 import { MomentMenu } from "@/components/moment-menu";
+import { PhotoStackTile } from "@/components/photo-stack";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
@@ -143,6 +146,10 @@ interface StoryRow {
   slot: number;
   handle: string;
   media_path: string;
+  // Seit 0023: Foto-Momente. Optional getypt, damit der Client auch gegen die
+  // alte Funktions-Version (ohne die Spalten) nicht bricht — dann gilt "video".
+  media_type?: string | null;
+  media_paths?: string[] | null;
   post_id: string;
   author_id: string;
   prompt_date: string | null;
@@ -151,7 +158,9 @@ interface StoryRow {
 interface StoryClip {
   slot: number;
   handle: string;
-  videoUrl: string;
+  // Genau eines von beiden: Video-URL oder geordneter Foto-Stapel.
+  videoUrl: string | null;
+  photoUrls: string[] | null;
   postId: string;
   authorId: string;
   // Der Prompt, zu dem dieser Moment entstand. In der Story ist das für alle
@@ -237,22 +246,30 @@ function StoryPage() {
       const rows = (data ?? []) as StoryRow[];
       if (error || !rows.length) return [];
 
+      // Alle Medienpfade eines Slots (Video: einer, Foto-Moment: bis zu 5).
+      const pathsOf = (row: StoryRow) =>
+        row.media_type === "photo" && row.media_paths?.length ? row.media_paths : [row.media_path];
+
       // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
       // Prompt-Texte und signierte URLs je in EINER Abfrage, parallel. Die URLs sind
       // gecacht (signed-urls.ts) — der Fokus-Refetch tauscht das <video src> nicht aus.
       const [promptsByDate, urlsByPath] = await Promise.all([
         fetchPromptsByDate(rows.map((row) => row.prompt_date)),
-        getSignedMomentUrls(rows.map((row) => row.media_path)),
+        getSignedMomentUrls(rows.flatMap((row) => pathsOf(row))),
       ]);
 
       return rows.flatMap((row): StoryClip[] => {
-        const videoUrl = urlsByPath[row.media_path];
-        if (!videoUrl) return [];
+        const urls = pathsOf(row)
+          .map((path) => urlsByPath[path])
+          .filter((u): u is string => !!u);
+        if (!urls.length) return [];
+        const isPhoto = row.media_type === "photo";
         return [
           {
             slot: row.slot,
             handle: row.handle,
-            videoUrl,
+            videoUrl: isPhoto ? null : urls[0],
+            photoUrls: isPhoto ? urls : null,
             postId: row.post_id,
             authorId: row.author_id,
             promptDate: row.prompt_date ?? null,
@@ -264,19 +281,52 @@ function StoryPage() {
     enabled: !!user,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
-    // Kurz nach 21:00 und noch leer → alle paar Sekunden nachfragen, bis die
-    // Ziehung da ist. Mit Clips oder außerhalb des Fensters: kein Polling.
-    refetchInterval: (query) => {
-      if ((query.state.data?.length ?? 0) > 0) return false;
-      return Date.now() - cycleStart() < DRAW_GRACE_MS ? DRAW_POLL_MS : false;
+    // Im Fenster kurz nach 21:00 IMMER pollen — auch wenn schon Daten da sind.
+    // Grund: geht die Client-Uhr etwas vor, liefert der Fetch direkt nach dem
+    // Key-Wechsel noch die ALTE Ziehung (der Server ist noch im alten Corso-Tag).
+    // Ein „Daten da → Polling aus" ließe dann die frische Ziehung erst nach
+    // einem Tab-Wechsel erscheinen — genau der gemeldete Hänger. Außerhalb des
+    // Fensters: kein Polling (die Story steht ohnehin bis zur nächsten Ziehung).
+    refetchInterval: () => (Date.now() - cycleStart() < DRAW_GRACE_MS ? DRAW_POLL_MS : false),
+  });
+
+  const { burstHandle, triggerBurst } = useHeartBurst();
+  const { isFollowing, follow, unfollow } = useFollow();
+
+  // Swipe-Follow: Rechts-Wisch auf dem Clip = Folgen, Links-Wisch = Entfolgen
+  // (kein Button mehr). Der Clip bleibt in der Story stehen (die Ziehung ist
+  // eingefroren), die Karte federt nach dem Commit zurück — den Zustand zeigt
+  // die Status-Pille unten rechts.
+  const { cardRef, swipeHandlers } = useSwipeFollow({
+    right: {
+      canCommit: (i) => {
+        const c = clips[i];
+        return !!c && !isFollowing(c.handle);
+      },
+      onCommit: (i) => {
+        const c = clips[i];
+        if (!c) return;
+        follow({ handle: c.handle, src: null });
+        triggerBurst(c.handle);
+      },
+    },
+    left: {
+      canCommit: (i) => {
+        const c = clips[i];
+        return !!c && isFollowing(c.handle);
+      },
+      onCommit: (i) => {
+        const c = clips[i];
+        if (c) unfollow(c.handle);
+      },
     },
   });
 
   const { currentIndex, slideRef, containerRef } = useSnapScroll({
     count: clips.length,
     axis: "y",
+    onSwipeX: swipeHandlers,
   });
-  const { burstHandle, triggerBurst } = useHeartBurst();
 
   // Ansicht verbuchen, sobald ein Story-Clip aktiv wird (Datenquelle „Zuschauer").
   // Kurze Verweil-Schwelle — siehe Begründung in index.tsx (Zuschauer = Kill-Metrik).
@@ -290,7 +340,25 @@ function StoryPage() {
   // Noch keine Story (kein einwilligender Clip) oder Vorhang-Fenster vor der
   // Ziehung: ehrlicher Leerzustand mit Countdown statt Mock. Kein "peinlich
   // leer" durch Fake-Auffüllen (PRD).
-  if (curtain || (!isLoading && clips.length === 0)) {
+  const showEmpty = curtain || (!isLoading && clips.length === 0);
+
+  // Enthüllungs-Animation: Wer den Countdown live verfolgt, sieht die Ziehung
+  // hier ERSCHEINEN (Leerzustand/Vorhang → Clips), nicht nur „plötzlich da".
+  // Der Übergang wird erkannt, indem wir uns merken, ob zuletzt der Leerzustand
+  // stand — nur dann animiert der erste Moment herein.
+  const wasEmptyRef = useRef(showEmpty);
+  const [reveal, setReveal] = useState(false);
+  useEffect(() => {
+    if (wasEmptyRef.current && !showEmpty && clips.length > 0) {
+      setReveal(true);
+      const t = setTimeout(() => setReveal(false), 1200);
+      wasEmptyRef.current = false;
+      return () => clearTimeout(t);
+    }
+    wasEmptyRef.current = showEmpty;
+  }, [showEmpty, clips.length]);
+
+  if (showEmpty) {
     return <StoryEmpty />;
   }
 
@@ -321,13 +389,23 @@ function StoryPage() {
               }}
             >
               <div
+                ref={cardRef(i)}
                 className="relative w-full h-full rounded-[2rem] overflow-hidden"
                 style={{
                   boxShadow:
                     "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                  // Die Ziehung tritt auf, statt nur da zu sein (nur der Moment im Blick).
+                  animation:
+                    reveal && isActive
+                      ? "storyReveal 900ms cubic-bezier(0.22, 1, 0.36, 1) both"
+                      : undefined,
                 }}
               >
-                <VideoTile src={c.videoUrl} isActive={isActive} />
+                {c.photoUrls ? (
+                  <PhotoStackTile urls={c.photoUrls} isActive={isActive} />
+                ) : c.videoUrl ? (
+                  <VideoTile src={c.videoUrl} isActive={isActive} />
+                ) : null}
 
                 {/* Gradient-Ring-Overlay (identisch zur Discovery) */}
                 <div
@@ -353,11 +431,17 @@ function StoryPage() {
                 {/* Herz-Burst beim Folgen — geteilt mit Discovery */}
                 <HeartBurst active={burstHandle === c.handle} />
 
-                {/* Bottom overlay — Ort/Zeit + Handle + Folgen.
+                {/* Herz/gebrochenes Herz blenden mit dem Wisch-Fortschritt ein */}
+                <SwipeFollowOverlay label="folgen" />
+                <SwipeFollowOverlay label="entfolgen" direction="left" />
+
+                {/* Bottom overlay — Ort/Zeit + Handle; Folgen per Rechts-Wisch.
                     🔒 KEINE Reaktions- oder Follower-Zahlen sichtbar (PRD §4.6). */}
                 <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
                   <div className="flex items-center gap-1.5 text-white/70 mb-2.5">
-                    <span className="material-symbols-outlined text-[16px] leading-none">location_on</span>
+                    <span className="material-symbols-outlined text-[16px] leading-none">
+                      location_on
+                    </span>
                     <span className="text-xs font-medium tracking-tight">{CITY}</span>
                     <span className="text-white/40 text-xs">· Stadt Corso</span>
                   </div>
@@ -365,7 +449,20 @@ function StoryPage() {
                     <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                       {c.handle}
                     </span>
-                    <FollowButton handle={c.handle} src={null} onBurst={() => triggerBurst(c.handle)} />
+                    {isFollowing(c.handle) ? (
+                      // Reiner Status, kein Button — der Clip bleibt in der Story.
+                      <div className="pointer-events-none flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5">
+                        <span className="text-xs font-semibold text-black">folgst du</span>
+                        <span
+                          className="material-symbols-outlined text-[16px] leading-none text-black"
+                          style={{ fontVariationSettings: "'FILL' 1" }}
+                        >
+                          favorite
+                        </span>
+                      </div>
+                    ) : (
+                      <SwipeHintChip label="wischen zum Folgen" />
+                    )}
                   </div>
                 </div>
               </div>
@@ -462,8 +559,7 @@ function StoryEmpty() {
         <div
           className="pointer-events-none absolute inset-0 mix-blend-overlay opacity-60"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(20,30,60,0.35) 0%, rgba(0,0,0,0) 60%)",
+            background: "linear-gradient(180deg, rgba(20,30,60,0.35) 0%, rgba(0,0,0,0) 60%)",
           }}
         />
         {/* Grain — feines animiertes Rauschen via SVG. Div über den Rand hinaus

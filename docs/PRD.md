@@ -1,6 +1,6 @@
 # Corso — Product Requirements Document
 
-**Version:** 0.4 (Stand 19. August 2026)
+**Version:** 0.5 (Stand 2. September 2026)
 **Status:** Pre-Pilot. Konzept final, Pilot als gratis Freundes-Pilot auf PWA spezifiziert. Der Freundes-Pilot ist **noch nicht gestartet** — es gibt bislang keine Signale zu den Kill-Metriken (§9).
 **Eigner:** Maxim
 
@@ -9,6 +9,14 @@
 > Kritische Leitplanken sind mit 🔒 LEITPLANKE markiert — nicht verhandelbar ohne Freigabe des Eigners.
 > Die priorisierte Bau-Reihenfolge steht in `docs/ROADMAP.md`, der tagesaktuelle Stand in `docs/STATUS.md`. Bei Konflikt gewinnt dieses PRD.
 
+> **Changelog v0.4 → v0.5** (Zwei-Achsen-Umbau, Entscheidung Dominik 2. Sep 2026, als Eigner-Freigabe bestätigt):
+> - **Zwei-Achsen-Modell:** Achse 1 „Die Stadt" (Broadcast, Fremde: Discovery + „Ich folge" unter EINEM Menüpunkt mit Toggle) und Achse 2 **„Circle"** (beständig, gegenseitig, eigener Menüpunkt). §4.4 und §4.8 entsprechend neu.
+> - **„Ich folge" zeigt nur noch Menschen mit lebendem Moment** — die Verbindung bleibt, die Sichtbarkeit hängt am Moment (kein Karteileichen-Feed). Ersetzt die frühere Regel „zeigt auch Leute ohne Moment".
+> - **Anstupsen (§4.5) GEPARKT:** mit der neuen Sichtbarkeitsregel hat es keinen Ort mehr; UI entfernt, Backend bleibt.
+> - **Verdienter Chat entschieden:** Chat lebt ausschließlich im Circle und wird mit dem Circle-Eintritt frei (löst die offenen Entscheidungen #2/#8 ab — die 3–4-Austausch-Regel ist damit ersetzt).
+> - **Fotos gebaut:** Foto-Momente (bis 5 Fotos als Stapel = EIN Moment), weiterhin 🔒 nur Live-Kamera. Aufnahme: Tippen = Foto, Halten = Video.
+> - **Bottom-Nav:** Stadt · Corso · Kamera · Circle · Du (5 Items; das Ritual-Tab hieß kurz „Story", seit dem Abend-Feinschliff „Corso"). „Du" = bisheriger Rücklauf/Self-Screen.
+>
 > **Changelog v0.3 → v0.4** (nur Status-Korrekturen, keine Konzept-Änderung):
 > - Offene Entscheidung **#6 (Größe des Stadt Corso) auf ENTSCHIEDEN gesetzt** — die Entscheidung fiel am 15. Juli, das PRD hing hinterher. §4.6 entsprechend präzisiert: max. 8 Momente, kein Mindest-Schwellwert, kein Fake-Auffüllen.
 > - Offene Entscheidung **#7 (Privater Corso)** mit dem Hinweis versehen, dass sie mit dem Push-Feature in Roadmap-Phase 1 fällig wird.
@@ -57,8 +65,8 @@ Dating ist der **Ausgang**, nicht der Eingang. Diese Reihenfolge prägt jede Ent
 ## 4. Kern-Mechaniken
 
 ### 4.1 Der "Moment"
-- Foto oder vertikales Video.
-- 🔒 **LEITPLANKE: Live-Kamera-Pflicht, kein Galerie-Upload.**
+- Foto oder vertikales Video. Ein Foto-Moment kann aus **bis zu 5 live aufgenommenen Fotos** bestehen (im Feed als Stapel gezeigt). Aufnahme: **Tippen = Foto, Halten = Video** (ein Auslöser, kein Modus-Umschalter).
+- 🔒 **LEITPLANKE: Live-Kamera-Pflicht, kein Galerie-Upload.** Gilt für Foto wie Video (Fotos entstehen ausschließlich als Frame aus dem Live-Stream).
 - Mehrere Takes, **kein Schnitt, keine Filter, keine Beauty.**
 - Täglicher Prompt ist leicht, konkret und filmbar — LeiCharakter statt Tiefe, nie Hausaufgabe/Therapie. ≥50 % gesichts-optional.
 - **Lebensdauer eines Moments: genau 24 h ab dem Upload.** Jeder Moment trägt seine eigene Uhr (`posts.expires_at = created_at + 24 h`), es gibt keinen stadtweiten Reset mehr. Danach ist er überall weg — auch für den Autor.
@@ -94,32 +102,36 @@ Konkretes Beispiel:
 
 🔒 **LEITPLANKE: Follower-Zahlen sind für andere unsichtbar.** Nur private Zahl für dich selbst.
 
-### 4.4 Die zwei Feeds
+### 4.4 Die Stadt: zwei Feeds unter einem Menüpunkt *(neu geschnitten 2. Sep 2026)*
+
+Der Menüpunkt **„Stadt"** (Achse 1, Broadcast) enthält zwei Feeds, umschaltbar über
+einen halbdurchsichtigen Toggle oben im Screen:
 
 | Feed | Inhalt | Logik |
 |---|---|---|
 | **Discovery** | Fremde, randomized | Entdeckung neuer Menschen |
-| **Ich folge** | Leute denen du aktiv folgst | Verfolgung bekannter Gesichter |
+| **Ich folge** | Leute denen du aktiv folgst (und die nicht im Circle sind) | Verfolgung bekannter Gesichter |
 
 **Discovery-Verhalten:**
 - Zeigt alle **lebenden** Momente der Stadt (jünger als 24 h), neueste zuerst, als endloser Scroll-Feed.
 - Kein gemeinsamer Leerzustand mehr: der Feed atmet asynchron — laufend fällt unten etwas raus, während oben Neues dazukommt.
 - Momente erscheinen unmittelbar nach dem Upload in der Discovery.
-- Zeigt nur Leute, denen du noch nicht folgst.
+- Zeigt nur Leute, denen du noch nicht folgst — Circle-Partner erscheinen hier ebenfalls nie.
 - ⚠️ Bei dünner Nutzerbasis kann der Feed sehr kurz oder leer sein — das ist die Regel, kein Fehler. Kein Auffüllen mit alten Momenten.
+- Wem du hier folgst, wandert in den „Ich folge"-Feed.
 
 **"Ich folge"-Verhalten:**
-- Zeigt den lebenden Moment jeder Person, der du folgst.
-- Zeigt auch Leute, denen du folgst, die gerade keinen lebenden Moment haben (mit Anstupsen-Option).
+- **Verbindung beständig, Moment flüchtig:** dein Follow (24 h ab dem letzten (Re-)Follow, §4.3 unverändert) bleibt bestehen — **sichtbar im Feed ist aber nur, wer aktuell einen lebenden Moment hat.** Wer gerade nichts zeigt, ist vorübergehend unsichtbar und taucht mit dem nächsten Post wieder auf. Kein Karteileichen-Feed.
+- Bewusste Konsequenz: Erneuern geht nur an sichtbaren Kacheln — wer nicht nachliefert, dessen Publikum läuft still aus (das IST die Schwerkraft aus §1).
+- Circle-Partner erscheinen hier nicht — ihre Momente leben im Circle (§4.8).
 
-### 4.5 Anstupsen
+### 4.5 Anstupsen — GEPARKT *(2. Sep 2026)*
 
-Wenn jemand in deinem "Ich folge"-Feed heute noch nichts gepostet hat, kannst du ihn anstupsen.
-
-- **Limit:** 1 Anstupser pro Person pro Tag.
-- **Sichtbarkeit:** Person A sieht, wer sie angestupst hat.
-- **Feedback-Loop:** Postet Person A nach dem Anstupsen, bekommt der Anstupsende eine Benachrichtigung.
-- **Verfügbar:** Nur unter "Ich folge", nicht in der Discovery.
+Mit der neuen „Ich folge"-Regel (nur Menschen mit lebendem Moment sichtbar) hat das
+Anstupsen keinen Ort mehr — es lebte auf den Leerkacheln der Personen ohne Moment.
+**Entscheidung: erstmal parken.** UI entfernt; Tabelle `nudges`, Limit-Logik und
+Block-Guard bleiben im Backend bestehen, damit eine spätere Wiederbelebung (z. B. im
+Circle) keine Migration braucht.
 
 ### 4.6 Stadt Corso (Herzstück, Aufstieg)
 
@@ -137,12 +149,39 @@ Wenn jemand in deinem "Ich folge"-Feed heute noch nichts gepostet hat, kannst du
 - Früh: Entdeckungs-Pool dominiert.
 - Später: Verfolgungs-Feed übernimmt automatisch.
 
-### 4.8 Verbindungs-Mechanik (verdienter Chat)
-`[ENTSCHEIDUNG OFFEN]` — Genaue Trigger-Logik noch nicht definiert. Grundprinzip:
-1. Gegenseitiges Folgen → stiller Hinweis.
-2. Privater Moment-Austausch.
-3. Nach mehreren Runden gegenseitigem Austausch → Text-Chat frei.
-- Ziel: reales Treffen (App verlassen = Erfolg).
+### 4.8 Der Circle (Achse 2: beständig, gegenseitig) — ENTSCHIEDEN *(2. Sep 2026)*
+
+Ersetzt die frühere offene Verbindungs-Mechanik (Entscheidungen #2/#8).
+
+- **Eintritt:** Zwei Menschen kommen in den Circle, wenn sie sich **wiederholt
+  gegenseitig gefolgt** sind. Gezählt wird **+1 pro Corso-Tag mit gegenseitig
+  aktivem Follow** (max. 1× pro Tag, nicht ertricksbar durch Entfolgen/Neu-Folgen
+  am selben Tag). Schwelle: **konfigurierbar, Default 5 Tage insgesamt** — Lücken
+  pausieren die Zählung, nichts wird zurückgesetzt.
+- 🔒 **Die Schwelle und der Zählerstand sind für Nutzer unsichtbar** (serverseitig
+  erzwungen: kein Lesepfad). Der Circle-Eintritt ist eine Überraschung und wird
+  beim nächsten App-Öffnen **gefeiert angekündigt** („Jemand Neues in deinem Inner
+  Circle — schreib ihm"), einmal pro Person (serverseitiger Gesehen-Stand).
+- **Beständig:** Die Circle-Verbindung **verfällt nie** (kein Erneuern). Die
+  **Momente** der Circle-Partner folgen weiter der 24h-Regel — im Circle-Feed
+  steht nur, wer gerade einen lebenden Moment hat; die Partner-Leiste (Chat-
+  Einstieg) ist dagegen beständig.
+- **Unbegrenzt:** kein Limit auf die Circle-Größe.
+- **Chat:** lebt **ausschließlich im Circle** und ist erst nach Circle-Eintritt
+  möglich. Kein eigenes Chat-Menü. Block sperrt Chat und Sichtbarkeit serverseitig
+  in beide Richtungen.
+- **Zweiter Eintrittsweg: persönliche Circle-Einladung** *(ergänzt 2. Sep 2026,
+  spät — Entscheidung Dominik)*: Ein Nutzer kann einen persönlichen Link teilen
+  (`/c/<token>`), der den Empfänger direkt in den gemeinsamen Circle bringt — am
+  5-Tage-Ritual vorbei, gedacht für Menschen, die sich ohnehin kennen. Gleiche
+  Mechanik-Garantien wie beim verdienten Eintritt (Block-Check beidseitig,
+  Ankündigung, `chat_reached` — in der Auswertung über `metadata.via =
+  'circle_invite'` vom verdienten Weg trennbar). Migrationen `0026`/`0027`.
+- Ziel unverändert: reales Treffen (App verlassen = Erfolg).
+- Technik: `follow_mutual_days` (verdeckter Zähler) + Trigger auf `follows`,
+  `connections` (Bestand seit 0003) + `circle_messages`; Migration `0024_circle.sql`.
+  Kill-Metrik „verdiente Chats" = `chat_reached`-Events (eines pro Person bei
+  Circle-Bildung).
 
 ### 4.9 Tagesablauf
 
@@ -164,23 +203,21 @@ Der Corso-Zyklus läuft **21:00 → 21:00** (Europe/Berlin). Wichtig: der Zyklus
 
 ## 5. Screens & Flows
 
-### Screen-Inventar
+### Screen-Inventar *(Nav seit 2. Sep 2026: Stadt · Corso · Kamera · Circle · Du)*
 1. Onboarding / ID-Verifizierung
 2. Heute-Screen (Prompt + Countdown bis 21:00)
-3. Discovery-Screen (randomized Feed, nur Fremde)
-4. Ich-folge-Screen (gefolgte Leute + Anstupsen)
-5. Screen für den Stadt Corso (21:00, vertikaler Karten-Feed wie Discovery, 8 Momente)
-6. Aufnahme-Screen (Live-Kamera + Einwilligungs-Toggle für Stadt Corso)
-7. Rücklauf-Screen (morgens, private Follower-Zahl)
-8. Verbindungs-Screen (Gegenseitigkeiten, verdienter Chat)
-9. Profil/Self (minimal, eigene Zahl, eigene Momente)
-10. Settings / Safety
+3. **Stadt** (ein Menüpunkt, zwei Feeds per Toggle: Discovery = nur Fremde, „Ich folge" = Gefolgte mit lebendem Moment)
+4. **Corso** = Stadt Corso (21:00, vertikaler Karten-Feed wie Discovery, max. 8 Momente; Screen-Titel bleibt „Stadt Corso")
+5. **Kamera** (Live-Kamera, Tippen=Foto/Halten=Video, Einwilligungs-Toggle für Stadt Corso)
+6. **Circle** (beständige Partner-Leiste + moment-gated Feed + Chat; Ankündigungs-Splash bei neuem Circle)
+7. **Du** (bisheriger Rücklauf: private Bilanz + Self-Screen + Weg zu den Einstellungen)
+8. Settings / Safety
 
 ### Kern-Flows
 - **A — Erster Abend:** Onboarding → ID → Heute → Push 21:00 → Stadt Corso → Discovery → folgen → optional ein eigener Moment.
 - **B — Stammnutzer:** Prompt → Posten → "Ich folge" checken → Anstupsen → Stadt Corso → Rücklauf.
 - **C — Aufstieg:** Moment mit Einwilligung → Stadt Corso → Publikum wächst → Rücklauf zeigt Sprung.
-- **D — Dating-Ausgang:** Gegenseitig folgen → Moment-Austausch → Chat → reales Treffen.
+- **D — Dating-Ausgang:** Über Tage wiederholt gegenseitig folgen → Circle (Überraschung, gefeiert) → Chat → reales Treffen.
 
 Prinzip: **Promenade zuerst, Kabine danach.**
 
@@ -246,16 +283,16 @@ Der Pilot läuft in zwei Schritten (siehe `docs/ROADMAP.md`):
 | # | Entscheidung | Status |
 |---|---|---|
 | 1 | Rampenlicht-Auswahl | **GEDÄMPFT** ✓ |
-| 2 | Austausch-Runden bis Chat | **3–4** ✓ (Trigger-Logik offen) |
+| 2 | Austausch-Runden bis Chat | **ERSETZT (2. Sep)** — Chat wird mit dem Circle-Eintritt frei (§4.8), keine Austausch-Runden mehr |
 | 3 | Rücklauf zählt Pool-Zuschauer | **JA** ✓ |
 | 4 | Strukturierter Treffen-Vorschlag UI | **NEIN** ✓ |
 | 5 | Tech-Stack Pilot | **PWA** ✓ (native App nicht für Pilot) |
 | 6 | Frequenz/Größe des Stadt Corso | **ENTSCHIEDEN (15. Juli)** ✓ — so viele einwilligende Momente wie da sind, max. 8, kein Minimum, kein Fake-Auffüllen (§4.6) |
 | 7 | Privater Corso (Push 19–22 Uhr) — genaue Mechanik | offen — **wird mit dem Push-Feature in Roadmap-Phase 1 fällig** |
-| 8 | Verbindungs-Trigger bei täglich-verfallenden Follows | offen (blockt Roadmap Phase 3) |
+| 8 | Verbindungs-Trigger bei täglich-verfallenden Follows | **ENTSCHIEDEN (2. Sep)** ✓ — Circle-Schwelle: 5 Corso-Tage gegenseitig (konfigurierbar, versteckt), §4.8 |
 | 9 | Live-Kamera-Lösung für Telegram-Pilot | **HINFÄLLIG** ✓ (PWA + `getUserMedia`, kein Telegram) |
 | 10 | Mitigation Geschlechter-Asymmetrie | offen |
 
 ---
 
-*Ende PRD v0.4 — Stand 19. August 2026.*
+*Ende PRD v0.5 — Stand 2. September 2026.*

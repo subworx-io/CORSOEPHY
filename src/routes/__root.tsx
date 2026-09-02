@@ -13,12 +13,17 @@ import { DevMenu } from "../components/dev-menu";
 import { Toaster } from "../components/ui/sonner";
 import { useUnseenBadges } from "../hooks/use-unseen-badges";
 
+// Zwei-Achsen-Nav (Umbau 2. Sep 2026): genau 5 Items.
+// „Stadt" bündelt Discovery + „Ich folge" (Toggle im Screen), „Corso" ist der
+// Stadt Corso (Nav-Label „Corso" — Entscheidung Dominik, 2. Sep; Screen-Titel
+// bleibt „Stadt Corso", PRD-Begriffspaar), „Circle" ist die beständige Achse 2,
+// „Du" der bisherige Rücklauf/Self-Screen.
 const TABS = [
-  { to: "/" as const, label: "Discovery", icon: "explore", badge: "discovery" as const },
-  { to: "/connections" as const, label: "Ich folge", icon: "favorite" },
-  { to: "/story" as const, label: "Stadt Corso", icon: "movie", badge: "story" as const },
-  { to: "/record" as const, label: "Aufnahme", icon: "videocam" },
-  { to: "/feedback" as const, label: "Rücklauf", icon: "trending_up" },
+  { to: "/" as const, label: "Stadt", icon: "explore", badge: "discovery" as const },
+  { to: "/story" as const, label: "Corso", icon: "movie", badge: "story" as const },
+  { to: "/record" as const, label: "Kamera", icon: "photo_camera" },
+  { to: "/circle" as const, label: "Circle", icon: "group" },
+  { to: "/feedback" as const, label: "Du", icon: "person" },
 ];
 
 // Kleiner weißer Punkt oben rechts am Tab: „hier gibt es etwas, das du noch nicht
@@ -37,8 +42,20 @@ function BottomNav() {
   const pathname = location.pathname;
   const unseen = useUnseenBadges(pathname);
 
+  // Sicherheitsnetz gegen hängengebliebene Overlay-Locks: Radix-Sheets und der
+  // vaul-Drawer setzen `pointer-events: none` am <body> und räumen es bei
+  // Unmount-Races nicht immer weg (bekannte Bug-Klasse, siehe dev-menu.tsx).
+  // Ein Routenwechsel ist der sichere Moment zum Aufräumen — dort ist nie
+  // legitim ein Overlay-Lock aktiv.
+  useEffect(() => {
+    document.body.style.pointerEvents = "";
+  }, [pathname]);
+
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none px-4" style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}>
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none px-4"
+      style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}
+    >
       <div className="pointer-events-auto inline-flex items-center gap-1 p-1.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl">
         {TABS.map((item) => {
           const isActive = pathname === item.to;
@@ -47,6 +64,10 @@ function BottomNav() {
             <Link
               key={item.to}
               to={item.to}
+              // Route-Chunk laden, sobald die Nav steht (nicht erst beim Tipp):
+              // besonders der Kamera-Screen fühlte sich sonst beim ersten Öffnen
+              // eine halbe Sekunde „gebuffert" an (Chunk-Fetch vor dem Mount).
+              preload="render"
               aria-label={showDot ? `${item.label} – Neues` : item.label}
               className={`relative flex items-center justify-center h-10 rounded-full transition-all ${
                 isActive
@@ -79,6 +100,7 @@ import { AuthProvider } from "../lib/auth-context";
 import { AuthGate } from "../components/auth-gate";
 import { DailyPromptSplash } from "../components/daily-prompt-splash";
 import { PushOptinSplash } from "../components/push-optin-splash";
+import { CircleSplash } from "../components/circle-splash";
 
 function NotFoundComponent() {
   return (
@@ -145,7 +167,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       // Mobile-first viewport: kein Zoom, skaliert wie eine native App
-      { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" },
+      {
+        name: "viewport",
+        content:
+          "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover",
+      },
       { title: "Corso" },
       { name: "description", content: "Deine Stadt. Jeden Abend." },
       // PWA: Als App installierbar (iOS + Android)
@@ -222,6 +248,9 @@ function RootComponent() {
             </div>
             <DailyPromptSplash />
             <PushOptinSplash />
+            {/* Circle-Eintritt: gefeierte Ankündigung beim nächsten App-Öffnen
+                (liegt per z-Index über dem Prompt-Splash, falls beide fällig sind). */}
+            <CircleSplash />
           </FollowProvider>
         </AuthGate>
       </AuthProvider>
