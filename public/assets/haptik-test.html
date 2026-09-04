@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Corso — Haptik-Test</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: #0a0a0a; color: #fff;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    padding: max(env(safe-area-inset-top), 16px) 16px calc(env(safe-area-inset-bottom) + 48px);
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: #888; font-size: 13px; margin: 0 0 20px; }
+  .card { border: 1px solid #262626; background: #131313; border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 15px; margin: 0 0 2px; }
+  .card p { color: #8a8a8a; font-size: 13px; margin: 0 0 12px; }
+  button {
+    width: 100%; padding: 15px; font-size: 16px; font-weight: 600;
+    border: 0; border-radius: 11px; background: #fff; color: #000;
+    font-family: inherit; cursor: pointer;
+  }
+  button:active { transform: scale(0.98); }
+  button.ghost { background: #262626; color: #fff; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 13px; }
+  dt { color: #7a7a7a; }
+  dd { margin: 0; font-weight: 600; word-break: break-word; }
+  .yes { color: #4ade80; } .no { color: #f87171; }
+  .ref { border-color: #3b82f6; }
+  .ref h2::after { content: " ← zuerst"; color: #3b82f6; font-weight: 400; font-size: 13px; }
+  input[switch] { width: 62px; height: 34px; }
+  .row { display: flex; align-items: center; gap: 14px; }
+  .hint { font-size: 12px; color: #666; margin-top: 20px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<h1>Haptik-Test</h1>
+<p class="sub">Tipp jeden Knopf 2–3× an und merk dir, bei welchen du etwas spürst.</p>
+
+<div class="card">
+  <h2>Dein Gerät</h2>
+  <dl id="info"></dl>
+</div>
+
+<div class="card ref">
+  <h2>1. Echter Schalter — mit dem Finger umlegen</h2>
+  <p>Der Referenztest. Spürst du hier nichts, kann dein Gerät es grundsätzlich nicht (oder die Systemhaptik ist aus) — dann liegt es nicht an der App.</p>
+  <div class="row">
+    <input type="checkbox" switch id="realSwitch" />
+    <span style="color:#8a8a8a;font-size:13px">hin und her schalten</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>2. navigator.vibrate</h2>
+  <p>Der Android-Weg. Auf dem iPhone gibt es diese Funktion nicht.</p>
+  <button class="ghost" onclick="tryVibrate()">Vibrieren (200 ms)</button>
+</div>
+
+<div class="card">
+  <h2>3. Versteckter Schalter, opacity:0</h2>
+  <p>Genau die Variante, die aktuell in der App steckt.</p>
+  <button class="ghost" onclick="fire('opacity')">Auslösen</button>
+</div>
+
+<div class="card">
+  <h2>4. Versteckter Schalter, display:none</h2>
+  <p>Andere verbreitete Variante.</p>
+  <button class="ghost" onclick="fire('none')">Auslösen</button>
+</div>
+
+<div class="card">
+  <h2>5. Versteckter Schalter, ganz ohne Styles</h2>
+  <p>Nur weit außerhalb des Bildschirms geparkt.</p>
+  <button class="ghost" onclick="fire('offscreen')">Auslösen</button>
+</div>
+
+<div class="card">
+  <h2>6. Sichtbarer Schalter, per Skript geklickt</h2>
+  <p>Derselbe Schalter wie in Test 1 — aber vom Code umgelegt statt vom Finger.</p>
+  <button class="ghost" onclick="clickReal()">Auslösen</button>
+</div>
+
+<p class="hint">
+  Falls gar nichts wirkt: iPhone-Einstellungen → Töne &amp; Haptik → <b>Systemhaptik</b> muss an sein.
+  Der Stromsparmodus kann Haptik ebenfalls dämpfen.
+</p>
+
+<script>
+// ---- Geräte-Fakten, ungeschönt ----
+var input = document.createElement("input");
+var hasSwitch = "switch" in input;
+var hasVibrate = "vibrate" in navigator;
+var ua = navigator.userAgent;
+var m = ua.match(/OS (\d+)[_.](\d+)/);
+var iosVersion = m ? m[1] + "." + m[2] : "—";
+var standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+function yn(v) { return v ? '<span class="yes">ja</span>' : '<span class="no">nein</span>'; }
+document.getElementById("info").innerHTML =
+  "<dt>navigator.vibrate</dt><dd>" + yn(hasVibrate) + "</dd>" +
+  "<dt>switch-Attribut</dt><dd>" + yn(hasSwitch) + "</dd>" +
+  "<dt>iOS-Version</dt><dd>" + iosVersion + "</dd>" +
+  "<dt>Als App gestartet</dt><dd>" + yn(standalone) + "</dd>" +
+  "<dt>Browser</dt><dd style='font-weight:400;font-size:11px;color:#666'>" + ua + "</dd>";
+
+function tryVibrate() {
+  if (!hasVibrate) { alert("Dieses Gerät kennt navigator.vibrate nicht — erwartet auf dem iPhone."); return; }
+  navigator.vibrate(200);
+}
+
+// ---- Drei versteckte Schalter, je eine Versteck-Variante ----
+var made = {};
+function make(kind) {
+  if (made[kind]) return made[kind];
+  var label = document.createElement("label");
+  label.setAttribute("aria-hidden", "true");
+  if (kind === "opacity") {
+    label.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1;";
+  } else if (kind === "none") {
+    label.style.display = "none";
+  } else {
+    label.style.cssText = "position:absolute;left:-9999px;";
+  }
+  var inp = document.createElement("input");
+  inp.type = "checkbox";
+  inp.setAttribute("switch", "");
+  inp.tabIndex = -1;
+  label.appendChild(inp);
+  document.body.appendChild(label);
+  made[kind] = label;
+  return label;
+}
+function fire(kind) {
+  if (!hasSwitch) { alert("Dieses Gerät kennt das switch-Attribut nicht (iOS älter als 17.4 oder kein Safari)."); return; }
+  make(kind).click();
+}
+function clickReal() {
+  if (!hasSwitch) { alert("Dieses Gerät kennt das switch-Attribut nicht."); return; }
+  document.getElementById("realSwitch").click();
+}
+</script>
+</body>
+</html>

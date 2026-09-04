@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { SwipeXHandlers } from "@/hooks/use-snap-scroll";
+import { haptic } from "@/lib/haptics";
 
 // Swipe-Follow (Entscheidung Dominik, 2. Sep 2026): JEDES Folgen — auch das
 // Erneuern — passiert per Rechts-Wisch auf der Kachel, Entfolgen per
@@ -35,6 +36,10 @@ export interface SwipeAction {
 
 export function useSwipeFollow({ right, left }: { right?: SwipeAction; left?: SwipeAction }) {
   const cardsRef = useRef(new Map<number, HTMLElement | null>());
+  // Merkt pro Kachel, ob der Finger die Commit-Schwelle schon überschritten
+  // hat — daran hängt der Schwellen-Tick (einmal beim Überqueren, nicht bei
+  // jedem Frame darüber).
+  const crossedRef = useRef(new Map<number, boolean>());
   const callbacksRef = useRef<((el: HTMLElement | null) => void)[]>([]);
 
   // Stabile Ref-Factory pro Index (Muster: slideRef in use-snap-scroll).
@@ -82,8 +87,16 @@ export function useSwipeFollow({ right, left }: { right?: SwipeAction; left?: Sw
           : 0;
         el.style.setProperty("--swipe-progress", dx > 0 ? progress.toFixed(3) : "0");
         el.style.setProperty("--swipe-progress-left", dx < 0 ? progress.toFixed(3) : "0");
+        // Spürbare Rastung: Der Finger merkt, dass der Wisch jetzt zählt —
+        // ohne dass man dafür auf die Overlays schauen muss.
+        const crossed = allowed && progress >= 1;
+        if (crossed !== !!crossedRef.current.get(index)) {
+          crossedRef.current.set(index, crossed);
+          if (crossed) haptic("tick");
+        }
       },
       end(index, dx, velocityX) {
+        crossedRef.current.set(index, false);
         const el = cardsRef.current.get(index);
         if (!el) return;
         const dir = dx >= 0 ? 1 : -1;

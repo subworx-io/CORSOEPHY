@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { haptic } from "@/lib/haptics";
 import { corsoDay } from "@/lib/corso-day";
 import { CityBackdrop } from "@/components/city-backdrop";
 
@@ -31,6 +32,9 @@ export function CityStoryHitSplash({ active }: { active: boolean }) {
       setPhase("done");
     } else {
       setPhase("visible");
+      // Ohne Nutzer-Geste ausgelöst: auf Android zuverlässig, auf iOS nicht
+      // garantiert. Der Splash trägt die Nachricht selbst — der Reiz ist Zugabe.
+      haptic("success");
       try {
         localStorage.setItem(STORAGE_KEY, today);
       } catch {

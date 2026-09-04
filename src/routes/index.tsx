@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { HapticTapTarget } from "@/components/haptic-tap";
 import { useEffect, useState } from "react";
 import { useCityMomentCounts } from "@/lib/city/use-city-moment-counts";
 import { useFollow } from "@/lib/follow-context";
@@ -48,22 +49,27 @@ function FeedToggle({
   return (
     <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-white/15 bg-black/40 p-1 backdrop-blur-md">
       {options.map((o) => (
-        <button
-          key={o.value}
-          onClick={() => onChange(o.value)}
-          aria-pressed={view === o.value}
-          className={`relative rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors ${
-            view === o.value ? "bg-white text-black" : "text-white/70"
-          }`}
-        >
-          {o.label}
-          {dotOn === o.value && view !== o.value && (
-            <span className="pointer-events-none absolute right-1 top-0.5 flex h-2 w-2" aria-hidden>
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-            </span>
-          )}
-        </button>
+        <span key={o.value} className="relative inline-flex">
+          <HapticTapTarget label={`Ansicht ${o.label}`} onTap={() => onChange(o.value)} />
+          <button
+            onClick={() => onChange(o.value)}
+            aria-pressed={view === o.value}
+            className={`relative rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors ${
+              view === o.value ? "bg-white text-black" : "text-white/70"
+            }`}
+          >
+            {o.label}
+            {dotOn === o.value && view !== o.value && (
+              <span
+                className="pointer-events-none absolute right-1 top-0.5 flex h-2 w-2"
+                aria-hidden
+              >
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+              </span>
+            )}
+          </button>
+        </span>
       ))}
     </div>
   );

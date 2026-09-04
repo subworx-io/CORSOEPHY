@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { HapticTapTarget } from "@/components/haptic-tap";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import { usePush } from "@/hooks/use-push";
@@ -108,30 +109,45 @@ export function PushOptinSplash() {
         </p>
 
         {needsInstall ? (
-          <button
-            type="button"
-            onClick={remember}
-            className="mt-8 h-12 w-full rounded-full bg-white text-sm font-semibold text-black transition-colors hover:bg-white/90"
-          >
-            Verstanden
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={allow}
-              className="mt-8 h-12 w-full rounded-full bg-white text-sm font-semibold text-black transition-colors hover:bg-white/90 disabled:opacity-60"
-            >
-              {busy ? "Einen Moment…" : "Benachrichtigungen erlauben"}
-            </button>
+          <span className="relative mt-8 block w-full">
+            <HapticTapTarget label="Verstanden" onTap={remember} />
             <button
               type="button"
               onClick={remember}
-              className="mt-3 h-11 w-full text-sm text-white/40 transition-colors hover:text-white/70"
+              className="h-12 w-full rounded-full bg-white text-sm font-semibold text-black transition-colors hover:bg-white/90"
             >
-              Später
+              Verstanden
             </button>
+          </span>
+        ) : (
+          <>
+            <span className="relative mt-8 block w-full">
+              <HapticTapTarget
+                label="Benachrichtigungen erlauben"
+                onTap={() => {
+                  if (busy) return;
+                  void allow();
+                }}
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={allow}
+                className="h-12 w-full rounded-full bg-white text-sm font-semibold text-black transition-colors hover:bg-white/90 disabled:opacity-60"
+              >
+                {busy ? "Einen Moment…" : "Benachrichtigungen erlauben"}
+              </button>
+            </span>
+            <span className="relative mt-3 block w-full">
+              <HapticTapTarget label="Push später" onTap={remember} />
+              <button
+                type="button"
+                onClick={remember}
+                className="h-11 w-full text-sm text-white/40 transition-colors hover:text-white/70"
+              >
+                Später
+              </button>
+            </span>
           </>
         )}
       </div>

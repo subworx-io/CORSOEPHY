@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { cycleStart } from "@/lib/corso-day";
 import { logEvent } from "@/lib/events";
+import { haptic } from "@/lib/haptics";
 
 export interface FollowedPerson {
   handle: string;
@@ -161,6 +162,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   // Folgen: optimistisch lokal einfügen, dann in die DB schreiben und reconcilen.
   const follow = useCallback(
     (person: { handle: string; src?: string | null }) => {
+      haptic("success");
       setHasUnseenFollow(true);
       setFollowed((prev) => {
         if (prev.has(person.handle)) return prev;
@@ -199,6 +201,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   // Danach erscheint die Person wieder in Discovery (dort reaktiv über `followed`).
   const unfollow = useCallback(
     (handle: string) => {
+      haptic("warning");
       let removed: FollowedPerson | undefined;
       setFollowed((prev) => {
         if (!prev.has(handle)) return prev;
@@ -225,6 +228,7 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   // Follow erneuern → Herz füllt wieder auf (followedAt zurücksetzen) + DB-Sync.
   const renew = useCallback(
     (handle: string) => {
+      haptic("tap");
       setFollowed((prev) => {
         const person = prev.get(handle);
         if (!person) return prev;

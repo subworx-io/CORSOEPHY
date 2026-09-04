@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { HapticTapTarget } from "@/components/haptic-tap";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
@@ -196,15 +197,18 @@ function FeedbackPage() {
                   className="absolute inset-0 h-full w-full object-cover"
                 />
 
-                <button
-                  onClick={toggleMute}
-                  className="absolute top-4 left-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 backdrop-blur-md active:scale-95 transition-transform"
-                  aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
-                >
-                  <span className="material-symbols-outlined text-white text-[18px]">
-                    {muted ? "volume_off" : "volume_up"}
-                  </span>
-                </button>
+                <span className="absolute top-4 left-4 z-10 inline-flex">
+                  <HapticTapTarget label="Ton umschalten" onTap={toggleMute} />
+                  <button
+                    onClick={toggleMute}
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-black/50 backdrop-blur-md active:scale-95 transition-transform"
+                    aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
+                  >
+                    <span className="material-symbols-outlined text-white text-[18px]">
+                      {muted ? "volume_off" : "volume_up"}
+                    </span>
+                  </button>
+                </span>
               </>
             )}
 

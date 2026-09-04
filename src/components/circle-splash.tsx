@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { haptic } from "@/lib/haptics";
+import { HapticTapTarget } from "@/components/haptic-tap";
 import { useNavigate } from "@tanstack/react-router";
 import { CityBackdrop } from "@/components/city-backdrop";
 import { useCircle } from "@/lib/circle/use-circle";
@@ -26,7 +28,9 @@ export function CircleSplash() {
 
   // Neue Ankündigung → Einblendung zurücksetzen.
   useEffect(() => {
-    if (next) setLeaving(false);
+    if (!next) return;
+    setLeaving(false);
+    haptic("success");
   }, [next?.connectionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!next) return null;
@@ -70,19 +74,25 @@ export function CircleSplash() {
         </p>
 
         <div className="mt-8 flex flex-col items-center gap-3">
-          <button
-            onClick={() => close(true)}
-            className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition-transform active:scale-[0.98]"
-          >
-            <span className="material-symbols-outlined text-[18px]">chat</span>
-            Schreib {name}
-          </button>
-          <button
-            onClick={() => close(false)}
-            className="rounded-full px-5 py-2 text-sm font-medium text-white/60 transition-colors hover:text-white"
-          >
-            Später
-          </button>
+          <span className="relative inline-flex">
+            <HapticTapTarget label="Chat aus der Ankündigung" onTap={() => close(true)} />
+            <button
+              onClick={() => close(true)}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition-transform active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-[18px]">chat</span>
+              Schreib {name}
+            </button>
+          </span>
+          <span className="relative inline-flex">
+            <HapticTapTarget label="Ankündigung später" onTap={() => close(false)} />
+            <button
+              onClick={() => close(false)}
+              className="rounded-full px-5 py-2 text-sm font-medium text-white/60 transition-colors hover:text-white"
+            >
+              Später
+            </button>
+          </span>
         </div>
       </div>
     </div>

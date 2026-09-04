@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Corso — Haptik beim Wischen</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin:0; background:#0a0a0a; color:#fff;
+    font:15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    padding: max(env(safe-area-inset-top),12px) 16px calc(env(safe-area-inset-bottom) + 40px); }
+  h1 { font-size:19px; margin:0 0 2px; }
+  .sub { color:#888; font-size:13px; margin:0 0 14px; }
+  #log { position:sticky; top:0; z-index:50; margin:0 -16px 16px; padding:10px 16px;
+    background:#001a10; border-bottom:1px solid #064e3b;
+    font:12px/1.5 ui-monospace, Menlo, monospace; color:#6ee7b7; min-height:56px; white-space:pre-wrap; }
+  .card { border:1px solid #262626; background:#131313; border-radius:14px; padding:14px; margin-bottom:12px; }
+  .card h2 { font-size:15px; margin:0 0 2px; }
+  .card p { color:#8a8a8a; font-size:12.5px; margin:0 0 12px; }
+  .tile { position:relative; height:120px; border-radius:12px; background:#2a2a2a;
+    display:flex; align-items:center; justify-content:center; font-weight:600;
+    overflow:hidden; touch-action:none; user-select:none; }
+  .tile input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; }
+  .hint { font-size:12px; color:#666; line-height:1.5; }
+</style>
+</head>
+<body>
+
+<h1>Haptik beim Wischen</h1>
+<p class="sub">Ein iPhone-Schalter lässt sich auch durch Ziehen umlegen. Die Frage ist, ob das beim Wischen über eine Fläche einen Impuls gibt — davon hängt ab, ob Folgen/Entfolgen per Wisch haptisch werden kann.</p>
+
+<div id="log">Noch nichts gewischt.</div>
+
+<div class="card">
+  <h2>1 — Quer wischen (das Entscheidende)</h2>
+  <p>Über die Fläche nach rechts wischen, wie beim Folgen. Darunter liegt ein unsichtbarer Schalter.</p>
+  <div class="tile" id="t1">← quer wischen →<input type="checkbox" switch /></div>
+</div>
+
+<div class="card">
+  <h2>2 — Quer wischen, Kachel folgt dem Finger</h2>
+  <p>Wie im echten Feed: Die Kachel bewegt sich per JavaScript mit. Funktioniert der Impuls trotzdem?</p>
+  <div class="tile" id="t2">← wischen, ich bewege mich →<input type="checkbox" switch /></div>
+</div>
+
+<div class="card">
+  <h2>3 — Hoch und runter wischen</h2>
+  <p>Wie beim Scrollen zwischen Momenten. Ich erwarte hier nichts — bitte trotzdem prüfen.</p>
+  <div class="tile" id="t3">↑ hoch / runter ↓<input type="checkbox" switch /></div>
+</div>
+
+<div class="card">
+  <h2>4 — Kurz antippen (Kontrolle)</h2>
+  <p>Dieselbe Fläche, nur getippt. Das funktioniert nachweislich — zur Absicherung, dass die Seite tut.</p>
+  <div class="tile" id="t4">tippen<input type="checkbox" switch /></div>
+</div>
+
+<p class="hint">Sag mir für jede der vier Flächen: Impuls spürbar oder nicht — und ob oben im Protokoll eine Zeile erscheint.</p>
+
+<script>
+var lines = [];
+function log(m) {
+  lines.unshift(new Date().toLocaleTimeString("de-DE") + "  " + m);
+  lines = lines.slice(0, 5);
+  document.getElementById("log").textContent = lines.join("\n");
+}
+
+["t1", "t2", "t3", "t4"].forEach(function (id) {
+  var tile = document.getElementById(id);
+  var inp = tile.querySelector("input");
+  inp.addEventListener("change", function () {
+    log("✓ " + id + ": Schalter umgelegt — Impuls spürbar?");
+  });
+});
+
+// Fläche 2 folgt dem Finger, wie die Kachel im echten Feed. Bewusst OHNE
+// preventDefault: das würde den Schalter-Toggle unterdrücken.
+var t2 = document.getElementById("t2");
+var startX = null;
+t2.addEventListener("pointerdown", function (e) { startX = e.clientX; });
+t2.addEventListener("pointermove", function (e) {
+  if (startX === null) return;
+  t2.style.transform = "translateX(" + (e.clientX - startX) + "px)";
+});
+function reset() { startX = null; t2.style.transition = "transform 300ms"; t2.style.transform = "";
+  setTimeout(function () { t2.style.transition = ""; }, 320); }
+t2.addEventListener("pointerup", reset);
+t2.addEventListener("pointercancel", reset);
+
+log("Bereit. switch=" + ("switch" in document.createElement("input")));
+</script>
+</body>
+</html>

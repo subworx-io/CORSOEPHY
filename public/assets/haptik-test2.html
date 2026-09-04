@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Corso — Haptik-Test 2</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: #0a0a0a; color: #fff;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    padding: max(env(safe-area-inset-top), 12px) 16px calc(env(safe-area-inset-bottom) + 40px);
+  }
+  h1 { font-size: 19px; margin: 0 0 2px; }
+  .sub { color: #888; font-size: 13px; margin: 0 0 14px; }
+  #log {
+    position: sticky; top: 0; z-index: 50; margin: 0 -16px 16px; padding: 10px 16px;
+    background: #001a10; border-bottom: 1px solid #064e3b;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #6ee7b7;
+    min-height: 58px; white-space: pre-wrap;
+  }
+  .card { border: 1px solid #262626; background: #131313; border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 15px; margin: 0 0 2px; }
+  .card p { color: #8a8a8a; font-size: 12.5px; margin: 0 0 12px; }
+  .pad {
+    position: relative; height: 76px; border-radius: 11px; background: #262626;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 600; overflow: hidden; user-select: none;
+  }
+  .pad.done { background: #1e3a2f; }
+  .pad input[switch] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+  dt { color: #7a7a7a; } dd { margin: 0; font-weight: 600; }
+  .yes { color: #4ade80; } .no { color: #f87171; }
+  .ref { border-color: #3b82f6; }
+  button.plain { width:100%; padding:14px; font:600 15px inherit; border:0; border-radius:11px; background:#262626; color:#fff; font-family:inherit; }
+</style>
+</head>
+<body>
+
+<h1>Haptik-Test 2</h1>
+<p class="sub">Diesmal tippst du auf die Flächen selbst — nicht auf einen Knopf, der etwas auslöst.</p>
+
+<div id="log">Noch nichts getippt.</div>
+
+<div class="card">
+  <h2>Dein Gerät</h2>
+  <dl id="info"></dl>
+</div>
+
+<div class="card ref">
+  <h2>A — Sichtbarer Schalter (Kontrolle)</h2>
+  <p>Der hat bei dir funktioniert. Nur zur Bestätigung, dass sich nichts geändert hat.</p>
+  <div style="display:flex;align-items:center;gap:14px">
+    <input type="checkbox" switch id="a" style="width:62px;height:34px" />
+    <span style="color:#8a8a8a;font-size:13px">umlegen</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>B — Unsichtbarer Schalter über der Fläche</h2>
+  <p>Ein echter Schalter liegt komplett durchsichtig über dieser Fläche. Dein Finger trifft ihn direkt. <b>Das ist der wichtigste Test.</b></p>
+  <div class="pad" id="padB">Hier tippen<input type="checkbox" switch style="opacity:0" /></div>
+</div>
+
+<div class="card">
+  <h2>C — Fast unsichtbar (2 %)</h2>
+  <p>Falls iOS bei komplett durchsichtig blockt, aber bei minimal sichtbar nicht.</p>
+  <div class="pad" id="padC">Hier tippen<input type="checkbox" switch style="opacity:0.02" /></div>
+</div>
+
+<div class="card">
+  <h2>D — Schalter mit eigenem Aussehen</h2>
+  <p>Ein echter Schalter, per CSS zu einer Fläche umgestylt (appearance:none).</p>
+  <div class="pad" id="padD">Hier tippen<input type="checkbox" switch style="opacity:0.001;appearance:none;-webkit-appearance:none" /></div>
+</div>
+
+<div class="card">
+  <h2>E — Winziger Schalter mitten in der Fläche</h2>
+  <p>Nicht formatfüllend, sondern 44×44 px in der Mitte — falls die Größe eine Rolle spielt.</p>
+  <div class="pad" id="padE">Mitte tippen<input type="checkbox" switch style="opacity:0;inset:auto;width:44px;height:44px" /></div>
+</div>
+
+<div class="card">
+  <h2>F — Per Code ausgelöst (Gegenprobe)</h2>
+  <p>Bestätigt nur noch einmal, dass der programmatische Weg tot ist.</p>
+  <button class="plain" id="fbtn">Auslösen</button>
+</div>
+
+<script>
+var lines = [];
+function log(msg) {
+  var t = new Date().toLocaleTimeString("de-DE");
+  lines.unshift(t + "  " + msg);
+  lines = lines.slice(0, 4);
+  document.getElementById("log").textContent = lines.join("\n");
+}
+
+var probe = document.createElement("input");
+var hasSwitch = "switch" in probe;
+var hasVibrate = "vibrate" in navigator;
+var ua = navigator.userAgent;
+var m = ua.match(/OS (\d+)[_.](\d+)/);
+function yn(v) { return v ? '<span class="yes">ja</span>' : '<span class="no">nein</span>'; }
+document.getElementById("info").innerHTML =
+  "<dt>switch-Attribut</dt><dd>" + yn(hasSwitch) + "</dd>" +
+  "<dt>navigator.vibrate</dt><dd>" + yn(hasVibrate) + "</dd>" +
+  "<dt>iOS-Version</dt><dd>" + (m ? m[1] + "." + m[2] : "—") + "</dd>" +
+  "<dt>Als App gestartet</dt><dd>" + yn(window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true) + "</dd>";
+
+// Jede Fläche meldet, dass ihr Schalter wirklich umgelegt wurde — so ist
+// unterscheidbar zwischen „nichts passiert" und „passiert, aber ohne Haptik".
+["a", "padB", "padC", "padD", "padE"].forEach(function (id) {
+  var host = document.getElementById(id);
+  var inp = host.tagName === "INPUT" ? host : host.querySelector("input");
+  var name = id === "a" ? "A (sichtbar)" : id.replace("pad", "") + " (Fläche)";
+  inp.addEventListener("change", function () {
+    if (host.classList) host.classList.add("done");
+    log("✓ " + name + " umgelegt — spürst du etwas?");
+  });
+});
+
+document.getElementById("fbtn").addEventListener("click", function () {
+  if (!hasSwitch) { log("✗ Gerät kennt kein switch-Attribut"); return; }
+  var l = document.createElement("label");
+  l.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;";
+  var i = document.createElement("input");
+  i.type = "checkbox"; i.setAttribute("switch", ""); l.appendChild(i);
+  document.body.appendChild(l);
+  l.click();
+  log("✓ F per Code geklickt (checked=" + i.checked + ") — erwartet: nichts spürbar");
+});
+
+log("Bereit. switch=" + hasSwitch + ", vibrate=" + hasVibrate);
+</script>
+</body>
+</html>

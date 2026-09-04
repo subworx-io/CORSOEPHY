@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { HapticTapTarget } from "@/components/haptic-tap";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 import { useBlocks } from "@/lib/blocks/use-blocks";
@@ -90,13 +91,16 @@ export function MomentMenu({ reportedUserId, reportedPostId, handle }: MomentMen
 
   return (
     <>
-      <button
-        onClick={openSheet}
-        className="h-9 w-9 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition-transform"
-        aria-label="Moment melden oder blockieren"
-      >
-        <span className="material-symbols-outlined text-white text-[18px]">more_vert</span>
-      </button>
+      <span className="relative inline-flex">
+        <HapticTapTarget label="Moment-Menü" onTap={openSheet} />
+        <button
+          onClick={openSheet}
+          className="h-9 w-9 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition-transform"
+          aria-label="Moment melden oder blockieren"
+        >
+          <span className="material-symbols-outlined text-white text-[18px]">more_vert</span>
+        </button>
+      </span>
 
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent side="bottom" className="bg-neutral-950 text-white border-white/10">
@@ -158,11 +162,7 @@ export function MomentMenu({ reportedUserId, reportedPostId, handle }: MomentMen
                 rows={3}
               />
               <div className="mt-4 flex flex-col gap-2">
-                <Button
-                  onClick={submitReport}
-                  disabled={!reason || submitting}
-                  className="w-full"
-                >
+                <Button onClick={submitReport} disabled={!reason || submitting} className="w-full">
                   Absenden
                 </Button>
                 <button

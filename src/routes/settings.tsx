@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
 import { useBlocks } from "@/lib/blocks/use-blocks";
 import { Switch } from "@/components/ui/switch";
 import type { Profile } from "@/lib/supabase/types";
 import { usePush } from "@/hooks/use-push";
+import { haptic, hapticsEnabled, hapticsSupported, setHapticsEnabled } from "@/lib/haptics";
+import { HapticTapTarget } from "@/components/haptic-tap";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -54,6 +56,7 @@ function SettingsPage() {
 
         <div className="mt-8 space-y-10">
           <NotificationsSection profile={profile} />
+          <HapticsSection />
           <SecuritySection />
           <LegalSection />
           <AccountSection profile={profile} />
@@ -138,13 +141,20 @@ function NotificationsSection({ profile }: { profile: Profile }) {
                 : "Um 20:45 und 21:00, wenn deine Stadt spazieren geht."}
           </p>
         </div>
-        <Switch
-          checked={on}
-          disabled={saving || busy || status === "loading" || status === "blocked"}
-          onCheckedChange={toggle}
-          aria-label="Push-Benachrichtigungen"
-          className="data-[state=checked]:bg-white data-[state=unchecked]:bg-white/20"
-        />
+        <span className="relative inline-flex">
+          <HapticTapTarget
+            label="Push umschalten"
+            onTap={() => void toggle(!on)}
+            disabled={saving || busy || status === "loading" || status === "blocked"}
+          />
+          <Switch
+            checked={on}
+            disabled={saving || busy || status === "loading" || status === "blocked"}
+            onCheckedChange={toggle}
+            aria-label="Push-Benachrichtigungen"
+            className="data-[state=checked]:bg-white data-[state=unchecked]:bg-white/20"
+          />
+        </span>
       </div>
 
       {/* 🔒 iOS lässt Web Push ausschließlich aus der installierten PWA zu.
@@ -172,7 +182,59 @@ function NotificationsSection({ profile }: { profile: Profile }) {
   );
 }
 
-/* 2. Sicherheit --------------------------------------------------------- */
+/* 2. Haptik ------------------------------------------------------------- */
+
+/*
+ * Der Schalter erscheint nur, wo das Gerät überhaupt antworten kann: Android
+ * über navigator.vibrate, iPhones ab iOS 17.4 über den System-Tap. Auf dem
+ * Desktop wäre er ein Versprechen, das niemand einlösen kann.
+ *
+ * Beides — Können und Wahl — steht erst nach dem Mount fest (der CF-Worker hat
+ * weder navigator noch localStorage), deshalb der Effect statt Initialwerte.
+ */
+
+function HapticsSection() {
+  const [supported, setSupported] = useState(false);
+  const [on, setOn] = useState(true);
+
+  useEffect(() => {
+    setSupported(hapticsSupported());
+    setOn(hapticsEnabled());
+  }, []);
+
+  if (!supported) return null;
+
+  function toggle(next: boolean) {
+    setHapticsEnabled(next);
+    setOn(next);
+    // Einschalten beantwortet sich selbst: der Probe-Impuls zeigt, was gemeint ist.
+    if (next) haptic("tap");
+  }
+
+  return (
+    <Section title="Haptik">
+      <div className="flex items-center justify-between gap-4 px-4 py-4">
+        <div>
+          <p className="text-sm font-medium">Vibration</p>
+          <p className="mt-0.5 text-xs leading-snug text-white/40">
+            Ein kurzer Impuls beim Auslösen, beim Folgen und wenn ein Moment einrastet.
+          </p>
+        </div>
+        <span className="relative inline-flex">
+          <HapticTapTarget label="Vibration umschalten" onTap={() => toggle(!on)} ignoreSetting />
+          <Switch
+            checked={on}
+            onCheckedChange={toggle}
+            aria-label="Vibration"
+            className="data-[state=checked]:bg-white data-[state=unchecked]:bg-white/20"
+          />
+        </span>
+      </div>
+    </Section>
+  );
+}
+
+/* 3. Sicherheit --------------------------------------------------------- */
 
 function SecuritySection() {
   const { blocked, unblock } = useBlocks();
@@ -205,7 +267,7 @@ function SecuritySection() {
   );
 }
 
-/* 3. Rechtliches -------------------------------------------------------- */
+/* 4. Rechtliches -------------------------------------------------------- */
 
 function LegalSection() {
   return (
@@ -233,7 +295,7 @@ function LegalLink({ to, label }: { to: "/impressum" | "/datenschutz" | "/agb"; 
   );
 }
 
-/* 4. Account ------------------------------------------------------------ */
+/* 5. Account ------------------------------------------------------------ */
 
 function AccountSection({ profile }: { profile: Profile }) {
   const { updateProfile, signOut } = useAuth();
