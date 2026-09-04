@@ -206,7 +206,7 @@ export function DiscoveryFeed() {
     },
   });
 
-  const { currentIndex, slideRef, containerRef, snapTo, realign } = useSnapScroll({
+  const { currentIndex, settledIndex, slideRef, containerRef, snapTo, realign } = useSnapScroll({
     count: slides.length,
     axis: "y",
     onSwipeX: swipeHandlers,
@@ -242,8 +242,18 @@ export function DiscoveryFeed() {
         const isExiting = slide.kind === "tile" && exiting.has(slide.handle);
         // Video-Fenster: außerhalb bleibt die Slide-Hülle stehen (der Snap-Hook
         // positioniert sie weiter), nur das <video> darin wird nicht gemountet.
-        const mountVideo = distance <= VIDEO_WINDOW;
-        const preload = distance <= 1 ? "auto" : "metadata";
+        //
+        // Bewusst am `settledIndex` statt am `currentIndex`: Das Fenster wandert
+        // erst, wenn die Bewegung steht. Hinge es am aktiven Index, würde mitten
+        // in der Wischgeste ein <video> montiert und ein anderes abgeräumt —
+        // Decoder-Auf- und -Abbau im laufenden Frame, und genau da ruckelte es.
+        // Preis dieser Entkopplung: Wer mit einem sehr schnellen Flick mehr als
+        // VIDEO_WINDOW Kacheln auf einmal überspringt, sieht die Zielkachel für
+        // den Bruchteil einer Sekunde ohne Bild, bis der Snap steht. Eine normale
+        // Wischgeste bewegt eine Kachel und bleibt damit innerhalb des Fensters.
+        const settledDistance = Math.abs(i - settledIndex);
+        const mountVideo = settledDistance <= VIDEO_WINDOW;
+        const preload = settledDistance <= 1 ? "auto" : "metadata";
 
         return (
           <div
@@ -289,13 +299,18 @@ export function DiscoveryFeed() {
                         draggable={false}
                       />
                     )}
-                    {/* gradient ring overlay */}
+                    {/* Glanzkante. Bewusst OHNE mix-blend-mode: Ein Blend-Modus
+                        zwingt den Browser, für jeden Frame den Untergrund unter
+                        der Kachel mitzurechnen — auf einem bewegten Video fällt
+                        die Kachel damit aus dem reinen GPU-Compositing. Der
+                        einfache Alpha-Gradient sieht praktisch gleich aus und
+                        kostet nichts; die Deckkraft ist leicht abgesenkt, weil
+                        „overlay" heller auftrug als reines Weiß auf Alpha. */}
                     <div
                       className="pointer-events-none absolute inset-0 rounded-[2rem]"
                       style={{
                         background:
-                          "linear-gradient(160deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.08) 100%)",
-                        mixBlendMode: "overlay",
+                          "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.06) 100%)",
                       }}
                     />
                     {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}

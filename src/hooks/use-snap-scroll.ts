@@ -1,19 +1,77 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { haptic } from "@/lib/haptics";
 
+// Grobe Dauer einer Einrast-Bewegung. Seit der Umstellung auf die Feder unten
+// ist das KEINE exakte Animationsdauer mehr — die Feder ist mal schneller
+// (harter Flick), mal langsamer (sanftes Loslassen). Der Wert bleibt als
+// großzügige OBERGRENZE für Aufrufer, die eine Choreografie an den Snap hängen:
+// discovery-feed.tsx (Folgen) und following-feed.tsx (Entfolgen) warten damit
+// über `SWIPE_EXIT_MS + SNAP_MS + 60` ab, bis der Feed steht, bevor sie die
+// Kachel aus der Liste nehmen und per `realign` den Index nachziehen.
+//
+// Deshalb darf der Wert nur nach OBEN korrigiert werden. Wer ihn auf die neue
+// typische Dauer heruntersetzt, lässt `realign` in eine noch laufende Feder
+// funken — der Feed springt dann beim Folgen und Entfolgen.
 export const SNAP_MS = 380;
 
-function fireHaptic() {
-  if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-    navigator.vibrate(4);
-  }
-}
+// Das Einrasten läuft als kritisch gedämpfte Feder statt als Kurve mit fester
+// Dauer. Der Unterschied ist genau das, was man als „flüssig" empfindet: Die
+// Bewegung übernimmt die Geschwindigkeit, mit der der Finger losgelassen hat,
+// statt bei jedem Wisch dieselbe Zeit abzuwarten. Ein harter Flick rastet
+// dadurch schnell ein, ein sanftes Schubsen läuft weich aus.
+//
+// `SPRING_DAMPING` ist bewusst aus der Härte abgeleitet (2·√k) und keine freie
+// Zahl: Genau dieser Wert ist die Grenze, an der die Kachel so schnell wie
+// möglich in ihre Endlage läuft, ohne darüber hinauszuschießen. Ein Feed, der
+// am Ende nachwippt, wirkt billig — wer hier schraubt, sollte die Kopplung
+// beibehalten und nur `SPRING_STIFFNESS` anfassen.
+//
+// Die Härte ist nicht geraten, sondern durchgerechnet (bei 800 px Kachelhöhe,
+// 60 fps, Weg = halbe Kachel). „Sichtbar" = bis 90 % der Strecke zurückgelegt
+// sind, danach kriecht die Feder nur noch unmerklich:
+//
+//     Härte    sichtbar    bis Stillstand
+//       260      250 ms          667 ms
+//       600      167 ms          467 ms
+//       800      150 ms          417 ms   ← gewählt
+//      1400      117 ms          333 ms
+//
+// Die alte Kurve mit fester Dauer war nach rund 230 ms optisch fertig. 260 wäre
+// also spürbar TRÄGER gewesen als der Zustand davor — genau das, was hier
+// abgestellt werden sollte. 800 ist merklich direkter als vorher und bleibt
+// durch die kritische Dämpfung trotzdem weich.
+const SPRING_STIFFNESS = 800;
+const SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS);
+// Ab hier gilt die Bewegung als beendet. Ein Pixel Restabstand ist auf keinem
+// Display zu sehen — enger abzubrechen kostet nur Frames und verzögert das
+// Nachladen des Video-Fensters.
+const SPRING_REST_PX = 1;
+const SPRING_REST_VELOCITY = 40; // px/s
 
-function easeOutCubic(t: number) {
-  return 1 - Math.pow(1 - t, 3);
+// Zähigkeit des Gummibands an den Feed-Rändern. Kleiner = härterer Anschlag.
+const RUBBER_TENSION = 0.55;
+
+/**
+ * Widerstand jenseits des ersten/letzten Moments. Ohne ihn folgt der Rand dem
+ * Finger 1:1 ins Leere und schnappt hart zurück — das fühlt sich nach Fehler an,
+ * nicht nach Grenze. Die Dämpfung ist progressiv: die ersten Pixel gehen fast
+ * frei, danach wird es zäh und läuft asymptotisch gegen einen festen Anschlag,
+ * egal wie weit man zieht.
+ */
+function rubberBand(overflow: number, dim: number) {
+  const sign = overflow < 0 ? -1 : 1;
+  const ratio = Math.abs(overflow) / dim;
+  return sign * (1 - 1 / (ratio * RUBBER_TENSION + 1)) * dim;
 }
 
 // Ab dieser Fingerbewegung (px) entscheidet sich die Achse einer Geste.
 const AXIS_LOCK_SLOP = 10;
+
+// So viele Slides um die aktuelle Position herum werden pro Frame tatsächlich
+// bewegt. Alles darüber hinaus steht ohnehin außerhalb des Bildschirms — es in
+// jedem Frame mitzuschreiben kostete in einem lang gescrollten Discovery-Feed
+// hunderte Style-Writes, von denen niemand etwas sieht.
+const RENDER_WINDOW = 3;
 
 /**
  * Quer zur Feed-Achse wischen (Swipe-Follow): Der Feed meldet die horizontale
@@ -43,6 +101,16 @@ export function useSnapScroll({
   onSwipeX?: SwipeXHandlers;
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  // Zwei Indizes, bewusst getrennt:
+  //  - `currentIndex` wechselt SOFORT beim Überqueren der Slide-Hälfte. Daran
+  //    hängt, welcher Moment spielt — das muss ohne Verzögerung passieren.
+  //  - `settledIndex` zieht erst nach, wenn die Bewegung wirklich steht. Daran
+  //    gehören die teuren Entscheidungen: welche <video>-Elemente überhaupt im
+  //    DOM sind. Vorher hing beides am selben Wert, das Video-Fenster wanderte
+  //    also mitten in der Wischgeste mit und React montierte/demontierte
+  //    <video>-Elemente im laufenden Frame — genau dort verschluckte sich die
+  //    Animation.
+  const [settledIndex, setSettledIndex] = useState(0);
   const indexRef = useRef(0);
   // Weltposition in Pixeln: indexRef.current * Bildschirmhöhe/-breite
   const posRef = useRef(0);
@@ -59,6 +127,18 @@ export function useSnapScroll({
   // die Geste IM Container beginnt. Ohne das steuert jeder Wisch irgendwo auf der
   // Seite den Feed — auch einer auf einem Overlay darüber (Tages-Prompt-Splash).
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Slide-Zahl als Ref. Dadurch bleiben `clampIndex` und `snapTo` über die ganze
+  // Sitzung dieselben Funktionen — und damit auch die Gesten-Effekte, die daran
+  // hängen. Vorher hing `clampIndex` direkt an `count`: Jede nachgeladene Seite
+  // und jeder Follow registrierte die Touch-Listener neu. Der Gesten-Zustand
+  // (gestureActive, history, startWorldPos) lebt aber in deren Closure, ging
+  // dabei verloren, und der Feed hörte mitten im Wischen auf, dem Finger zu
+  // folgen — ohne abschließenden Snap.
+  const countRef = useRef(count);
+  countRef.current = count;
+  // Zuletzt bewegter Slide-Bereich. Was daraus herausfällt, wird EINMAL
+  // stillgelegt statt in jedem Frame neu beschrieben.
+  const paintedRef = useRef({ lo: 0, hi: -1 });
 
   // Geste zählt nur, wenn sie im Feed beginnt. Kein Container gesetzt → wie bisher.
   const isInsideContainer = useCallback((target: EventTarget | null) => {
@@ -83,15 +163,38 @@ export function useSnapScroll({
     (pos: number) => {
       const dim = getDim();
       const tr = axis === "y" ? "Y" : "X";
-      slidesRef.current.forEach((el, i) => {
-        if (!el) return;
+      const slides = slidesRef.current;
+      const center = Math.round(pos / dim);
+      const lo = Math.max(0, center - RENDER_WINDOW);
+      const hi = Math.min(slides.length - 1, center + RENDER_WINDOW);
+
+      // Was aus dem Fenster gefallen ist, einmal stilllegen: aus dem Paint
+      // nehmen und die Compositor-Ebene freigeben. `will-change` dauerhaft auf
+      // jedem Slide eines langen Feeds zu lassen kostet auf iOS mehr Speicher,
+      // als es an Glätte bringt.
+      const prev = paintedRef.current;
+      for (let i = prev.lo; i <= prev.hi; i++) {
+        if (i >= lo && i <= hi) continue;
+        const el = slides[i];
+        if (!el) continue;
+        el.style.visibility = "hidden";
+        el.style.willChange = "";
+      }
+
+      for (let i = lo; i <= hi; i++) {
+        const el = slides[i];
+        if (!el) continue;
         const offset = i * dim - pos;
         el.style.transform = `translate${tr}(${offset}px)`;
-        // Weit entfernte Slides ausblenden
-        el.style.opacity = Math.abs(offset) > dim * 1.5 ? "0" : "1";
-      });
+        if (el.style.visibility === "hidden") {
+          el.style.visibility = "";
+          el.style.willChange = "transform";
+        }
+      }
+
+      paintedRef.current = { lo, hi };
     },
-    [axis, getDim]
+    [axis, getDim],
   );
 
   // Aktiven Index übernehmen. Bewusst SOFORT und nicht erst am Ende der
@@ -101,50 +204,82 @@ export function useSnapScroll({
   const commitIndex = useCallback((idx: number) => {
     if (indexRef.current === idx) return;
     indexRef.current = idx;
-    fireHaptic();
+    haptic("tick");
     setCurrentIndex(idx);
   }, []);
 
   const clampIndex = useCallback(
-    (idx: number) => Math.max(0, Math.min(count - 1, idx)),
-    [count]
+    (idx: number) => Math.max(0, Math.min(countRef.current - 1, idx)),
+    [],
   );
 
-  // Animation zum nächsten Einrastpunkt mit easeOutCubic
+  /**
+   * Zum Einrastpunkt federn. `velocityPxPerS` ist die Geschwindigkeit, mit der
+   * der Finger losgelassen hat (positiv = in Richtung wachsender Position) — sie
+   * geht als Anfangsgeschwindigkeit in die Feder ein, damit die Bewegung den
+   * Schwung der Geste fortsetzt statt bei null neu anzufangen.
+   */
   const snapTo = useCallback(
-    (rawIdx: number) => {
+    (rawIdx: number, velocityPxPerS = 0) => {
       const targetIdx = clampIndex(rawIdx);
-      const dim = getDim();
-      const startPos = posRef.current;
-      const targetPos = targetIdx * dim;
-      const startTime = performance.now();
+      const targetPos = targetIdx * getDim();
 
       cancelAnimationFrame(rafRef.current);
       // Ziel sofort aktiv schalten — das Video des Ziel-Slides startet mit der
-      // Bewegung, nicht erst 380 ms später.
+      // Bewegung, nicht erst wenn sie steht.
       commitIndex(targetIdx);
 
+      let velocity = velocityPxPerS;
+      let last = performance.now();
+
       const animate = (now: number) => {
-        const t = Math.min((now - startTime) / SNAP_MS, 1);
-        posRef.current = startPos + (targetPos - startPos) * easeOutCubic(t);
+        // Zeitschritt deckeln. Nach einem verschluckten Frame — oder wenn der
+        // Browser die Seite kurz pausiert hat — würde ein großer Sprung die
+        // Feder aufschaukeln statt sie zu beruhigen.
+        const dt = Math.min((now - last) / 1000, 1 / 30);
+        last = now;
+
+        const offset = posRef.current - targetPos;
+        velocity += (-SPRING_STIFFNESS * offset - SPRING_DAMPING * velocity) * dt;
+        posRef.current += velocity * dt;
         applyPos(posRef.current);
 
-        if (t < 1) {
+        if (
+          Math.abs(posRef.current - targetPos) > SPRING_REST_PX ||
+          Math.abs(velocity) > SPRING_REST_VELOCITY
+        ) {
           rafRef.current = requestAnimationFrame(animate);
-        } else {
-          // Endposition frisch messen: fährt die Browser-Leiste WÄHREND der Animation
-          // ein oder aus, stimmt das eingangs berechnete Ziel nicht mehr — der Feed
-          // bliebe sonst um die Leistenhöhe versetzt zwischen zwei Momenten stehen.
-          const finalPos = targetIdx * getDim();
-          posRef.current = finalPos;
-          applyPos(finalPos);
-          rafRef.current = 0;
+          return;
         }
+
+        // Endposition frisch messen: fährt die Browser-Leiste WÄHREND der Animation
+        // ein oder aus, stimmt das eingangs berechnete Ziel nicht mehr — der Feed
+        // bliebe sonst um die Leistenhöhe versetzt zwischen zwei Momenten stehen.
+        const finalPos = targetIdx * getDim();
+        posRef.current = finalPos;
+        applyPos(finalPos);
+        rafRef.current = 0;
+        // Erst jetzt steht die Bewegung — ab hier darf der Feed die teure
+        // Arbeit nachholen (Video-Fenster verschieben).
+        setSettledIndex(targetIdx);
       };
 
       rafRef.current = requestAnimationFrame(animate);
     },
-    [clampIndex, getDim, applyPos, commitIndex]
+    [clampIndex, getDim, applyPos, commitIndex],
+  );
+
+  // Position mit Rand-Widerstand. Innerhalb des Feeds unverändert, jenseits von
+  // erstem/letztem Moment gedämpft.
+  const withRubberBand = useCallback(
+    (pos: number) => {
+      const dim = getDim();
+      const max = Math.max(0, (countRef.current - 1) * dim);
+      if (pos < 0) return rubberBand(pos, dim);
+      if (pos > max) return max + rubberBand(pos - max, dim);
+      return pos;
+    },
+    [getDim],
   );
 
   // Slide-Zahl hat sich geändert: Seite nachgeladen, Kachel nach Follow verschwunden,
@@ -268,8 +403,9 @@ export function useSnapScroll({
       // Nur letzten 100ms behalten
       const cutoff = now - 100;
       while (history.length > 1 && history[0].t < cutoff) history.shift();
-      // Bild folgt Finger in Echtzeit
-      posRef.current = startWorldPos + (startTouchPos - cur);
+      // Bild folgt Finger in Echtzeit — an den Rändern mit Widerstand, damit
+      // der erste und letzte Moment eine spürbare Grenze haben.
+      posRef.current = withRubberBand(startWorldPos + (startTouchPos - cur));
       applyPos(posRef.current);
       // Aktiven Slide schon beim Überqueren der Hälfte wechseln — der Moment,
       // auf den man zieht, spielt dann bereits, statt eingefroren zu warten.
@@ -304,10 +440,18 @@ export function useSnapScroll({
       }
 
       const dim = getDim();
-      // 150ms Momentum-Projektion → bestimmt den Ziel-Index
-      const projectedPos = posRef.current + velocityPxMs * 150;
-      const targetIdx = Math.round(projectedPos / dim);
-      snapTo(targetIdx);
+      // Wo läge man ohne Schwung — und wohin trüge der Schwung (150 ms Projektion)?
+      const restIdx = Math.round(posRef.current / dim);
+      const projectedIdx = Math.round((posRef.current + velocityPxMs * 150) / dim);
+      // Der Schwung darf höchstens EINEN Moment weitertragen. Ohne die Klemme
+      // überspringt ein harter Flick zwei oder drei Momente, die man nie zu
+      // sehen bekommt — der Feed fühlt sich dann unkontrollierbar an. Gedämpft
+      // wird nur das Momentum: Wer den Finger langsam über mehrere Kacheln
+      // zieht, landet weiterhin dort, wo er hingezogen hat.
+      const targetIdx = Math.max(restIdx - 1, Math.min(restIdx + 1, projectedIdx));
+      // Geschwindigkeit in px/s an die Feder übergeben, damit die Bewegung ohne
+      // sichtbaren Knick aus der Geste in die Animation übergeht.
+      snapTo(targetIdx, velocityPxMs * 1000);
     };
 
     const abortSwipeX = () => {
@@ -354,7 +498,7 @@ export function useSnapScroll({
       window.removeEventListener("touchcancel", onCancel);
       document.removeEventListener("visibilitychange", onHidden);
     };
-  }, [axis, getDim, applyPos, snapTo, isInsideContainer, commitIndex, clampIndex]);
+  }, [axis, getDim, applyPos, snapTo, isInsideContainer, commitIndex, clampIndex, withRubberBand]);
 
   // Trackpad / Mausrad
   useEffect(() => {
@@ -366,7 +510,7 @@ export function useSnapScroll({
       cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
       const delta = axis === "x" ? e.deltaX || e.deltaY : e.deltaY;
-      posRef.current += delta;
+      posRef.current = withRubberBand(posRef.current + delta);
       applyPos(posRef.current);
       if (snapId) clearTimeout(snapId);
       snapId = setTimeout(() => {
@@ -381,7 +525,7 @@ export function useSnapScroll({
       window.removeEventListener("wheel", onWheel);
       if (snapId) clearTimeout(snapId);
     };
-  }, [axis, getDim, applyPos, snapTo, isInsideContainer]);
+  }, [axis, getDim, applyPos, snapTo, isInsideContainer, withRubberBand]);
 
   // Maus-Drag für den Quer-Wisch (Swipe-Follow) auf Desktop: ohne Folgen-Button
   // wäre Folgen mit der Maus sonst unmöglich. Vertikales Maus-Ziehen bleibt wie
@@ -468,7 +612,7 @@ export function useSnapScroll({
     };
     const onMove = (e: MouseEvent) => {
       if (!tracking) return;
-      posRef.current = startWorldPos + (startX - e.clientX);
+      posRef.current = withRubberBand(startWorldPos + (startX - e.clientX));
       applyPos(posRef.current);
     };
     const onUp = () => {
@@ -492,7 +636,7 @@ export function useSnapScroll({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [axis, getDim, applyPos, snapTo, isInsideContainer]);
+  }, [axis, getDim, applyPos, snapTo, isInsideContainer, withRubberBand]);
 
   // Index + Position OHNE Animation hart setzen. Für den unsichtbaren Umbau nach
   // einem Swipe-Follow: erst scrollt der Feed animiert zum nächsten Moment
@@ -509,6 +653,8 @@ export function useSnapScroll({
       posRef.current = clamped * getDim();
       applyPos(posRef.current);
       setCurrentIndex(clamped);
+      // Harte Neuausrichtung heißt: die Bewegung ist vorbei.
+      setSettledIndex(clamped);
     },
     [clampIndex, getDim, applyPos],
   );
@@ -524,14 +670,19 @@ export function useSnapScroll({
             const offset = i * dim - posRef.current;
             const tr = axis === "y" ? "Y" : "X";
             el.style.transform = `translate${tr}(${offset}px)`;
-            el.style.willChange = "transform, opacity";
+            // Ein frisch gemounteter Slide weit außerhalb des Bildschirms wird
+            // gar nicht erst gemalt und bekommt auch keine eigene Ebene —
+            // `applyPos` holt ihn zurück, sobald er in Reichweite kommt.
+            const near = Math.abs(offset) <= dim * (RENDER_WINDOW + 0.5);
+            el.style.visibility = near ? "" : "hidden";
+            el.style.willChange = near ? "transform" : "";
           }
         };
       }
       return callbacksRef.current[i];
     },
-    [axis, getDim]
+    [axis, getDim],
   );
 
-  return { currentIndex, slideRef, containerRef, snapTo, realign };
+  return { currentIndex, settledIndex, slideRef, containerRef, snapTo, realign };
 }

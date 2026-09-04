@@ -199,10 +199,11 @@ function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
         loop
         className="absolute inset-0 h-full w-full object-cover"
       />
+      {/* Solide Fläche statt backdrop-blur — Begründung in components/video-tile.tsx. */}
       {isActive && (
         <button
           onClick={toggleMute}
-          className="absolute top-4 left-4 h-9 w-9 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition-transform z-10"
+          className="absolute top-4 left-4 h-9 w-9 rounded-full bg-black/60 flex items-center justify-center active:scale-95 transition-transform z-10"
           aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
         >
           <span className="material-symbols-outlined text-white text-[18px]">
@@ -407,13 +408,15 @@ function StoryPage() {
                   <VideoTile src={c.videoUrl} isActive={isActive} />
                 ) : null}
 
-                {/* Gradient-Ring-Overlay (identisch zur Discovery) */}
+                {/* Glanzkante, identisch zur Discovery — dort steht die
+                    ausführliche Begründung, warum hier kein mix-blend-mode mehr
+                    steht: Der Blend-Modus kostet auf einer bewegten Kachel
+                    jeden Frame eine Neuberechnung des Untergrunds. */}
                 <div
                   className="pointer-events-none absolute inset-0 rounded-[2rem]"
                   style={{
                     background:
-                      "linear-gradient(160deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.08) 100%)",
-                    mixBlendMode: "overlay",
+                      "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.06) 100%)",
                   }}
                 />
 

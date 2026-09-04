@@ -85,10 +85,15 @@ export function VideoTile({
           <div className="h-9 w-9 rounded-full border-2 border-white/15 border-t-white/80 animate-spin" />
         </div>
       )}
+      {/* Ton-Schalter. Solide Fläche statt backdrop-blur: Ein Backdrop-Filter auf
+          einem Element, das mit der Kachel mitwandert, zwingt Safari, den
+          Untergrund in jedem Frame neu zu filtern — der teuerste Einzelposten auf
+          einer bewegten Kachel. Über einem Video ist ohnehin kaum zu sehen, was
+          er tut. */}
       {isActive && (
         <button
           onClick={toggleMute}
-          className="absolute top-4 left-4 h-9 w-9 rounded-full bg-black/50 backdrop-blur-md flex items-center justify-center active:scale-95 transition-transform z-10"
+          className="absolute top-4 left-4 h-9 w-9 rounded-full bg-black/60 flex items-center justify-center active:scale-95 transition-transform z-10"
           aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
         >
           <span className="material-symbols-outlined text-white text-[18px]">
