@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand: 2. September 2026.**
+**Stand: 4. September 2026.**
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -42,6 +42,27 @@ Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (
 - **Verifiziert:** Zwei-User-Beweis per simulierten JWT-Claims (create → redeem = `connected`, zurückgerollt), Grants dicht (anon ✗, Tokens nicht auflistbar), live: `/c/<fake>` → 404-Seite, `/c/<echt>` → personalisierte Seite; Test-Token gelöscht. ⚠️ Der `/circle-join`-Pfad für KOMPLETT neue E-Mails (generateLink-Signup) ist — wie beim Invite-Flow — bis zum echten Zwei-Geräte-Test unbewiesen.
 - **Kleineres:** weißer Unseen-Punkt am „Ich folge"-Toggle (`hasUnseenFollow`/`markFollowsSeen` im follow-context) · Router `defaultPreload: 'intent'` + BottomNav `preload='render'` gegen den Kamera-Chunk-Puffer · **Slide-Zoom beim Video-Halten** (Snapchat-Stil: Finger nach oben ziehen, 220 px = Verdopplung, nur Hardware-Zoom) · Nav-Label **„Story" → „Corso"** · Stadt-Zähler als Glas-Pille unten mittig statt Textzeile unterm Toggle.
 - Alles am Gerät ungetestet, nichts committet.
+
+**Haptik (4. September, Auftrag Dominik — gebaut, am Gerät gemessen, deployed):** Zentrales Modul `src/lib/haptics.ts` mit sechs benannten Reizen (`tick · tap · impact · success · warning · error`) plus `src/components/haptic-tap.tsx`.
+
+**Der Messbefund vom 4. September ist die eigentliche Erkenntnis** (auf Dominiks iPhone, Diagnose-Seiten `public/assets/haptik-test.html` und `haptik-test2.html`, live unter `/assets/haptik-test` bzw. `/assets/haptik-test2`): Safari kennt `navigator.vibrate` nicht, und der verbreitete Trick, ein verstecktes `<input type="checkbox" switch>` per `label.click()` auszulösen, **funktioniert nicht mehr**. Sechs Varianten gegeneinander getestet:
+
+| Variante | Ergebnis |
+|---|---|
+| Finger **tippt** auf sichtbaren Schalter | ✓ Impuls |
+| Finger **tippt** auf **unsichtbaren** Schalter (opacity 0) über der Fläche | ✓ Impuls |
+| dito mit opacity 0.02 · `appearance:none` · 44×44 px | ✓ Impuls |
+| derselbe Schalter **per Code** geklickt | ✗ nichts |
+| quer über den Schalter **gewischt** (auch mit mitlaufender Kachel) | ✗ nichts |
+| hoch/runter **gewischt** (wie beim Scrollen) | ✗ nichts |
+
+Die Regel daraus: **Es zählt der echte Fingertipp auf das Schalter-Element.** Unsichtbar darf es sein, synthetisch nicht — und Wischen zählt nicht als Tipp, auch nicht über einem Schalter, der sich nativ ziehen ließe (dritte Diagnose-Seite `haptik-test3.html`, live unter `/assets/haptik-test3`).
+
+Daraus der Aufbau: `haptic()` bedient nur noch `navigator.vibrate` (praktisch Android) und **steigt auf iOS sofort aus**, statt wirkungslos ein DOM-Element zu klicken — der Aufruf sitzt u. a. in `commitIndex` mitten in der Wischgeste, wo Arbeit ohne Wirkung teuer ist (Hinweis der Parallel-Session). Für Tipp-Ziele legt `<HapticTapTarget>` ein unsichtbares Schalter-`<input>` über das Bedienelement; `onTap` führt die Aktion aus, weil der Knopf darunter den Tipper auf iOS nicht mehr bekommt (ein `<input>` darf dabei nie Kind eines `<button>` sein → Geschwister im `relative`-Container).
+
+Verdrahtet: Haupt-Auslöser (Tippen/Halten, Pointer-Handler liegen auf dem Schalter) · Foto-Auslöser · „Verwenden" (Foto + Video) · „Neu aufnehmen" · Stadt-Corso-Freigabe · Thumbnails — dazu weiter über `haptic()`: Upload gelungen/fehlgeschlagen, Folgen/Erneuern/Entfolgen (`follow-context.tsx`), Schwellen-Tick beim Quer-Wisch, Einrasten im Snap-Feed, Circle-Ankündigung, 21:00-Treffer.
+
+⚠️ **Was auf dem iPhone strukturell fehlt:** Gesten. Beim Wischen und Einrasten trifft kein Finger ein Bedienelement — dort gibt es keinen Ersatz und keinen Workaround. Auf Android bleibt beides über `navigator.vibrate` erhalten. Ebenfalls unerreichbar: der Impuls beim Video-Start nach 400 ms Halten (der Schalter löst erst beim Loslassen aus). Systemhaptik muss in den Geräte-Einstellungen an sein.
 
 **Deployed am 2. September (spät abends, zwei Läufe):** Der komplette Stand — Foto-Batch, Zwei-Achsen-Umbau/Circle, Swipe-Follow und der Feedback-Nachbatch (beidseitiger Swipe, Stacking-Fix, Auto-Weiterscrollen) — ist per `bash scripts/deploy.sh` live auf `corso-app.pages.dev` (Smoke-Check 200). Migrationen `0023` + `0024` waren bereits vorher angewendet (erst Schema, dann Code). Weiterhin **nichts committet** — der gesamte Batch liegt im Working Tree.
 
