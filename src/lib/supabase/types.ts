@@ -125,6 +125,10 @@ export interface Block {
 // clientseitig abfragbar (app_config + follow_mutual_days sind ohne Lesepfad).
 // announced_*_at: hat die jeweilige Seite die Circle-Ankündigung gesehen
 // (serverseitig pro Person, gesetzt via RPC acknowledge_circle()).
+// last_read_*_at (0028): Lese-Stand der jeweiligen Seite im Chat — serverseitig
+// statt localStorage, damit „ungelesen" auf allen Geräten dasselbe heißt.
+// Schreibbar ausschließlich über RPC mark_circle_read() (connections hat keine
+// UPDATE-Policy), und nur für die eigene Seite.
 export interface Connection {
   id: string;
   user_a_id: string; // kanonisch: user_a_id < user_b_id
@@ -132,16 +136,31 @@ export interface Connection {
   connected_at: string;
   announced_a_at: string | null;
   announced_b_at: string | null;
+  last_read_a_at: string | null;
+  last_read_b_at: string | null;
 }
 
 // Chat-Nachricht (0024) — lebt ausschließlich im Circle. RLS: nur die beiden
 // Partner der Verbindung lesen/schreiben; Block sperrt serverseitig (Trigger).
+// Seit 0028 in der supabase_realtime-Publication: neue Nachrichten kommen per
+// Realtime an, nicht mehr per Polling.
 export interface CircleMessage {
   id: string;
   connection_id: string;
   sender_id: string;
   body: string;
   created_at: string;
+}
+
+// Rückgabe von circle_inbox() (0028) — eine Zeile je eigener Verbindung mit der
+// jüngsten Nachricht und dem Ungelesen-Stand. 🔒 Bewusst ohne Zähler: die App
+// zeigt einen Punkt, keine Zahl.
+export interface CircleInboxRow {
+  connection_id: string;
+  partner_id: string;
+  last_message_at: string | null;
+  last_sender_id: string | null;
+  unread: boolean;
 }
 
 // Rückgabe von city_moment_counts() — aggregierte Stadt-Zahl (Momente heute/gestern),

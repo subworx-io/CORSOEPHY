@@ -36,7 +36,9 @@ export function useCircle() {
       // RLS (connections_read_own) liefert nur die eigenen Verbindungen.
       const { data: rows } = await supabase
         .from("connections")
-        .select("id, user_a_id, user_b_id, connected_at, announced_a_at, announced_b_at")
+        .select(
+          "id, user_a_id, user_b_id, connected_at, announced_a_at, announced_b_at, last_read_a_at, last_read_b_at",
+        )
         .order("connected_at", { ascending: false });
       if (!rows?.length) return [];
 

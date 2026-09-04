@@ -7,6 +7,9 @@ import { useAuth } from "@/lib/auth-context";
 import { uploadMoment, uploadPhotoMoment } from "@/lib/supabase/upload";
 import { useTodayPrompt } from "@/lib/prompts/use-today-prompt";
 import { logEvent } from "@/lib/events";
+import { haptic } from "@/lib/haptics";
+import { HapticTapTarget } from "@/components/haptic-tap";
+import { PhotoReview } from "@/components/photo-review";
 
 export const Route = createFileRoute("/record")({
   head: () => ({
@@ -84,11 +87,13 @@ function RecordPage() {
     if (error) {
       setUploadStatus("error");
       setUploadError(error);
+      haptic("error");
     } else {
       // moment_posted (Metrik-Tracking): nach erfolgreichem Upload/Post.
       // 🔒 metadata trägt nur die Referenz-ID, keine Clip-Inhalte. Fire-and-forget.
       logEvent("moment_posted", post ? { post_id: post.id } : null);
       setUploadStatus("done");
+      haptic("success");
       await queryClient.invalidateQueries({ queryKey: ["discovery"] });
       setTimeout(() => void navigate({ to: "/" }), 1200);
     }
@@ -106,13 +111,20 @@ function RecordPage() {
     if (error) {
       setUploadStatus("error");
       setUploadError(error);
+      haptic("error");
     } else {
       logEvent("moment_posted", post ? { post_id: post.id } : null);
       setUploadStatus("done");
+      haptic("success");
       await queryClient.invalidateQueries({ queryKey: ["discovery"] });
       setTimeout(() => void navigate({ to: "/" }), 1200);
     }
   }
+
+  // Foto-Sichtung (#24): Index des angetippten Fotos, sonst null. Liegt bewusst
+  // hier oben und nicht in PhotoControls — der Viewer ist ein Vollbild-Overlay
+  // über der ganzen Kamera, kein Teil der Steuerleiste.
+  const [reviewIndex, setReviewIndex] = useState<number | null>(null);
 
   // Kurzer weißer Blitz als Aufnahme-Feedback beim Foto.
   const [flash, setFlash] = useState(false);
@@ -120,6 +132,7 @@ function RecordPage() {
     // Erstes Foto schaltet intern in den Foto-Modus (aktiviert u.a. den
     // Digital-Zoom-Fallback aus use-camera; die UI selbst ist modeless).
     if (cam.photos.length === 0) cam.setMode("photo");
+    haptic("tap");
     setFlash(true);
     setTimeout(() => setFlash(false), 180);
     void cam.capturePhoto();
@@ -279,6 +292,10 @@ function RecordPage() {
                 uploadError={uploadError}
                 onCapture={handleCapturePhoto}
                 onUsePhotos={() => void handleUsePhotos()}
+                onOpenReview={(i) => {
+                  haptic("tap");
+                  setReviewIndex(i);
+                }}
               />
             ) : (
               <div className="flex flex-col items-center gap-2.5">
@@ -297,6 +314,19 @@ function RecordPage() {
           </div>
         )}
       </div>
+
+      {/* Foto-Sichtung (#24) — Vollbild über der ganzen Kamera. Verwerfen läuft
+          über dieselbe cam.removePhoto()-Kante wie früher das × am Thumbnail,
+          der Stapel bleibt also die eine Wahrheit. Während des Uploads zu, sonst
+          könnte man einem laufenden Upload den Stapel unter den Füßen wegziehen. */}
+      {reviewIndex !== null && uploadStatus === "idle" && cam.photos.length > 0 && (
+        <PhotoReview
+          photos={cam.photos}
+          initialIndex={Math.min(reviewIndex, cam.photos.length - 1)}
+          onRemove={(i) => cam.removePhoto(i)}
+          onClose={() => setReviewIndex(null)}
+        />
+      )}
     </div>
   );
 }
@@ -320,7 +350,8 @@ function PromptOverlay({ text }: { text: string }) {
 // Zustand bleibt klar erkennbar: gefüllt/weiß = an, gedimmt/outline = aus.
 function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <div className="relative flex flex-col items-center gap-1.5">
+      <HapticTapTarget label="Stadt-Corso-Freigabe" onTap={onToggle} className="h-auto" />
       <button
         onClick={onToggle}
         role="switch"
@@ -385,7 +416,7 @@ function UnifiedShutter({
     }
   };
 
-  const beginPress = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const beginPress = (e: React.PointerEvent<HTMLElement>) => {
     if (cam.status !== "live") return;
     // Pointer einfangen: das pointerup kommt auch dann bei uns an, wenn der
     // Finger während der Aufnahme vom Auslöser rutscht.
@@ -400,6 +431,7 @@ function UnifiedShutter({
       // Clip abweichen) — setMode("video") setzt ihn zurück, bevor es losgeht.
       cam.setMode("video");
       cam.startRecording();
+      haptic("impact");
     }, HOLD_TO_RECORD_MS);
   };
 
@@ -408,7 +440,7 @@ function UnifiedShutter({
   // 220 px nach oben = Verdopplung — exponentiell fühlt sich wie in nativen
   // Kamera-Apps an. Ohne Hardware-Zoom passiert stumm nichts (setZoom no-opt,
   // gleiche Regel wie beim Pinch: kein CSS-Fallback für Video).
-  const movePress = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const movePress = (e: React.PointerEvent<HTMLElement>) => {
     if (!startedRecordingRef.current || !cam.canZoom) return;
     const dy = pressYRef.current - e.clientY; // hoch = positiv
     cam.setZoom(zoomStartRef.current * Math.pow(2, dy / 220));
@@ -420,6 +452,7 @@ function UnifiedShutter({
     startedRecordingRef.current = false;
     if (held || cam.status === "recording") {
       cam.stopRecording();
+      haptic("tap");
     } else if (cam.status === "live") {
       onPhoto();
     }
@@ -429,53 +462,72 @@ function UnifiedShutter({
     clearHold();
     if (startedRecordingRef.current || cam.status === "recording") {
       cam.stopRecording();
+      haptic("warning");
     }
     startedRecordingRef.current = false;
   };
 
   return (
-    <button
-      onPointerDown={beginPress}
-      onPointerMove={movePress}
-      onPointerUp={endPress}
-      onPointerCancel={cancelPress}
-      onContextMenu={(e) => e.preventDefault()}
-      aria-label="Tippen für ein Foto, Halten für Video — beim Halten hochschieben zum Zoomen"
-      className="relative select-none transition-transform active:scale-95"
-      style={{ width: "4.75rem", height: "4.75rem", touchAction: "none", WebkitUserSelect: "none" }}
+    <span
+      className="relative inline-flex transition-transform active:scale-95 has-[input:active]:scale-95"
+      style={{ width: "4.75rem", height: "4.75rem" }}
     >
-      {/* Fortschrittsring während der Video-Aufnahme */}
-      <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100">
-        <circle
-          cx="50"
-          cy="50"
-          r="46"
-          fill="none"
-          stroke="rgba(255,255,255,0.25)"
-          strokeWidth="4"
-        />
-        {recording && (
+      {/* Auf dem iPhone liegt hier ein unsichtbarer System-Schalter darüber und
+          nimmt die Geste entgegen — nur ein echter Fingertipp darauf löst dort
+          Haptik aus (siehe src/lib/haptics.ts). */}
+      <HapticTapTarget
+        label="Auslöser"
+        onTap={() => {}}
+        onPointerDown={beginPress}
+        onPointerMove={movePress}
+        onPointerUp={endPress}
+        onPointerCancel={cancelPress}
+        onContextMenu={(e) => e.preventDefault()}
+        style={{ touchAction: "none" }}
+      />
+      <button
+        onPointerDown={beginPress}
+        onPointerMove={movePress}
+        onPointerUp={endPress}
+        onPointerCancel={cancelPress}
+        onContextMenu={(e) => e.preventDefault()}
+        aria-label="Tippen für ein Foto, Halten für Video — beim Halten hochschieben zum Zoomen"
+        className="relative h-full w-full select-none"
+        style={{ touchAction: "none", WebkitUserSelect: "none" }}
+      >
+        {/* Fortschrittsring während der Video-Aufnahme */}
+        <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100">
           <circle
             cx="50"
             cy="50"
             r="46"
             fill="none"
-            stroke="#ef4444"
+            stroke="rgba(255,255,255,0.25)"
             strokeWidth="4"
-            strokeLinecap="round"
-            strokeDasharray={2 * Math.PI * 46}
-            strokeDashoffset={2 * Math.PI * 46 * (1 - recordProgress)}
-            style={{ transition: "stroke-dashoffset 0.1s linear" }}
           />
-        )}
-      </svg>
-      {/* Innerer Auslöser: weißer Kreis (Foto) ↔ rotes Quadrat (Video läuft) */}
-      <span
-        className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ${
-          recording ? "h-6 w-6 rounded-md bg-red-500" : "h-14 w-14 rounded-full bg-white"
-        }`}
-      />
-    </button>
+          {recording && (
+            <circle
+              cx="50"
+              cy="50"
+              r="46"
+              fill="none"
+              stroke="#ef4444"
+              strokeWidth="4"
+              strokeLinecap="round"
+              strokeDasharray={2 * Math.PI * 46}
+              strokeDashoffset={2 * Math.PI * 46 * (1 - recordProgress)}
+              style={{ transition: "stroke-dashoffset 0.1s linear" }}
+            />
+          )}
+        </svg>
+        {/* Innerer Auslöser: weißer Kreis (Foto) ↔ rotes Quadrat (Video läuft) */}
+        <span
+          className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transition-all duration-200 ${
+            recording ? "h-6 w-6 rounded-md bg-red-500" : "h-14 w-14 rounded-full bg-white"
+          }`}
+        />
+      </button>
+    </span>
   );
 }
 
@@ -488,12 +540,15 @@ function PhotoControls({
   uploadError,
   onCapture,
   onUsePhotos,
+  onOpenReview,
 }: {
   cam: ReturnType<typeof useCamera>;
   uploadStatus: "idle" | "uploading" | "done" | "error";
   uploadError: string | null;
   onCapture: () => void;
   onUsePhotos: () => void;
+  /** Thumbnail angetippt → Vollbild-Sichtung an dieser Stelle öffnen. */
+  onOpenReview: (index: number) => void;
 }) {
   const uploading = uploadStatus === "uploading";
   const done = uploadStatus === "done";
@@ -504,36 +559,37 @@ function PhotoControls({
     <div className="flex flex-col items-center gap-3">
       {uploadError && <p className="text-center text-sm text-red-400">{uploadError}</p>}
 
-      {/* Aufgenommene Fotos — leicht gedrehter Mini-Stapel, × entfernt einzeln */}
+      {/* Aufgenommene Fotos — leicht gedrehter Mini-Stapel. Jedes Thumbnail ist
+          ein Knopf: Tippen öffnet die Vollbild-Sichtung an dieser Stelle (#24).
+          Die × sind seit dem 4. Sep 2026 weg — sie überlappten sich ab drei
+          Fotos gegenseitig und waren als 20-px-Kreis kaum zu treffen (#25).
+          Verworfen wird jetzt im Viewer, wo man das Bild auch wirklich sieht.
+          Dafür stehen die Bilder mit einer kleinen Lücke statt überlappend:
+          Optik bleibt „hingelegte Prints", aber jedes ist voll tippbar. */}
       {hasPhotos && (
-        <div className="flex items-end justify-center">
-          {cam.photos.map((p, i) => (
-            <div
-              key={p.url}
-              className="relative"
-              style={{
-                transform: `rotate(${i % 2 === 0 ? 2 : -2}deg)`,
-                marginLeft: i === 0 ? 0 : "-0.4rem",
-                zIndex: i,
-              }}
-            >
-              <img
-                src={p.url}
-                alt=""
-                draggable={false}
-                className="h-16 w-12 rounded-lg border border-white/25 object-cover shadow-lg"
-              />
-              {!uploading && !done && (
-                <button
-                  onClick={() => cam.removePhoto(i)}
-                  aria-label={`Foto ${i + 1} entfernen`}
-                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white/25 bg-black/80"
-                >
-                  <span className="material-symbols-outlined text-[12px] text-white">close</span>
-                </button>
-              )}
-            </div>
-          ))}
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex items-end justify-center gap-1">
+            {cam.photos.map((p, i) => (
+              <button
+                key={p.url}
+                type="button"
+                onClick={() => onOpenReview(i)}
+                aria-label={`Foto ${i + 1} ansehen`}
+                className="relative transition-transform active:scale-95"
+                style={{ transform: `rotate(${i % 2 === 0 ? 2 : -2}deg)` }}
+              >
+                <img
+                  src={p.url}
+                  alt=""
+                  draggable={false}
+                  className="h-16 w-12 rounded-lg border border-white/25 object-cover shadow-lg"
+                />
+              </button>
+            ))}
+          </div>
+          {!uploading && !done && (
+            <span className="text-[11px] text-white/45">Tippen zum Ansehen</span>
+          )}
         </div>
       )}
 
@@ -548,42 +604,58 @@ function PhotoControls({
         </div>
 
         {/* Auslöser — weißer Kreis (Foto), gedimmt wenn der Stapel voll ist */}
-        <button
-          onClick={onCapture}
-          disabled={full || uploading || done}
-          aria-label="Foto aufnehmen"
-          className="relative transition-transform active:scale-95 disabled:opacity-40"
+        <span
+          className="relative inline-flex transition-transform active:scale-95 has-[input:active]:scale-95"
           style={{ width: "4.75rem", height: "4.75rem" }}
         >
-          <svg className="absolute inset-0" viewBox="0 0 100 100">
-            <circle
-              cx="50"
-              cy="50"
-              r="46"
-              fill="none"
-              stroke="rgba(255,255,255,0.25)"
-              strokeWidth="4"
-            />
-          </svg>
-          <span className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
-        </button>
+          <HapticTapTarget
+            label="Foto aufnehmen"
+            onTap={onCapture}
+            disabled={full || uploading || done}
+          />
+          <button
+            onClick={onCapture}
+            disabled={full || uploading || done}
+            aria-label="Foto aufnehmen"
+            className="relative h-full w-full disabled:opacity-40"
+          >
+            <svg className="absolute inset-0" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="46"
+                fill="none"
+                stroke="rgba(255,255,255,0.25)"
+                strokeWidth="4"
+              />
+            </svg>
+            <span className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+          </button>
+        </span>
 
         {/* rechte Spalte: Verwenden — erscheint mit dem ersten Foto */}
         <div className="flex w-14 flex-col items-center gap-1.5">
           {hasPhotos && (
             <>
-              <button
-                onClick={onUsePhotos}
-                disabled={uploading || done}
-                aria-label="Verwenden"
-                className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black transition-transform active:scale-95 disabled:opacity-60"
-              >
-                <span
-                  className={`material-symbols-outlined text-[26px] ${uploading ? "animate-spin" : ""}`}
+              <span className="relative inline-flex transition-transform active:scale-95 has-[input:active]:scale-95">
+                <HapticTapTarget
+                  label="Verwenden (Fotos)"
+                  onTap={onUsePhotos}
+                  disabled={uploading || done}
+                />
+                <button
+                  onClick={onUsePhotos}
+                  disabled={uploading || done}
+                  aria-label="Verwenden"
+                  className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black disabled:opacity-60"
                 >
-                  {done ? "check_circle" : uploading ? "progress_activity" : "check"}
-                </span>
-              </button>
+                  <span
+                    className={`material-symbols-outlined text-[26px] ${uploading ? "animate-spin" : ""}`}
+                  >
+                    {done ? "check_circle" : uploading ? "progress_activity" : "check"}
+                  </span>
+                </button>
+              </span>
               <span className="text-[11px] text-white/70">
                 {done ? "Fertig" : uploading ? "Lädt…" : "Verwenden"}
               </span>
@@ -615,29 +687,43 @@ function RecordedControls({
       {uploadError && <p className="text-center text-sm text-red-400">{uploadError}</p>}
       <div className="flex items-end justify-center gap-10">
         <div className="flex flex-col items-center gap-1.5">
-          <button
-            onClick={cam.retake}
-            disabled={uploading || done}
-            aria-label="Neu aufnehmen"
-            className="flex h-14 w-14 items-center justify-center rounded-full border border-white/15 bg-white/12 text-white transition-transform active:scale-95 disabled:opacity-40"
-          >
-            <span className="material-symbols-outlined text-[24px]">replay</span>
-          </button>
+          <span className="relative inline-flex transition-transform active:scale-95 has-[input:active]:scale-95">
+            <HapticTapTarget
+              label="Neu aufnehmen"
+              onTap={cam.retake}
+              disabled={uploading || done}
+            />
+            <button
+              onClick={cam.retake}
+              disabled={uploading || done}
+              aria-label="Neu aufnehmen"
+              className="flex h-14 w-14 items-center justify-center rounded-full border border-white/15 bg-white/12 text-white disabled:opacity-40"
+            >
+              <span className="material-symbols-outlined text-[24px]">replay</span>
+            </button>
+          </span>
           <span className="text-[11px] text-white/70">Neu</span>
         </div>
         <div className="flex flex-col items-center gap-1.5">
-          <button
-            onClick={onUseClip}
-            disabled={uploading || done}
-            aria-label="Verwenden"
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black transition-transform active:scale-95 disabled:opacity-60"
-          >
-            <span
-              className={`material-symbols-outlined text-[28px] ${uploading ? "animate-spin" : ""}`}
+          <span className="relative inline-flex transition-transform active:scale-95 has-[input:active]:scale-95">
+            <HapticTapTarget
+              label="Verwenden (Video)"
+              onTap={onUseClip}
+              disabled={uploading || done}
+            />
+            <button
+              onClick={onUseClip}
+              disabled={uploading || done}
+              aria-label="Verwenden"
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black disabled:opacity-60"
             >
-              {done ? "check_circle" : uploading ? "progress_activity" : "check"}
-            </span>
-          </button>
+              <span
+                className={`material-symbols-outlined text-[28px] ${uploading ? "animate-spin" : ""}`}
+              >
+                {done ? "check_circle" : uploading ? "progress_activity" : "check"}
+              </span>
+            </button>
+          </span>
           <span className="text-[11px] text-white/70">
             {done ? "Fertig" : uploading ? "Lädt…" : "Verwenden"}
           </span>

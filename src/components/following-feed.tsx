@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useFollow, followFill, canRenew, type FollowedPerson } from "@/lib/follow-context";
 import { useCircle } from "@/lib/circle/use-circle";
 import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
@@ -170,7 +170,7 @@ export function FollowingFeed() {
   const handles = people.map((p) => p.handle);
 
   // Holt den aktuellsten LEBENDEN Post (+ signierte URLs) für jede gefolgte Person.
-  const { data: momentsByHandle = {} } = useQuery<Record<string, FollowedMoment>>({
+  const { data: momentsByHandle = {}, isPending } = useQuery<Record<string, FollowedMoment>>({
     queryKey: ["following-posts", handles.join(",")],
     queryFn: async () => {
       if (!handles.length) return {};
@@ -234,6 +234,13 @@ export function FollowingFeed() {
     enabled: !!user && handles.length > 0,
     staleTime: 0,
     refetchOnMount: true,
+    // Der Handle-Satz steht IM Query-Key — jedes Entfolgen erzeugt also einen
+    // neuen Key ohne Cache-Eintrag. Ohne das hier stünde `momentsByHandle` für
+    // einen Wimpernschlag leer da, `visible` wäre leer und der Leerzustand
+    // („Gerade zeigt niemand einen Moment") blitzte auf, obwohl sich nur eine
+    // Person aus der Liste verabschiedet hat. Die alten Einträge bleiben für die
+    // verbliebenen Handles gültig — sie zu behalten ist keine Notlüge.
+    placeholderData: keepPreviousData,
   });
 
   // Sichtbar ist nur, wer gerade einen lebenden Moment hat (Umbau-Regel).
@@ -296,6 +303,12 @@ export function FollowingFeed() {
     const t = setTimeout(() => recordView(postId), 500);
     return () => clearTimeout(t);
   }, [activeHandle, momentsByHandle]);
+
+  // Erster Aufruf, Follows vorhanden, Momente noch unterwegs: „niemand zeigt
+  // etwas" wäre eine Behauptung ohne Deckung. Lieber kurz nichts sagen.
+  if (visible.length === 0 && people.length > 0 && isPending) {
+    return <div className="absolute inset-0" />;
+  }
 
   if (visible.length === 0) {
     const hasInvisible = people.length > 0;

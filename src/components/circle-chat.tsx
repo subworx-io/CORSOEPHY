@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { HapticTapTarget } from "@/components/haptic-tap";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { chatQueryKey, useCircleInbox } from "@/lib/circle/inbox-context";
 import type { CirclePartner } from "@/lib/circle/use-circle";
 import type { CircleMessage } from "@/lib/supabase/types";
 
@@ -10,9 +12,16 @@ import type { CircleMessage } from "@/lib/supabase/types";
 // zwischen den beiden Partnern einer bestehenden Verbindung an (RLS + Block-
 // Trigger, Migration 0024). Diese Komponente ist nur die Oberfläche dazu.
 //
-// Bewusst simpel für den Pilot: Polling statt Realtime (kein neues Setup),
-// keine Read-Receipts, kein Edit/Delete.
-const POLL_MS = 4000;
+// Live seit 0028 (Backlog #18): eingehende Nachrichten kommen per Supabase
+// Realtime an. Das Abo liegt bewusst NICHT hier, sondern zentral im
+// CircleInboxProvider — es ist derselbe Ereignisstrom, aus dem auch die
+// App-weite Meldung gespeist wird (#21). Der Provider schreibt neue Nachrichten
+// direkt in genau diesen Query-Cache; hier steht deshalb nur noch das Laden des
+// Verlaufs und ein langsamer Poll als Rückfalllinie, falls der WebSocket
+// wegbricht (Funkloch, iOS-Hintergrund).
+//
+// Bewusst simpel für den Pilot: keine Read-Receipts, kein Edit/Delete.
+const FALLBACK_POLL_MS = 30_000;
 
 const timeLabel = (iso: string) =>
   new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
@@ -20,13 +29,14 @@ const timeLabel = (iso: string) =>
 export function CircleChat({ partner, onClose }: { partner: CirclePartner; onClose: () => void }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { markRead } = useCircleInbox();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: messages = [] } = useQuery<CircleMessage[]>({
-    queryKey: ["circle-chat", partner.connectionId],
+    queryKey: chatQueryKey(partner.connectionId),
     queryFn: async () => {
       const { data } = await supabase
         .from("circle_messages")
@@ -37,8 +47,16 @@ export function CircleChat({ partner, onClose }: { partner: CirclePartner; onClo
       return (data ?? []) as CircleMessage[];
     },
     enabled: !!user,
-    refetchInterval: POLL_MS,
+    refetchInterval: FALLBACK_POLL_MS,
   });
+
+  // Offener Chat = gelesen. Beim Öffnen und bei jeder neuen Nachricht, die
+  // währenddessen eintrifft — der Punkt an der Nav soll gar nicht erst angehen,
+  // solange man auf den Verlauf schaut.
+  const lastMessageId = messages.length ? messages[messages.length - 1].id : null;
+  useEffect(() => {
+    markRead(partner.connectionId);
+  }, [markRead, partner.connectionId, lastMessageId]);
 
   // Ans Ende scrollen, wenn Nachrichten dazukommen (und beim Öffnen).
   useEffect(() => {
@@ -51,19 +69,32 @@ export function CircleChat({ partner, onClose }: { partner: CirclePartner; onClo
     if (!body || !user || sending) return;
     setSending(true);
     setSendError(null);
-    const { error } = await supabase.from("circle_messages").insert({
-      connection_id: partner.connectionId,
-      sender_id: user.id,
-      body,
-    });
+    // Eingabe sofort leeren — der Absender soll nicht auf den Roundtrip warten,
+    // um weiterzutippen. Bei einem Fehler kommt der Text zurück ins Feld.
+    setDraft("");
+
+    const { data, error } = await supabase
+      .from("circle_messages")
+      .insert({ connection_id: partner.connectionId, sender_id: user.id, body })
+      .select("id, connection_id, sender_id, body, created_at")
+      .single();
+
     setSending(false);
-    if (error) {
+    if (error || !data) {
       // Häufigster echter Fall: Block in eine der beiden Richtungen (Trigger).
+      setDraft(body);
       setSendError("Nachricht konnte nicht gesendet werden.");
       return;
     }
-    setDraft("");
-    await queryClient.invalidateQueries({ queryKey: ["circle-chat", partner.connectionId] });
+
+    // Direkt in den Verlauf hängen. Das Realtime-Echo derselben Zeile kommt
+    // gleich noch hinterher — beide Wege deduplizieren über die id.
+    const message = data as CircleMessage;
+    queryClient.setQueryData<CircleMessage[]>(chatQueryKey(partner.connectionId), (old) => {
+      const list = old ?? [];
+      if (list.some((m) => m.id === message.id)) return list;
+      return [...list, message];
+    });
   }
 
   const name = partner.displayName || partner.handle;
@@ -75,13 +106,16 @@ export function CircleChat({ partner, onClose }: { partner: CirclePartner; onClo
         className="flex items-center gap-3 border-b border-white/10 px-4 pb-3"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)" }}
       >
-        <button
-          onClick={onClose}
-          aria-label="Chat schließen"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 transition-transform active:scale-95"
-        >
-          <span className="material-symbols-outlined text-[20px]">arrow_back</span>
-        </button>
+        <span className="relative inline-flex">
+          <HapticTapTarget label="Chat schließen" onTap={onClose} />
+          <button
+            onClick={onClose}
+            aria-label="Chat schließen"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 transition-transform active:scale-95"
+          >
+            <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+          </button>
+        </span>
         <div className="min-w-0">
           <p className="truncate text-[15px] font-semibold tracking-tight">{name}</p>
           <p className="truncate text-[11px] text-white/40">{partner.handle} · in deinem Circle</p>
@@ -142,18 +176,28 @@ export function CircleChat({ partner, onClose }: { partner: CirclePartner; onClo
             placeholder="Nachricht …"
             className="max-h-28 min-h-[2.75rem] flex-1 resize-none rounded-3xl border border-white/15 bg-white/8 px-4 py-3 text-[14px] leading-snug text-white placeholder:text-white/35 focus:border-white/35 focus:outline-none"
           />
-          <button
-            onClick={() => void send()}
-            disabled={!draft.trim() || sending}
-            aria-label="Senden"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-black transition-transform active:scale-95 disabled:opacity-40"
-          >
-            <span
-              className={`material-symbols-outlined text-[20px] ${sending ? "animate-spin" : ""}`}
+          <span className="relative inline-flex shrink-0">
+            <HapticTapTarget
+              label="Senden"
+              onTap={() => {
+                if (!draft.trim() || sending) return;
+                void send();
+              }}
+              disabled={!draft.trim() || sending}
+            />
+            <button
+              onClick={() => void send()}
+              disabled={!draft.trim() || sending}
+              aria-label="Senden"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-black transition-transform active:scale-95 disabled:opacity-40"
             >
-              {sending ? "progress_activity" : "arrow_upward"}
-            </span>
-          </button>
+              <span
+                className={`material-symbols-outlined text-[20px] ${sending ? "animate-spin" : ""}`}
+              >
+                {sending ? "progress_activity" : "arrow_upward"}
+              </span>
+            </button>
+          </span>
         </div>
       </div>
     </div>

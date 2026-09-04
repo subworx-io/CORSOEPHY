@@ -1,10 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { HapticTapTarget } from "@/components/haptic-tap";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useCircle, type CirclePartner } from "@/lib/circle/use-circle";
+import { useCircleInbox } from "@/lib/circle/inbox-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { recordView } from "@/lib/record-view";
 import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
@@ -80,6 +82,10 @@ type PartnerMoment = {
 function CirclePage() {
   const { user } = useAuth();
   const { partners } = useCircle();
+  // Ungelesene Nachrichten — Punkt am jeweiligen Partner-Chip, damit man sieht,
+  // WER geschrieben hat, nicht nur DASS jemand geschrieben hat.
+  // 🔒 Punkt, keine Anzahl.
+  const { unreadPartnerIds } = useCircleInbox();
   const navigate = useNavigate();
   const { chat } = Route.useSearch();
   const invite = useCircleInviteShare();
@@ -180,14 +186,24 @@ function CirclePage() {
           die bleibt. Hier könnt ihr euch dann schreiben.
         </p>
         {/* Leerer Circle → der Link-Weg steht zentral (Umsetzung Punkt 12). */}
-        <button
-          onClick={() => void invite.share()}
-          disabled={invite.busy}
-          className="mt-7 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black transition-transform active:scale-[0.98] disabled:opacity-60"
-        >
-          <span className="material-symbols-outlined text-[18px] leading-none">person_add</span>
-          {invite.busy ? "Link wird erstellt …" : "Freund:in in den Circle holen"}
-        </button>
+        <span className="relative mt-7 inline-flex">
+          <HapticTapTarget
+            label="Circle-Einladung teilen"
+            onTap={() => {
+              if (invite.busy) return;
+              void invite.share();
+            }}
+            disabled={invite.busy}
+          />
+          <button
+            onClick={() => void invite.share()}
+            disabled={invite.busy}
+            className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black transition-transform active:scale-[0.98] disabled:opacity-60"
+          >
+            <span className="material-symbols-outlined text-[18px] leading-none">person_add</span>
+            {invite.busy ? "Link wird erstellt …" : "Freund:in in den Circle holen"}
+          </button>
+        </span>
         <p className="mt-2.5 max-w-[16rem] text-[11px] leading-snug text-white/35">
           Du bekommst einen Link zum Verschicken — gilt für eine Person, 7 Tage.
         </p>
@@ -253,15 +269,18 @@ function CirclePage() {
                         <span className="min-w-0 truncate text-lg font-semibold tracking-tight text-white drop-shadow-md">
                           {partner.handle}
                         </span>
-                        <button
-                          onClick={() => openChat(partner)}
-                          className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black transition-all active:scale-95"
-                        >
-                          <span className="material-symbols-outlined text-[16px] leading-none">
-                            chat
-                          </span>
-                          Nachricht
-                        </button>
+                        <span className="relative inline-flex">
+                          <HapticTapTarget label="Chat öffnen" onTap={() => openChat(partner)} />
+                          <button
+                            onClick={() => openChat(partner)}
+                            className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black transition-all active:scale-95"
+                          >
+                            <span className="material-symbols-outlined text-[16px] leading-none">
+                              chat
+                            </span>
+                            Nachricht
+                          </button>
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -297,31 +316,66 @@ function CirclePage() {
             className="flex min-w-0 flex-1 gap-2 overflow-x-auto"
             style={{ scrollbarWidth: "none" }}
           >
-            {partners.map((partner) => (
-              <button
-                key={partner.partnerId}
-                onClick={() => openChat(partner)}
-                className="flex shrink-0 items-center gap-2 rounded-full border border-white/15 bg-black/45 py-1.5 pl-1.5 pr-3.5 backdrop-blur-md transition-transform active:scale-[0.97]"
-              >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-[13px] font-semibold uppercase text-white">
-                  {partner.handle.replace(/^@/, "").charAt(0)}
+            {partners.map((partner) => {
+              const unread = unreadPartnerIds.has(partner.partnerId);
+              return (
+                <span key={partner.partnerId} className="relative inline-flex shrink-0">
+                  <HapticTapTarget label="Partner öffnen" onTap={() => openChat(partner)} />
+                  <button
+                    onClick={() => openChat(partner)}
+                    aria-label={
+                      unread
+                        ? `${partner.displayName || partner.handle} – neue Nachricht`
+                        : partner.displayName || partner.handle
+                    }
+                    className={`relative flex shrink-0 items-center gap-2 rounded-full border bg-black/45 py-1.5 pl-1.5 pr-3.5 backdrop-blur-md transition-transform active:scale-[0.97] ${
+                      unread ? "border-white/50" : "border-white/15"
+                    }`}
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-[13px] font-semibold uppercase text-white">
+                      {partner.handle.replace(/^@/, "").charAt(0)}
+                    </span>
+                    <span
+                      className={`max-w-[8rem] truncate text-[13px] ${
+                        unread ? "font-semibold text-white" : "font-medium text-white"
+                      }`}
+                    >
+                      {partner.displayName || partner.handle}
+                    </span>
+                    {unread && (
+                      <span
+                        className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5"
+                        aria-hidden
+                      >
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full border border-black/40 bg-white" />
+                      </span>
+                    )}
+                  </button>
                 </span>
-                <span className="max-w-[8rem] truncate text-[13px] font-medium text-white">
-                  {partner.displayName || partner.handle}
-                </span>
-              </button>
-            ))}
+              );
+            })}
           </div>
-          <button
-            onClick={() => void invite.share()}
-            disabled={invite.busy}
-            aria-label="Freund:in per Link in den Circle holen"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/45 backdrop-blur-md transition-transform active:scale-95 disabled:opacity-60"
-          >
-            <span className="material-symbols-outlined text-[20px] leading-none text-white/85">
-              person_add
-            </span>
-          </button>
+          <span className="relative inline-flex shrink-0">
+            <HapticTapTarget
+              label="Circle-Einladung teilen"
+              onTap={() => {
+                if (invite.busy) return;
+                void invite.share();
+              }}
+              disabled={invite.busy}
+            />
+            <button
+              onClick={() => void invite.share()}
+              disabled={invite.busy}
+              aria-label="Freund:in per Link in den Circle holen"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/45 backdrop-blur-md transition-transform active:scale-95 disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined text-[20px] leading-none text-white/85">
+                person_add
+              </span>
+            </button>
+          </span>
         </div>
       </header>
 
