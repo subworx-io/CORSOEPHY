@@ -23,7 +23,7 @@ const EXPLAINER_SCREENS: { eyebrow: string; title: string; body: string }[] = [
   {
     eyebrow: "So funktioniert Corso",
     title: "Du siehst deine Stadt nur, wenn sie postet.",
-    body: "Kein endloser Feed. Es gibt Momente, wenn Menschen um dich herum welche aufnehmen — und um 21 Uhr geht Düsseldorf gemeinsam spazieren.",
+    body: "Kein endloser Feed. Es gibt Momente, wenn Menschen um dich herum welche aufnehmen — und auf der Bühne der Stadt steht immer, wer gerade nachgerückt ist.",
   },
   {
     eyebrow: "Sichtbar bleibst du,",

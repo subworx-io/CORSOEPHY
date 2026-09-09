@@ -19,6 +19,7 @@ import { Route as DatenschutzRouteImport } from './routes/datenschutz'
 import { Route as CircleRouteImport } from './routes/circle'
 import { Route as AgbRouteImport } from './routes/agb'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PHandleRouteImport } from './routes/p.$handle'
 import { Route as CircleRedeemTokenRouteImport } from './routes/circle-redeem.$token'
 
 const StoryEmptyLabRoute = StoryEmptyLabRouteImport.update({
@@ -71,6 +72,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PHandleRoute = PHandleRouteImport.update({
+  id: '/p/$handle',
+  path: '/p/$handle',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CircleRedeemTokenRoute = CircleRedeemTokenRouteImport.update({
   id: '/circle-redeem/$token',
   path: '/circle-redeem/$token',
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/story': typeof StoryRoute
   '/story-empty-lab': typeof StoryEmptyLabRoute
   '/circle-redeem/$token': typeof CircleRedeemTokenRoute
+  '/p/$handle': typeof PHandleRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByTo {
   '/story': typeof StoryRoute
   '/story-empty-lab': typeof StoryEmptyLabRoute
   '/circle-redeem/$token': typeof CircleRedeemTokenRoute
+  '/p/$handle': typeof PHandleRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/story': typeof StoryRoute
   '/story-empty-lab': typeof StoryEmptyLabRoute
   '/circle-redeem/$token': typeof CircleRedeemTokenRoute
+  '/p/$handle': typeof PHandleRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/story'
     | '/story-empty-lab'
     | '/circle-redeem/$token'
+    | '/p/$handle'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
     | '/story'
     | '/story-empty-lab'
     | '/circle-redeem/$token'
+    | '/p/$handle'
   id:
     | '__root__'
     | '/'
@@ -157,6 +168,7 @@ export interface FileRouteTypes {
     | '/story'
     | '/story-empty-lab'
     | '/circle-redeem/$token'
+    | '/p/$handle'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +183,7 @@ export interface RootRouteChildren {
   StoryRoute: typeof StoryRoute
   StoryEmptyLabRoute: typeof StoryEmptyLabRoute
   CircleRedeemTokenRoute: typeof CircleRedeemTokenRoute
+  PHandleRoute: typeof PHandleRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -245,6 +258,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/p/$handle': {
+      id: '/p/$handle'
+      path: '/p/$handle'
+      fullPath: '/p/$handle'
+      preLoaderRoute: typeof PHandleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/circle-redeem/$token': {
       id: '/circle-redeem/$token'
       path: '/circle-redeem/$token'
@@ -267,6 +287,7 @@ const rootRouteChildren: RootRouteChildren = {
   StoryRoute: StoryRoute,
   StoryEmptyLabRoute: StoryEmptyLabRoute,
   CircleRedeemTokenRoute: CircleRedeemTokenRoute,
+  PHandleRoute: PHandleRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

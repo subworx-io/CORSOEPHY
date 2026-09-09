@@ -1,6 +1,14 @@
 import { supabase } from "./client";
 import type { Post } from "./types";
 
+// Ein Moment = eine neue posts-Zeile. Bewusst INSERT, nicht UPSERT:
+// Seit 0032 darf eine Person mehrere lebende Momente gleichzeitig haben — ein
+// neuer Moment stellt sich NEBEN den alten, statt ihn zu ersetzen. Der Grund
+// liegt im laufenden Corso: steht ein Moment gerade in einem Slot, soll ein
+// neuer Post ihn dort nicht herausreißen. Die 24h-Uhr läuft je Zeile getrennt.
+// (Bis 9. Sep 2026 war das ein Upsert auf (author_id, prompt_date) — dieser
+// Unique-Key ist mit 0032 gefallen.)
+
 export async function uploadMoment(
   blob: Blob,
   userId: string,
@@ -17,18 +25,13 @@ export async function uploadMoment(
 
   const { data, error: dbError } = await supabase
     .from("posts")
-    .upsert(
-      {
-        author_id: userId,
-        media_path: path,
-        media_type: "video",
-        // Re-Post im selben Zyklus kann eine Foto-Zeile überschreiben — die alte
-        // Foto-Liste darf dann nicht am neuen Video kleben bleiben.
-        media_paths: null,
-        city_story_consent: cityStoryConsent,
-      },
-      { onConflict: "author_id,prompt_date" },
-    )
+    .insert({
+      author_id: userId,
+      media_path: path,
+      media_type: "video",
+      media_paths: null, // Video-Moment: keine Foto-Liste
+      city_story_consent: cityStoryConsent,
+    })
     .select("*")
     .single();
 
@@ -69,16 +72,13 @@ export async function uploadPhotoMoment(
 
   const { data, error: dbError } = await supabase
     .from("posts")
-    .upsert(
-      {
-        author_id: userId,
-        media_path: paths[0],
-        media_type: "photo",
-        media_paths: paths,
-        city_story_consent: cityStoryConsent,
-      },
-      { onConflict: "author_id,prompt_date" },
-    )
+    .insert({
+      author_id: userId,
+      media_path: paths[0],
+      media_type: "photo",
+      media_paths: paths,
+      city_story_consent: cityStoryConsent,
+    })
     .select("*")
     .single();
 

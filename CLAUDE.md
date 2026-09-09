@@ -3,7 +3,9 @@
 ## Was wird hier gebaut
 
 **Corso** ist eine lokale Stadtbeobachtungs-App mit Dating-Ausgang.
-Jeden Abend "geht deine Stadt gemeinsam spazieren": rohe, ungeschnittene Video-Momente echter Menschen aus der Umgebung. Um 21:00 Uhr kann jeder Nutzer zufällig ins stadtweite Rampenlicht gezogen werden — zeitgleich startet der neue Prompt. Publikum verfällt 24 Stunden nach dem Follow, wenn man nicht nachliefert.
+"Deine Stadt geht spazieren": rohe, ungeschnittene Foto- und Video-Momente echter Menschen aus der Umgebung. Der **Stadt Corso** ist eine Bühne mit fester Platzzahl, die **rund um die Uhr läuft** — wird ein Platz frei, weil der Moment darauf seine 24 Stunden erreicht hat, rückt gewichtet der nächste nach. Publikum verfällt 24 Stunden nach dem Follow, wenn man nicht nachliefert.
+
+> **Stand 9. Sep 2026:** Der feste 21-Uhr-Reset und der tägliche Prompt sind **abgeschafft** (PRD v0.6, Migrationen `0031`/`0032`). Wer alte Kommentare über „die 21:00-Ziehung" oder „den Tages-Prompt" findet: das ist Historie, nicht der Sollzustand.
 
 **Pilot:** Düsseldorf, **PWA** (kein Telegram, keine native App). Zwei Schritte: zuerst gratis Freundes-Pilot (20–30 Freunde, misst ob der Loop zieht), danach zahlender Fremden-Pilot (60–100 Mitglieder, €9/Monat, 4–6 Wochen).
 **Eigner:** Maxim.
@@ -44,7 +46,11 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 - 🔒 Einwilligung pro Moment, ob für den Stadt Corso freigegeben
 - 🔒 Circle-Schwelle und Gegenseitigkeits-Zähler sind für Nutzer unsichtbar (kein Lesepfad) — der Circle-Eintritt ist eine Überraschung
 - Verfallendes Publikum: Follow = 24h **ab dem Follow** (individuelle Uhr pro Datensatz, kein stadtweiter Reset), danach aktiver Re-Entscheid; Erneuern ab 12h möglich
-- Moment = 24h ab dem Upload, danach überall weg; genau ein lebender Moment pro Person
+- Moment = 24h ab dem Upload, danach überall weg. **Mehrere lebende Momente pro Person sind erlaubt** (seit `0032`)
+- **In-Place-Blättern (seit 9. Sep 2026, PRD v0.7):** Die Momente eines Menschen sind EINE flache Sequenz — Bilder einer Reihe und die Momente selbst sind gleichrangige Schritte, keine verschachtelten Ebenen. Tipp rechts = weiter (am Ende zur nächsten Person), Tipp linkes Drittel = zurück. **Keine Zwischenebene, kein Vollbild-Layer.** `/p/$handle` ist nur noch Deep-Link-Ziel — von einer Kachel führt kein Tap dorthin. Logik zentral in `hooks/use-moment-sequence.ts`, Balken in `components/moment-progress.tsx`
+- ⚠️ **`onClick` ist innerhalb eines Snap-Containers auf iOS unzuverlässig**: `use-snap-scroll` ruft `preventDefault()` auf `touchmove`, WebKit unterdrückt danach die Kompatibilitäts-Mausereignisse. Tipps dort **immer** über `onTap` des Snap-Hooks führen, nie über `onClick`
+- **Laufender Corso (seit 9. Sep 2026, `0031`):** feste Platzzahl (`app_config.corso_slot_count`, Default 10), eine Belegung endet exakt mit den 24h ihres Moments, `refill_corso()` besetzt per pg_cron **jede Minute** nach. Pro Person immer nur EIN Moment im Corso — ein neuer Post verdrängt den laufenden Platz nicht. Kein 21-Uhr-Reset, **kein Prompt**, und „was um 21 Uhr als Event passiert" ist bewusst **geparkt** (nichts dafür bauen)
+- ⚠️ **`corso_day()` (21:00→21:00) bleibt trotzdem** — sie trägt den verdeckten Circle-Zähler, das Anstups-Limit, `reach_snapshots` und alle Push-`dedupe_key`s. Nicht entfernen, nur nicht mehr anzeigen
 - **Zwei Achsen (seit 2. Sep 2026, PRD §4.4/§4.8):** Achse 1 „Stadt" (Discovery + „Ich folge", flüchtige Follows; sichtbar nur wer einen lebenden Moment hat) · Achse 2 „Circle" (beständig, gegenseitig, entsteht serverseitig nach 5 Corso-Tagen gegenseitigen Folgens — Default via `app_config`, verfällt nie, unbegrenzt; zweiter Eintrittsweg: persönlicher Einladungs-Link `/c/<token>`, Migration 0026)
 - Verdienter Chat: lebt ausschließlich im Circle, wird mit dem Circle-Eintritt frei (`circle_messages`)
 
@@ -69,7 +75,7 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 ### Wichtige Backend-Prinzipien
 - **Leitplanken werden serverseitig erzwungen, nicht im Client.** Der Einwilligung für den Stadt Corso-Filter, die Follower-Privatsphäre und der 24h-Verfall leben in SQL-Funktionen, Triggern und RLS-Policies. Eine UI-seitige „Lösung" für eine 🔒 Leitplanke ist keine.
 - **Kennzahl-Funktionen sind argumentlos.** `my_reach()` / `my_feedback()` sind `SECURITY DEFINER` ohne Parameter — es gibt bewusst keinen Weg, die Zahl eines *anderen* Users abzufragen. Nicht „für Debugging" einen Parameter ergänzen.
-- **Der service_role-Key gehört nicht in den Client und nach Möglichkeit nicht in den Edge.** Der Tages-Prompt lief ursprünglich über eine Server-Action und wurde bewusst auf Client-RPC umgestellt, um den Key aus dem Worker zu halten. Nur das Einlösen von Einladungs-Links braucht ihn noch.
+- **Der service_role-Key gehört nicht in den Client und nach Möglichkeit nicht in den Edge.** Nur das Einlösen von Einladungs-Links braucht ihn noch.
 
 ## Dateistruktur
 
@@ -81,10 +87,11 @@ CORSO_EPHY/
 │   └── STATUS.md             # Lebender Schnappschuss: aktueller Stand + nächster Schritt
 ├── src/
 │   ├── routes/               # file-based routing — Konventionen: src/routes/README.md
-│   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider, AuthGate, Prompt-Splash
+│   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider, AuthGate, Splashes
 │   │   ├── index.tsx         # „Stadt" (Toggle: Discovery ⇄ Ich folge; Feeds in components/discovery-feed.tsx + following-feed.tsx)
-│   │   ├── record.tsx        # Aufnahme („Kamera": Tippen=Foto/Halten=Video, Live-Kamera + Prompt)
-│   │   ├── story.tsx         # Stadt Corso (Nav-Label „Corso"; 21:00 Ritual, Swipe vertikal, PRD §4.6)
+│   │   ├── record.tsx        # Aufnahme („Kamera": Tippen=Foto/Halten=Video, Live-Kamera)
+│   │   ├── story.tsx         # Stadt Corso (Nav-Label „Corso"; LAUFEND, Swipe vertikal, PRD §4.6)
+│   │   ├── p.$handle.tsx     # Profil — NUR Deep-Link-Ziel (Push/geteilte Links), kein Tap-Einstieg aus den Feeds
 │   │   ├── circle.tsx        # Circle (Achse 2): Partner-Leiste + moment-gated Feed + Chat (circle-chat.tsx)
 │   │   ├── feedback.tsx      # „Du" (Rücklauf: private Bilanz + Self-Screen)
 │   │   ├── settings.tsx      # Einstellungen (Screen 10, bewusst minimal)
@@ -92,22 +99,21 @@ CORSO_EPHY/
 │   │   └── story-empty-lab.tsx             # Lovable-Sandbox für den Leerzustand des Stadt Corso (Mock, kein Supabase)
 │   ├── components/
 │   │   ├── auth-gate.tsx     # Login-Screen + Session-Gate
-│   │   ├── city-backdrop.tsx # Geblurrte s/w Düsseldorf-Clips (Leerzustand des Stadt Corso + Prompt-Splash)
-│   │   ├── daily-prompt-splash.tsx  # Vollbild-Prompt, 1× pro Corso-Tag
+│   │   ├── city-backdrop.tsx # Geblurrte s/w Düsseldorf-Clips (Leerzustand des Stadt Corso)
 │   │   ├── dev-menu.tsx      # Admin-Dev-Menü, NUR für dominik@subworx.io (serverseitig geprüft)
-│   │   ├── follow-button.tsx, heart-burst.tsx, legal-page.tsx
+│   │   ├── heart-burst.tsx, legal-page.tsx, photo-stack.tsx, video-tile.tsx
 │   │   └── ui/               # shadcn/ui Komponenten (nicht anfassen)
 │   ├── hooks/
 │   │   ├── use-camera.ts     # 🔒 getUserMedia + MediaRecorder — die Live-Kamera-Pflicht
-│   │   ├── use-snap-scroll.ts# Vertikaler Snap-Feed (Discovery/Stadt Corso/Ich-folge teilen ihn)
+│   │   ├── use-snap-scroll.ts# Snap-Feed (vertikal = Person, horizontal = folgen) + onTap
+│   │   ├── use-moment-sequence.ts # 🔒 Die flache Sequenz einer Person — eine Quelle für alle Screens
 │   │   └── use-mobile.tsx
 │   ├── lib/
 │   │   ├── auth-context.tsx  # Session + Profil (Vorsicht: Auth-Lock, siehe STATUS)
 │   │   ├── follow-context.tsx# Follow/Renew/Unfollow — alle Follow-DB-Writes zentral hier (Circle-Zähler hängt per DB-Trigger daran)
 │   │   ├── circle/           # use-circle.ts — Circle-Verbindungen, Partner-IDs, acknowledge
-│   │   ├── corso-day.ts      # Der 21:00-Zyklusschnitt — überall benutzen, nie neu berechnen
+│   │   ├── corso-day.ts      # Der 21:00-Zyklusschnitt (intern, unsichtbar) — überall benutzen, nie neu berechnen
 │   │   ├── record-view.ts    # Anonyme Ansichten-Erfassung (500-ms-Verweil-Schwelle)
-│   │   ├── prompts/          # useTodayPrompt → RPC get_today_prompt()
 │   │   ├── invites/          # ⚠️ Pilot-Provisorium: E-Mail-freie Einladungs-Links
 │   │   ├── supabase/         # client.ts, upload.ts, types.ts (handgepflegt!)
 │   │   └── utils.ts
@@ -119,7 +125,7 @@ CORSO_EPHY/
 │   └── routeTree.gen.ts      # auto-generiert — nie von Hand editieren
 ├── supabase/
 │   ├── migrations/           # Nummerierte SQL-Migrationen (0001…) — Reihenfolge ist bindend
-│   ├── seed/                 # Prompt-Seeds
+│   ├── seed/                 # Prompt-Seeds (Historie — der Prompt ist seit 9. Sep 2026 abgeschafft)
 │   └── templates/            # Auth-E-Mail-Template (auth_email_de.html)
 ├── scripts/
 │   ├── deploy.sh             # Der einzige Deploy-Befehl
@@ -144,7 +150,8 @@ CORSO_EPHY/
 - Keine Follower-Zahlen oder Publikumsgröße für andere Nutzer sichtbar machen
 - **Migrationen sind append-only:** neue Datei mit der nächsten Nummer, bereits angewendete Migrationen nie rückwirkend editieren
 - **`src/lib/supabase/types.ts` ist handgepflegt** (nicht generiert) — bei jeder Schema-Änderung mitziehen, sonst driftet es unbemerkt
-- **Zeitlogik immer über `corso-day.ts`** — der Zyklus beginnt um 21:00, nicht um Mitternacht. Nie eigenes Datums-Rechnen daneben bauen.
+- **Zeitlogik immer über `corso-day.ts`** — der Zyklus beginnt um 21:00, nicht um Mitternacht. Nie eigenes Datums-Rechnen daneben bauen. (Der Zyklus ist seit 9. Sep 2026 nur noch intern; sichtbar ist er nirgends mehr.)
+- **Der Corso wird nie im Client gezogen.** Besetzung ausschließlich serverseitig über `refill_corso()`; gelesen wird über `corso_now()`. Eine Ziehung zur Lesezeit gäbe jedem Nutzer einen anderen Corso — das bricht das „die ganze Stadt sieht dasselbe".
 - **Verfall immer über `expires_at > now()` filtern**, nie über Tages-Arithmetik. `expires_at` wird ausschließlich per DB-Trigger gesetzt — nie vom Client mitschicken.
 
 ## Was du NICHT tun sollst

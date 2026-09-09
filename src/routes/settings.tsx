@@ -93,7 +93,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
  * Der Switch steht deshalb nur auf „an", wenn beides stimmt. Sie können
  * auseinanderlaufen — iOS wirft das Abo weg, wenn die PWA neu installiert
  * wird. Diesen Fall benennen wir, statt ihn zu verschlucken: sonst glaubt
- * jemand, Push sei an, und wundert sich still über die Stille um 21:00.
+ * jemand, Push sei an, und wundert sich still über die Stille.
  */
 
 function NotificationsSection({ profile }: { profile: Profile }) {
@@ -138,7 +138,7 @@ function NotificationsSection({ profile }: { profile: Profile }) {
               ? "In den Einstellungen deines Geräts für Corso erlauben."
               : staleOnThisDevice
                 ? "Auf diesem Gerät gerade nicht aktiv — einmal aus- und wieder einschalten."
-                : "Um 20:45 und 21:00, wenn deine Stadt spazieren geht."}
+                : "Wenn dein Moment in den Corso rückt und wenn jemand zeigt, dem du folgst."}
           </p>
         </div>
         <span className="relative inline-flex">

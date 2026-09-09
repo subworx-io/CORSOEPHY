@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useFollow, followFill, canRenew, type FollowedPerson } from "@/lib/follow-context";
 import { useCircle } from "@/lib/circle/use-circle";
 import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
 import { useSwipeFollow, SWIPE_EXIT_MS } from "@/hooks/use-swipe-follow";
 import { SwipeFollowOverlay } from "@/components/swipe-follow-overlay";
 import { supabase } from "@/lib/supabase/client";
+import { isControlTap, tapDirection } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
 import { MomentMenu } from "@/components/moment-menu";
-import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
-import { MomentPrompt } from "@/components/moment-prompt";
-import { PhotoStackTile } from "@/components/photo-stack";
-import { VideoTile } from "@/components/video-tile";
+import { SequenceMedia } from "@/components/sequence-media";
+import { MomentProgress } from "@/components/moment-progress";
+import {
+  useMomentSequence,
+  firstStepOf,
+  type SequenceMoment,
+  type SequenceGroup,
+  type SequenceStep,
+} from "@/hooks/use-moment-sequence";
 
 // „Ich folge" (Achse 1, zweite Unteransicht des Stadt-Screens): Menschen, denen
 // du folgst und die NICHT in deinem Circle sind.
@@ -58,29 +65,43 @@ function GlassHeart({ fill, className = "" }: { fill: number; className?: string
 const PILL =
   "flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold rounded-full transition-all active:scale-95";
 const PILL_SOLID = "bg-white text-black";
+// Stabile leere Liste — eine frische [] pro Render würde die Sequenz zurücksetzen.
+const EMPTY_MOMENTS: SequenceMoment[] = [];
 
-// Lebender Moment einer gefolgten Person — Video oder Foto-Stapel + Prompt.
-type FollowedMoment = {
-  videoUrl?: string;
-  photoUrls?: string[];
-  postId: string;
-  prompt: { text: string; date: string } | null;
-};
+// Alle lebenden Momente einer gefolgten Person, als Sequenz zum In-Place-Blättern.
+type FollowedMoments = SequenceMoment[];
 
 function PersonSlide({
   person,
   now,
-  moment,
+  moments,
   isActive,
   cardRef,
+  step,
+  currentMoment,
+  groups,
+  stepIndex,
+  hasSequence,
+  isLastStep,
+  onEnded,
 }: {
   person: FollowedPerson;
   now: number;
-  moment: FollowedMoment;
+  moments: FollowedMoments;
   isActive: boolean;
   // Karten-Element für Swipe-Renew/-Unfollow (use-swipe-follow bewegt es direkt).
   cardRef: (el: HTMLElement | null) => void;
+  // Sequenz-Zustand — nur die aktive Kachel bekommt ihn; Nachbarn zeigen ihren
+  // Anfang (siehe firstStepOf).
+  step?: SequenceStep;
+  currentMoment?: SequenceMoment;
+  groups: SequenceGroup[];
+  stepIndex: number;
+  hasSequence: boolean;
+  isLastStep: boolean;
+  onEnded: () => void;
 }) {
+  const shown = isActive ? { step, moment: currentMoment } : firstStepOf(moments);
   const fill = followFill(person.followedAt, now);
   const renewable = canRenew(person.followedAt, now);
 
@@ -105,20 +126,28 @@ function PersonSlide({
           <div className="absolute top-4 right-4 z-20">
             <MomentMenu
               reportedUserId={person.id}
-              reportedPostId={moment.postId}
+              reportedPostId={shown.step?.postId ?? moments[0]?.postId ?? null}
               handle={person.handle}
             />
           </div>
         )}
 
-        {moment.photoUrls ? (
-          <PhotoStackTile urls={moment.photoUrls} isActive={isActive} />
-        ) : moment.videoUrl ? (
-          <VideoTile src={moment.videoUrl} isActive={isActive} />
-        ) : null}
+        {shown.step && (
+          <SequenceMedia
+            step={shown.step}
+            moment={shown.moment}
+            isActive={isActive}
+            isLastStep={isActive ? isLastStep : false}
+            onEnded={onEnded}
+          />
+        )}
 
-        {/* Zu welchem Prompt ist dieser Moment entstanden? */}
-        {moment.prompt && <MomentPrompt text={moment.prompt.text} date={moment.prompt.date} />}
+        {/* Fortschritt der Sequenz — eine Zeile oben, sofort sichtbar. */}
+        {isActive && hasSequence && (
+          <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+            <MomentProgress groups={groups} stepIndex={stepIndex} />
+          </div>
+        )}
 
         {/* Herz/gebrochenes Herz blenden mit dem Wisch-Fortschritt ein */}
         <SwipeFollowOverlay label="erneuern" />
@@ -129,6 +158,7 @@ function PersonSlide({
             taucht wieder in Discovery auf). Die Pille ist reiner Status. */}
         <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
           <div className="flex items-end justify-between gap-3">
+            {/* Reiner Text — kein Einstieg in eine Zwischenebene mehr (9. Sep 2026). */}
             <span className="min-w-0 truncate text-white text-lg font-semibold tracking-tight drop-shadow-md">
               {person.handle}
             </span>
@@ -150,6 +180,7 @@ function PersonSlide({
 }
 
 export function FollowingFeed() {
+  const navigate = useNavigate();
   const { followed, renew, unfollow } = useFollow();
   const { partnerIds: circleIds } = useCircle();
   const { user } = useAuth();
@@ -170,7 +201,7 @@ export function FollowingFeed() {
   const handles = people.map((p) => p.handle);
 
   // Holt den aktuellsten LEBENDEN Post (+ signierte URLs) für jede gefolgte Person.
-  const { data: momentsByHandle = {}, isPending } = useQuery<Record<string, FollowedMoment>>({
+  const { data: momentsByHandle = {}, isPending } = useQuery<Record<string, FollowedMoments>>({
     queryKey: ["following-posts", handles.join(",")],
     queryFn: async () => {
       if (!handles.length) return {};
@@ -184,18 +215,11 @@ export function FollowingFeed() {
       // Nur lebende Momente (24h ab Post) — wer keinen hat, ist hier unsichtbar.
       const { data: posts } = await supabase
         .from("posts")
-        .select("id, media_path, media_type, media_paths, author_id, prompt_date")
+        .select("id, media_path, media_type, media_paths, author_id")
         .in("author_id", authorIds)
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false });
       if (!posts?.length) return {};
-
-      // Pro Author nur der neueste lebende Post (Liste ist created_at desc sortiert).
-      const newestByAuthor = new Map<string, (typeof posts)[number]>();
-      for (const post of posts) {
-        if (!newestByAuthor.has(post.author_id)) newestByAuthor.set(post.author_id, post);
-      }
-      const newest = Array.from(newestByAuthor.values());
 
       // Alle Medienpfade eines Posts (Video: einer, Foto-Moment: bis zu 5).
       const pathsOf = (post: {
@@ -207,27 +231,28 @@ export function FollowingFeed() {
           ? post.media_paths
           : [post.media_path];
 
-      // Prompt-Texte und signierte URLs je in EINER Abfrage, parallel. Die URLs sind
-      // gecacht (signed-urls.ts) — ein Refetch tauscht das <video src> nicht aus.
-      const [promptsByDate, urlsByPath] = await Promise.all([
-        fetchPromptsByDate(newest.map((p) => p.prompt_date)),
-        getSignedMomentUrls(newest.flatMap((p) => pathsOf(p))),
-      ]);
+      // Signierte URLs in EINER Abfrage. Sie sind gecacht (signed-urls.ts) —
+      // ein Refetch tauscht das <video src> nicht aus.
+      const urlsByPath = await getSignedMomentUrls(posts.flatMap((p) => pathsOf(p)));
 
-      const result: Record<string, FollowedMoment> = {};
-      for (const post of newest) {
+      // ALLE lebenden Momente je Person als Sequenz. Die Query liefert
+      // created_at DESC; innerhalb einer Person wird umgedreht, damit man
+      // chronologisch vorwärts durch ihren Tag blättert.
+      const result: Record<string, FollowedMoments> = {};
+      for (const post of posts) {
         const profile = profiles.find((p) => p.id === post.author_id);
         const urls = pathsOf(post)
           .map((path) => urlsByPath[path])
           .filter((u): u is string => !!u);
         if (!profile || !urls.length) continue;
-        const promptText = promptsByDate[post.prompt_date];
-        result[profile.handle] = {
-          videoUrl: post.media_type === "photo" ? undefined : urls[0],
-          photoUrls: post.media_type === "photo" ? urls : undefined,
+        const isPhoto = post.media_type === "photo";
+        const moment: SequenceMoment = {
           postId: post.id,
-          prompt: promptText ? { text: promptText, date: post.prompt_date } : null,
+          authorId: post.author_id,
+          videoUrl: isPhoto ? null : urls[0],
+          photoUrls: isPhoto ? urls : null,
         };
+        (result[profile.handle] ??= []).unshift(moment);
       }
       return result;
     },
@@ -244,7 +269,7 @@ export function FollowingFeed() {
   });
 
   // Sichtbar ist nur, wer gerade einen lebenden Moment hat (Umbau-Regel).
-  const visible = people.filter((p) => momentsByHandle[p.handle]);
+  const visible = people.filter((p) => momentsByHandle[p.handle]?.length);
 
   // snapTo/realign für die Entfolgen-Choreografie (Hook läuft erst weiter unten).
   const snapRef = useRef<{ snapTo: (i: number) => void; realign: (i: number) => void } | null>(
@@ -290,19 +315,41 @@ export function FollowingFeed() {
     count: visible.length,
     axis: "y",
     onSwipeX: swipeHandlers,
+    // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
+    // Siehe TapInfo in use-snap-scroll.ts (auf iOS feuert hier kein click).
+    onTap: ({ index, x, y, target }) => {
+      if (isControlTap(target)) return;
+      if (index !== currentIndexRef.current) return;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+      else seqRef.current?.next();
+    },
   });
   snapRef.current = { snapTo, realign };
+
+  // Sequenz der aktiven Person (eine pro Feed — Nachbarn zeigen ihren Anfang).
+  const activePerson = visible[currentIndex];
+  const seq = useMomentSequence({
+    moments: (activePerson && momentsByHandle[activePerson.handle]) || EMPTY_MOMENTS,
+    isActive: true,
+    onExhausted: () => snapTo(Math.min(visible.length - 1, currentIndex + 1)),
+  });
+  const seqRef = useRef(seq);
+  seqRef.current = seq;
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
 
   // Ansicht verbuchen, sobald der Moment einer gefolgten Person aktiv wird
   // (Follower-Ansichten zählen ebenfalls als „Zuschauer").
   // Kurze Verweil-Schwelle — siehe Begründung in discovery-feed (Kill-Metrik).
-  const activeHandle = visible[currentIndex]?.handle;
+  // Verbucht wird der Moment, auf dem die Sequenz gerade steht.
+  const activePostId = seq.step?.postId;
   useEffect(() => {
-    const postId = activeHandle ? momentsByHandle[activeHandle]?.postId : undefined;
-    if (!postId) return;
-    const t = setTimeout(() => recordView(postId), 500);
+    if (!activePostId) return;
+    const t = setTimeout(() => recordView(activePostId), 500);
     return () => clearTimeout(t);
-  }, [activeHandle, momentsByHandle]);
+  }, [activePostId]);
 
   // Erster Aufruf, Follows vorhanden, Momente noch unterwegs: „niemand zeigt
   // etwas" wäre eine Behauptung ohne Deckung. Lieber kurz nichts sagen.
@@ -357,9 +404,16 @@ export function FollowingFeed() {
             <PersonSlide
               person={person}
               now={now}
-              moment={momentsByHandle[person.handle]}
+              moments={momentsByHandle[person.handle] ?? EMPTY_MOMENTS}
               isActive={isActive}
               cardRef={cardRef(i)}
+              step={seq.step}
+              currentMoment={seq.currentMoment}
+              groups={seq.groups}
+              stepIndex={seq.stepIndex}
+              hasSequence={seq.hasSequence}
+              isLastStep={seq.isLastStep}
+              onEnded={seq.autoNext}
             />
           </div>
         );

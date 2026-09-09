@@ -45,19 +45,19 @@ interface DevInput {
 const ACTIONS: DevAction[] = [
   {
     key: "draw",
-    rpc: "dev_menu_draw_story",
-    label: "Stadt Corso jetzt ziehen",
+    rpc: "dev_menu_corso_refill",
+    label: "Corso jetzt nachbesetzen",
     icon: "movie",
-    desc: "Zieht sofort aus den echten, heute geposteten und für den Stadt Corso freigegebenen Momenten eine neue Auswahl (gewichtete Zufallsziehung) und friert sie stadtweit ein — ohne bis 21:00 zu warten.",
-    warn: "Überschreibt den heutigen Stadt Corso für ALLE Nutzer.",
+    desc: "Führt sofort einen Nachbesetzungs-Lauf aus, statt auf den Minuten-Cron zu warten: abgelaufene Momente verlassen ihre Slots, freie Slots werden gewichtet neu besetzt.",
+    warn: "Wirkt auf den echten Corso, den ALLE Nutzer sehen.",
   },
   {
     key: "clear",
-    rpc: "dev_menu_clear_story",
-    label: "Stadt Corso zurücksetzen",
+    rpc: "dev_menu_corso_clear",
+    label: "Corso leeren",
     icon: "backspace",
-    desc: "Löscht die heutige Auswahl für den Stadt Corso. Der Screen zeigt danach den Leerzustand, bis wieder gezogen wird.",
-    warn: "Leert den heutigen Stadt Corso für ALLE Nutzer.",
+    desc: "Räumt alle Belegungen des Corso. Danach steht der Leerzustand, bis der nächste Lauf (spätestens nach einer Minute) neu besetzt. Macht dieselben Momente wieder zu Kandidaten.",
+    warn: "Leert den Corso für ALLE Nutzer.",
     danger: true,
   },
   {
@@ -65,7 +65,7 @@ const ACTIONS: DevAction[] = [
     rpc: "dev_menu_expire_my_follows",
     label: "Meine Follows verfallen lassen",
     icon: "heart_broken",
-    desc: "Zieht den 24h-Verfall aller deiner aktiven Follows sofort vor — ohne 24 Stunden zu warten. Deine „Ich folge\"-Liste leert sich.",
+    desc: 'Zieht den 24h-Verfall aller deiner aktiven Follows sofort vor — ohne 24 Stunden zu warten. Deine „Ich folge"-Liste leert sich.',
     danger: true,
   },
   {
@@ -73,7 +73,7 @@ const ACTIONS: DevAction[] = [
     rpc: "dev_menu_expire_my_moment",
     label: "Meinen Moment verfallen lassen",
     icon: "timer_off",
-    desc: "Zieht den 24h-Verfall deines lebenden Moments sofort vor. Danach ist er überall weg: Discovery, „Ich folge\" und Rücklauf. Im laufenden Stadt Corso bleibt er stehen, falls er gezogen wurde.",
+    desc: "Zieht den 24h-Verfall ALLER deiner lebenden Momente sofort vor. Danach sind sie überall weg — auch aus dem Corso: dein Slot wird beim nächsten Lauf frei und jemand anderes rückt nach.",
     danger: true,
   },
   {
@@ -82,7 +82,7 @@ const ACTIONS: DevAction[] = [
     label: "Fake-Test-Momente seeden",
     icon: "science",
     desc: "Legt synthetische Test-Momente mit verschiedenen Follower-Zahlen an, damit du die gewichtete Ziehung solo testen kannst.",
-    warn: "Diese Fake-Momente können im ECHTEN Stadt Corso auftauchen, bis du sie mit „Fake-Test-Daten löschen\" wieder entfernst.",
+    warn: 'Diese Fake-Momente können im ECHTEN Corso auftauchen, bis du sie mit „Fake-Test-Daten löschen" wieder entfernst.',
     danger: true,
   },
   {
@@ -90,7 +90,7 @@ const ACTIONS: DevAction[] = [
     rpc: "dev_menu_clear_test_clips",
     label: "Fake-Test-Daten löschen",
     icon: "delete_sweep",
-    desc: "Entfernt alle synthetischen Test-Konten samt ihrer Momente, Follows und Slots im Stadt Corso wieder.",
+    desc: "Entfernt alle synthetischen Test-Konten samt ihrer Momente, Follows und Corso-Belegungen wieder.",
   },
   {
     key: "circleseed",
@@ -127,7 +127,7 @@ const ACTIONS: DevAction[] = [
       {
         name: "p_body",
         label: "Text",
-        placeholder: "Heute Abend um 21:00 geht deine Stadt zum ersten Mal spazieren.",
+        placeholder: "Deine Stadt geht spazieren — schau, wer gerade im Corso steht.",
         max: 180,
         multiline: true,
       },
@@ -138,17 +138,7 @@ const ACTIONS: DevAction[] = [
     rpc: "dev_menu_test_push",
     label: "Test-Push an mich",
     icon: "notifications_active",
-    desc: "Schickt sofort eine Push-Benachrichtigung an alle Geräte, auf denen du Push eingeschaltet hast — ohne bis 21:00 zu warten. Kommt binnen einer Minute an. Betrifft nur dich.",
-  },
-  {
-    key: "splash",
-    run: () => {
-      window.dispatchEvent(new CustomEvent("corso:preview-splash"));
-      return "Splash eingeblendet.";
-    },
-    label: "Prompt-Splash zeigen",
-    icon: "slideshow",
-    desc: "Blendet den täglichen Vollbild-Prompt-Splash sofort ein (3 Sekunden, genau wie beim ersten App-Öffnen). Reine Vorschau — ändert nichts am „einmal pro Tag\"-Merker und an der DB.",
+    desc: "Schickt sofort eine Push-Benachrichtigung an alle Geräte, auf denen du Push eingeschaltet hast. Kommt binnen einer Minute an. Betrifft nur dich.",
   },
 ];
 

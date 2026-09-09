@@ -10,7 +10,10 @@ export interface Profile {
   created_at: string;
 }
 
-// Hebel-Kategorien der Prompt-Rotation (0011_prompts_categories.sql), gewichtet ~40/40/20.
+// ⚠️ ÜBERHOLT seit dem laufenden Corso (9. Sep 2026): Es gibt keinen Tages-Prompt
+// mehr. Die Tabellen `prompts` / `daily_prompt` bleiben in der DB liegen (Pilot-
+// Historie, nichts wird gelöscht), der Client liest sie nicht mehr. Die Typen
+// stehen hier nur noch, damit die Historie später auswertbar bleibt.
 export type PromptCategory = "zeig" | "augenzwinkern" | "funken";
 
 export interface Prompt {
@@ -36,7 +39,11 @@ export type MediaType = "photo" | "video";
 export interface Post {
   id: string;
   author_id: string;
-  prompt_date: string; // Corso-Zyklus (21:00→21:00), in dem der Moment entstand
+  // Corso-Zyklus (21:00→21:00), in dem der Moment entstand. Seit dem Wegfall des
+  // Prompts (9. Sep 2026) nur noch eine Zeit-Gruppierung für die Auswertung —
+  // kein Anzeige-Bezug mehr. Der Unique-Key (author_id, prompt_date) ist mit 0032
+  // gefallen: eine Person darf mehrere lebende Momente haben.
+  prompt_date: string;
   media_path: string; // Pfad im Storage-Bucket 'moments' (bei Fotos: das erste Foto)
   media_type: MediaType;
   // Foto-Momente (0023): vollständige, geordnete Foto-Liste (inkl. media_path),
@@ -82,6 +89,8 @@ export interface Nudge {
   created_at: string;
 }
 
+// ⚠️ HISTORIE: die eingefrorenen 21:00-Ziehungen bis zum 8. Sep 2026.
+// Seit 0031 schreibt nichts mehr hinein — der laufende Corso lebt in corso_slots.
 export interface CityStorySlot {
   id: string;
   story_date: string;
@@ -89,6 +98,32 @@ export interface CityStorySlot {
   post_id: string;
   slot: number; // 0..7
   created_at: string;
+}
+
+// Der laufende Corso (0031): eine Zeile = eine Belegung eines Slots durch einen
+// Moment. `left_at === null` heißt „steht gerade auf der Bühne". Die Tabelle hat
+// bewusst KEINEN Client-Lesepfad — gelesen wird über corso_now() /
+// corso_latest_entry(). Der Typ dient der Dokumentation des Schemas.
+export interface CorsoSlot {
+  id: string;
+  city: string;
+  slot: number; // 0 .. corso_slot_count-1 (app_config, Default 10)
+  post_id: string;
+  author_id: string;
+  entered_at: string;
+  left_at: string | null; // gesetzt, wenn der Moment seine 24h erreicht hat
+}
+
+// Rückgabezeile von corso_now() — 🔒 nur Anzeigedaten, keine Zahlen.
+export interface CorsoNowRow {
+  slot: number;
+  handle: string;
+  media_path: string;
+  media_type: MediaType;
+  media_paths: string[] | null;
+  post_id: string;
+  author_id: string;
+  entered_at: string;
 }
 
 export interface ReachSnapshot {
@@ -144,13 +179,38 @@ export interface Connection {
 // Partner der Verbindung lesen/schreiben; Block sperrt serverseitig (Trigger).
 // Seit 0028 in der supabase_realtime-Publication: neue Nachrichten kommen per
 // Realtime an, nicht mehr per Polling.
+/** Sorte einer Chat-Nachricht (0035). 'text' = ohne Anhang. */
+export type ChatMessageKind = "text" | "photo" | "video" | "voice";
+
 export interface CircleMessage {
   id: string;
   connection_id: string;
   sender_id: string;
+  /** Bei reinen Medien-Nachrichten leer — der Check erlaubt das seit 0035. */
   body: string;
   created_at: string;
+  // ── Anhang (0035). Chat-Medien liegen im PRIVATEN Bucket `chat-media`,
+  // Pfad <connection_id>/<sender_id>/<uuid>. 🔒 Nur die beiden Partner der
+  // Verbindung bekommen dafür eine signierte URL — durchgesetzt per
+  // Storage-Policy, nicht im Client.
+  kind: ChatMessageKind;
+  attachment_path: string | null;
+  attachment_mime: string | null;
+  attachment_bytes: number | null;
+  /** Video und Sprachnachricht. */
+  duration_ms: number | null;
+  /** Foto/Video — für das Seitenverhältnis der Blase. */
+  width: number | null;
+  height: number | null;
+  /** Zitierte Nachricht. Serverseitig auf dieselbe Verbindung beschränkt (0035). */
+  reply_to: string | null;
 }
+
+/** Spaltenliste für jede circle_messages-Abfrage — muss vollständig bleiben:
+ *  Realtime liefert die GANZE Zeile, eine kürzere Auswahl erzeugt sonst zwei
+ *  verschiedene Zeilenformen im selben Query-Cache. */
+export const CIRCLE_MESSAGE_COLUMNS =
+  "id, connection_id, sender_id, body, created_at, kind, attachment_path, attachment_mime, attachment_bytes, duration_ms, width, height, reply_to";
 
 // Rückgabe von circle_inbox() (0028) — eine Zeile je eigener Verbindung mit der
 // jüngsten Nachricht und dem Ungelesen-Stand. 🔒 Bewusst ohne Zähler: die App
@@ -183,6 +243,10 @@ export interface MyFeedback {
   moment_live: boolean;
   moment_created_at: string | null;
   moment_expires_at: string | null;
+  // ⚠️ Seit dem laufenden Corso (0031) endet eine Corso-Belegung exakt mit den
+  // 24h des Moments — die frühere Lebensverlängerung „im Corso, aber abgelaufen"
+  // (PRD §4.6, bis zu 48h) ist gestrichen. Das Feld bleibt korrekt: „steht mein
+  // Moment gerade im Corso?".
   in_city_story: boolean;
   is_record: boolean;
   streak: number;
@@ -195,7 +259,9 @@ export interface MyFeedback {
 //   follow_expired — reserviert, wird NICHT gefeuert (Verfall implizit über
 //                    follows.expires_at seit 0015, kein Cron mehr).
 //   chat_reached   — reserviert (Phase 3, Chat existiert nicht).
-//   story_drawn    — nur serverseitig in draw_city_story() geschrieben.
+//   story_drawn    — nur serverseitig geschrieben: bis 8. Sep in draw_city_story(),
+//                    seit 0031 in refill_corso() (metadata.via = 'corso_refill')
+//                    bei jedem Einzug in einen Corso-Slot.
 //   onboarding_completed — First-Run abgeschlossen (metadata.via: "read"|"skip").
 export type EventType =
   | "app_open"

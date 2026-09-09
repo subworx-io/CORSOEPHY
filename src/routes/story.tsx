@@ -1,27 +1,28 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
+import { isControlTap, tapDirection } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { useSwipeFollow } from "@/hooks/use-swipe-follow";
 import { useFollow } from "@/lib/follow-context";
+import { useCircle } from "@/lib/circle/use-circle";
 import { SwipeFollowOverlay, SwipeHintChip } from "@/components/swipe-follow-overlay";
 import { HeartBurst, useHeartBurst } from "@/components/heart-burst";
 import { recordView } from "@/lib/record-view";
 import { logEvent } from "@/lib/events";
-import { corsoDay, cycleStart, nextCycleStart } from "@/lib/corso-day";
-import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
-import { MomentPrompt } from "@/components/moment-prompt";
 import { MomentMenu } from "@/components/moment-menu";
-import { PhotoStackTile } from "@/components/photo-stack";
+import { SequenceMedia } from "@/components/sequence-media";
+import { MomentProgress } from "@/components/moment-progress";
+import { useMomentSequence, firstStepOf, type SequenceMoment } from "@/hooks/use-moment-sequence";
 
 export const Route = createFileRoute("/story")({
   head: () => ({
     meta: [
       { title: "Stadt Corso" },
-      { name: "description", content: "21:00 — Deine Stadt enthüllt sich." },
+      { name: "description", content: "Wer gerade auf der Bühne deiner Stadt steht." },
     ],
   }),
   component: StoryPage,
@@ -29,194 +30,53 @@ export const Route = createFileRoute("/story")({
 
 const CITY = (import.meta.env.VITE_PILOT_CITY as string | undefined) ?? "Düsseldorf";
 
-// Ziehung und Zyklus-Wechsel fallen auf dieselbe Uhrzeit: um 21:00 wird die
-// Stadt Corso gezogen UND der neue Prompt startet. Die Auswahl steht danach
-// eingefroren bis zur nächsten Ziehung — also den ganzen Zyklus lang.
-// Beides ist derselbe Zeitpunkt, deshalb dieselbe Funktion.
-const nextStoryTarget = (now: number) => nextCycleStart(new Date(now));
-const storyEndsAt = nextStoryTarget;
+// Der LAUFENDE Corso (Umbau 9. Sep 2026, Migration 0031).
+//
+// Es gibt keine Ziehung um 21:00 mehr und keinen Reset. Der Corso hat feste
+// Slots; jede Belegung endet exakt dann, wenn ihr Moment 24 h alt wird, und ein
+// Cron-Lauf (jede Minute) rückt den nächsten passenden Moment nach. Der Screen
+// zeigt deshalb schlicht den aktuellen Stand — kein Countdown, kein Vorhang,
+// keine Enthüllung zu einer festen Uhrzeit.
+//
+// Gelesen wird über corso_now() (SECURITY DEFINER): Block-Filter und die
+// Lebend-Prüfung liegen serverseitig. Die Lebend-Prüfung dort schließt auch das
+// Lag-Fenster von bis zu 60 s zwischen dem Ablauf eines Moments und dem
+// nächsten Cron-Lauf — ein toter Moment ist sofort weg, nicht erst nach dem Tick.
 
-// Die Ziehung läuft per pg_cron UM 21:00 — also einige Sekunden nach dem Ende des
-// Countdowns, nicht punktgenau davor. Solange die Story nach dem Zyklus-Start noch
-// leer ist, fragt der Screen in diesem Fenster regelmäßig nach, damit die Clips
-// auftauchen, während man zuschaut. Danach gilt: heute kein einwilligender Moment.
-const DRAW_GRACE_MS = 10 * 60 * 1000;
-const DRAW_POLL_MS = 10_000;
+// Wie oft der Screen nachfragt, ob jemand nachgerückt ist. Der Corso verändert
+// sich jetzt jederzeit, nicht mehr einmal am Abend — aber auch nicht hektisch:
+// pro frei werdendem Slot ein Wechsel.
+const CORSO_POLL_MS = 30_000;
+// Stabile leere Liste — eine frische [] pro Render würde die Sequenz zurücksetzen.
+const EMPTY_MOMENTS: SequenceMoment[] = [];
 
-// Vorhang vor der Ziehung (Entscheidung 21. Aug 2026): In den letzten 15 Minuten
-// vor 21:00 zeigt der Screen den Countdown mit dem Düsseldorf-Hintergrund statt
-// der auslaufenden Stadt Corso — das Ritual bekommt einen sichtbaren Anlauf.
-// Passend dazu geht um 20:45 der Vorab-Push raus (0022_city_story_soon_push.sql).
-const CURTAIN_BEFORE_MS = 15 * 60 * 1000;
-
-const isCurtainTime = (now: number) => nextCycleStart(new Date(now)) - now <= CURTAIN_BEFORE_MS;
-
-/**
- * true in den letzten CURTAIN_BEFORE_MS vor dem Zyklus-Wechsel. Schaltet per
- * Timer exakt an den beiden Kanten um (Fensterbeginn, 21:00) — kein Sekunden-
- * Ticker, der den ganzen Screen samt Videos jede Sekunde neu rendern würde.
- */
-function useDrawCurtain() {
-  const [curtain, setCurtain] = useState(() => isCurtainTime(Date.now()));
-
-  useEffect(() => {
-    let id = 0;
-    const arm = () => {
-      window.clearTimeout(id);
-      const now = Date.now();
-      const cycle = nextCycleStart(new Date(now));
-      const up = cycle - now <= CURTAIN_BEFORE_MS;
-      setCurtain(up);
-      // Nächste Kante: Vorhang fällt um 21:00, sonst geht er bei 21:00 − 15 min hoch.
-      const edge = up ? cycle : cycle - CURTAIN_BEFORE_MS;
-      id = window.setTimeout(arm, Math.max(0, edge - now) + 250);
-    };
-    const onVisible = () => {
-      if (document.visibilityState === "visible") arm();
-    };
-    arm();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.clearTimeout(id);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
-
-  return curtain;
-}
-
-/**
- * Der Corso-Tag als State, der exakt beim Zyklus-Wechsel (21:00) umspringt.
- * Hängt er nur im Query-Key als `corsoDay()`-Aufruf, bleibt er auf dem alten Tag,
- * bis irgendetwas den Screen neu rendert — beim Zuschauen auf den Countdown
- * passiert das nie, die Story erschien erst nach einem Tab-Wechsel.
- */
-function useCorsoDay() {
-  const [day, setDay] = useState(() => corsoDay());
-
-  useEffect(() => {
-    let id = 0;
-    const sync = () => setDay((prev) => (prev === corsoDay() ? prev : corsoDay()));
-    const arm = () => {
-      window.clearTimeout(id);
-      // Kleiner Puffer, damit der Timer sicher NACH dem Wechsel feuert.
-      const delay = Math.max(0, nextCycleStart() - Date.now()) + 250;
-      id = window.setTimeout(() => {
-        sync();
-        arm();
-      }, delay);
-    };
-    // Kommt die App aus dem Hintergrund, können Timer verschlafen haben.
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      sync();
-      arm();
-    };
-    arm();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.clearTimeout(id);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
-
-  return day;
-}
-
-// Tickt sekündlich und liefert die verbleibende Zeit bis zum Ziel.
-function useTimeLeft(targetOf: (now: number) => number) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-  const diff = Math.max(0, targetOf(now) - now);
-  return {
-    hours: Math.floor(diff / 3600000),
-    minutes: Math.floor((diff % 3600000) / 60000),
-    seconds: Math.floor((diff % 60000) / 1000),
-    total: diff,
-  };
-}
-
-const pad = (n: number) => n.toString().padStart(2, "0");
-
-// Rückgabezeile von city_story() — 🔒 nur Anzeige-Daten, keine Zahlen.
-interface StoryRow {
+// Rückgabezeile von corso_now() — 🔒 nur Anzeige-Daten, keine Zahlen.
+interface CorsoRow {
   slot: number;
   handle: string;
   media_path: string;
-  // Seit 0023: Foto-Momente. Optional getypt, damit der Client auch gegen die
-  // alte Funktions-Version (ohne die Spalten) nicht bricht — dann gilt "video".
   media_type?: string | null;
   media_paths?: string[] | null;
   post_id: string;
   author_id: string;
-  prompt_date: string | null;
+  entered_at: string;
 }
 
 interface StoryClip {
   slot: number;
   handle: string;
-  // Genau eines von beiden: Video-URL oder geordneter Foto-Stapel.
-  videoUrl: string | null;
-  photoUrls: string[] | null;
-  postId: string;
   authorId: string;
-  // Der Prompt, zu dem dieser Moment entstand. In der Story ist das für alle
-  // Slots derselbe Tag — trotzdem pro Clip aufgelöst, damit die Anzeige an der
-  // Historie hängt und nicht an einer Annahme.
-  promptText: string | null;
-  promptDate: string | null;
-}
-
-/* Video-Kachel — identische UX wie Discovery (autoplay stumm, tippen für Ton). */
-function VideoTile({ src, isActive }: { src: string; isActive: boolean }) {
-  const ref = useRef<HTMLVideoElement>(null);
-  const [muted, setMuted] = useState(true);
-
-  useEffect(() => {
-    const v = ref.current;
-    if (!v) return;
-    if (isActive) v.play().catch(() => {});
-    else v.pause();
-  }, [isActive]);
-
-  function toggleMute() {
-    const v = ref.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setMuted(v.muted);
-  }
-
-  return (
-    <>
-      <video
-        ref={ref}
-        src={src}
-        playsInline
-        muted
-        loop
-        className="absolute inset-0 h-full w-full object-cover"
-      />
-      {/* Solide Fläche statt backdrop-blur — Begründung in components/video-tile.tsx. */}
-      {isActive && (
-        <button
-          onClick={toggleMute}
-          className="absolute top-4 left-4 h-9 w-9 rounded-full bg-black/60 flex items-center justify-center active:scale-95 transition-transform z-10"
-          aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
-        >
-          <span className="material-symbols-outlined text-white text-[18px]">
-            {muted ? "volume_off" : "volume_up"}
-          </span>
-        </button>
-      )}
-    </>
-  );
+  /** Der Moment, der den Slot belegt — Startpunkt der Sequenz. */
+  slotPostId: string;
+  /** 🔒 AUSSCHLIESSLICH Momente mit Corso-Freigabe. */
+  moments: SequenceMoment[];
+  /** Position des Slot-Moments innerhalb von `moments`. */
+  slotIndex: number;
 }
 
 function StoryPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   // story_viewed (Metrik-Tracking): einmal beim Öffnen des Story-Screens, wenn
   // eingeloggt. Bewusst getrennt von app_open — das Öffnen der Stadt Corso ist
@@ -227,72 +87,121 @@ function StoryPage() {
     logEvent("story_viewed");
   }, [user]);
 
-  // Springt um 21:00 um → neuer Query-Key → sofortiger Fetch der frischen Ziehung.
-  const day = useCorsoDay();
-  // Letzte 15 Minuten vor der Ziehung: Countdown-Vorhang statt der alten Story.
-  const curtain = useDrawCurtain();
-
-  // Die stadtweit eingefrorene Auswahl des heutigen Corso-Tags. Alle Nutzer der
-  // Stadt lesen exakt dieselben Slots (serverseitig um 21:00 gezogen).
+  // Der aktuelle Stand des laufenden Corso. Alle Nutzer der Stadt sehen
+  // dieselben Slots — die Besetzung liegt serverseitig in corso_slots, nicht in
+  // einer Ziehung pro Client.
   const { data: clips = [], isLoading } = useQuery({
-    queryKey: ["city-story", day, CITY, user?.id],
+    queryKey: ["corso-now", CITY, user?.id],
     queryFn: async () => {
       if (!user) return [];
-      // Gelesen wird über city_story() (SECURITY DEFINER), NICHT direkt über die
-      // Tabelle: seit 0015 blendet die RLS auf `posts` abgelaufene Momente aus.
-      // Die gezogene Stadt Corso bleibt aber bis zur nächsten Ziehung stehen —
-      // wer ins Rampenlicht gezogen wurde, verschwindet dort nicht mitten im Abend,
-      // auch wenn seine 24h in Discovery/Ich-folge längst abgelaufen sind.
-      const { data, error } = await supabase.rpc("city_story", { target_city: CITY });
-      const rows = (data ?? []) as StoryRow[];
+      const { data, error } = await supabase.rpc("corso_now", { target_city: CITY });
+      const rows = (data ?? []) as CorsoRow[];
       if (error || !rows.length) return [];
 
       // Alle Medienpfade eines Slots (Video: einer, Foto-Moment: bis zu 5).
-      const pathsOf = (row: StoryRow) =>
+      // Bewusst auf das Minimum getypt: dieselbe Funktion bedient die Slot-Zeilen
+      // aus corso_now() UND die Zusatz-Momente aus der posts-Abfrage.
+      const pathsOf = (row: {
+        media_path: string;
+        media_type?: string | null;
+        media_paths?: string[] | null;
+      }) =>
         row.media_type === "photo" && row.media_paths?.length ? row.media_paths : [row.media_path];
 
-      // Prompt-Texte für alle vorkommenden Tage in EINER Abfrage nachladen.
-      // Prompt-Texte und signierte URLs je in EINER Abfrage, parallel. Die URLs sind
-      // gecacht (signed-urls.ts) — der Fokus-Refetch tauscht das <video src> nicht aus.
-      const [promptsByDate, urlsByPath] = await Promise.all([
-        fetchPromptsByDate(rows.map((row) => row.prompt_date)),
-        getSignedMomentUrls(rows.flatMap((row) => pathsOf(row))),
-      ]);
+      // 🔒 In-Place-Blättern im Corso läuft AUSSCHLIESSLICH über Momente MIT
+      // Corso-Freigabe (Entscheidung Dominik, 9. Sep 2026, Variante b). Ein
+      // Moment ohne `city_story_consent` darf hier unter keinen Umständen
+      // auftauchen — sonst hebelte das Blättern die Einwilligungs-Leitplanke aus.
+      // Der Filter steht deshalb hart in der Query, nicht in der Darstellung.
+      const authorIds = [...new Set(rows.map((r) => r.author_id))];
+      const { data: consented } = await supabase
+        .from("posts")
+        .select("id, author_id, media_path, media_type, media_paths, created_at")
+        .in("author_id", authorIds)
+        .eq("city_story_consent", true) // 🔒 die Leitplanke
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: true });
 
-      return rows.flatMap((row): StoryClip[] => {
-        const urls = pathsOf(row)
+      const extra = consented ?? [];
+      const allPaths = [
+        ...rows.flatMap((row) => pathsOf(row)),
+        ...extra.flatMap((p) => pathsOf(p)),
+      ];
+      const urlsByPath = await getSignedMomentUrls(allPaths);
+
+      // Minimal getypt, damit dieselbe Funktion beide Quellen bedient (Supabase
+      // liefert die Zusatz-Momente als `any`-ish, der Slot-Moment ist CorsoRow).
+      const toMoment = (p: {
+        id: string;
+        author_id: string;
+        media_path: string;
+        media_type?: string | null;
+        media_paths?: string[] | null;
+        created_at?: string | null;
+      }): SequenceMoment | null => {
+        const urls = pathsOf(p)
           .map((path) => urlsByPath[path])
           .filter((u): u is string => !!u);
-        if (!urls.length) return [];
-        const isPhoto = row.media_type === "photo";
+        if (!urls.length) return null;
+        const isPhoto = p.media_type === "photo";
+        return {
+          postId: p.id,
+          authorId: p.author_id,
+          videoUrl: isPhoto ? null : urls[0],
+          photoUrls: isPhoto ? urls : null,
+          createdAt: p.created_at ?? null,
+        };
+      };
+
+      return rows.flatMap((row): StoryClip[] => {
+        const own = extra.filter((p) => p.author_id === row.author_id);
+        // Der Moment, der den Slot belegt, MUSS in der Sequenz stecken — sonst
+        // zeigte die Bühne jemand anderen als den, der wirklich draufsteht.
+        // Fällt die Zusatz-Abfrage aus oder fehlt der Slot-Moment darin (z.B.
+        // weil seine Freigabe nachträglich zurückgenommen wurde), wird er
+        // ergänzt. Er steht ja bereits öffentlich auf der Bühne.
+        const hasSlotMoment = own.some((p) => p.id === row.post_id);
+        const source =
+          own.length && hasSlotMoment
+            ? own
+            : [
+                { ...row, id: row.post_id, created_at: undefined },
+                ...own.filter((p) => p.id !== row.post_id),
+              ];
+        const moments = source.map(toMoment).filter((m): m is SequenceMoment => m !== null);
+        if (!moments.length) return [];
+        // Startpunkt ist der Moment, der wirklich auf der Bühne steht — nicht
+        // zwangsläufig der älteste der Person.
+        const slotIndex = Math.max(
+          0,
+          moments.findIndex((m) => m.postId === row.post_id),
+        );
         return [
           {
             slot: row.slot,
             handle: row.handle,
-            videoUrl: isPhoto ? null : urls[0],
-            photoUrls: isPhoto ? urls : null,
-            postId: row.post_id,
             authorId: row.author_id,
-            promptDate: row.prompt_date ?? null,
-            promptText: row.prompt_date ? (promptsByDate[row.prompt_date] ?? null) : null,
+            slotPostId: row.post_id,
+            moments,
+            slotIndex,
           },
         ];
       });
     },
     enabled: !!user,
-    staleTime: 60_000,
+    staleTime: CORSO_POLL_MS,
     refetchOnWindowFocus: true,
-    // Im Fenster kurz nach 21:00 IMMER pollen — auch wenn schon Daten da sind.
-    // Grund: geht die Client-Uhr etwas vor, liefert der Fetch direkt nach dem
-    // Key-Wechsel noch die ALTE Ziehung (der Server ist noch im alten Corso-Tag).
-    // Ein „Daten da → Polling aus" ließe dann die frische Ziehung erst nach
-    // einem Tab-Wechsel erscheinen — genau der gemeldete Hänger. Außerhalb des
-    // Fensters: kein Polling (die Story steht ohnehin bis zur nächsten Ziehung).
-    refetchInterval: () => (Date.now() - cycleStart() < DRAW_GRACE_MS ? DRAW_POLL_MS : false),
+    // Der Corso besetzt laufend nach — regelmäßig nachfragen, statt auf ein
+    // Ereignis zu einer festen Uhrzeit zu warten.
+    refetchInterval: CORSO_POLL_MS,
   });
 
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { isFollowing, follow, unfollow } = useFollow();
+  // Circle-Partner sind Achse 2: Ihnen zu folgen hat keine Wirkung, weil sie im
+  // „Ich folge"-Feed bewusst nicht auftauchen (PRD §4.4). Statt eines
+  // folgenlosen Wischs zeigt die Kachel eine Status-Pille „in deinem Circle".
+  const { partnerIds: circleIds } = useCircle();
 
   // Swipe-Follow: Rechts-Wisch auf dem Clip = Folgen, Links-Wisch = Entfolgen
   // (kein Button mehr). Der Clip bleibt in der Story stehen (die Ziehung ist
@@ -302,7 +211,7 @@ function StoryPage() {
     right: {
       canCommit: (i) => {
         const c = clips[i];
-        return !!c && !isFollowing(c.handle);
+        return !!c && !circleIds.has(c.authorId) && !isFollowing(c.handle);
       },
       onCommit: (i) => {
         const c = clips[i];
@@ -314,7 +223,7 @@ function StoryPage() {
     left: {
       canCommit: (i) => {
         const c = clips[i];
-        return !!c && isFollowing(c.handle);
+        return !!c && !circleIds.has(c.authorId) && isFollowing(c.handle);
       },
       onCommit: (i) => {
         const c = clips[i];
@@ -323,30 +232,50 @@ function StoryPage() {
     },
   });
 
-  const { currentIndex, slideRef, containerRef } = useSnapScroll({
+  const { currentIndex, slideRef, containerRef, snapTo } = useSnapScroll({
     count: clips.length,
     axis: "y",
     onSwipeX: swipeHandlers,
+    // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
+    // 🔒 Die Sequenz enthält nur freigegebene Momente (Filter in der Query).
+    onTap: ({ index, x, y, target }) => {
+      if (isControlTap(target)) return;
+      if (index !== currentIndexRef.current) return;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+      else seqRef.current?.next();
+    },
   });
+
+  // Sequenz des aktiven Slots. Startpunkt ist der Moment auf der Bühne.
+  const activeClip = clips[currentIndex];
+  const seq = useMomentSequence({
+    moments: activeClip?.moments ?? EMPTY_MOMENTS,
+    isActive: true,
+    initialMomentIndex: activeClip?.slotIndex ?? 0,
+    onExhausted: () => snapTo(Math.min(clips.length - 1, currentIndex + 1)),
+  });
+  const seqRef = useRef(seq);
+  seqRef.current = seq;
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
 
   // Ansicht verbuchen, sobald ein Story-Clip aktiv wird (Datenquelle „Zuschauer").
   // Kurze Verweil-Schwelle — siehe Begründung in index.tsx (Zuschauer = Kill-Metrik).
+  const activePostId = seq.step?.postId;
   useEffect(() => {
-    const postId = clips[currentIndex]?.postId;
-    if (!postId) return;
-    const t = setTimeout(() => recordView(postId), 500);
+    if (!activePostId) return;
+    const t = setTimeout(() => recordView(activePostId), 500);
     return () => clearTimeout(t);
-  }, [currentIndex, clips]);
+  }, [activePostId]);
 
-  // Noch keine Story (kein einwilligender Clip) oder Vorhang-Fenster vor der
-  // Ziehung: ehrlicher Leerzustand mit Countdown statt Mock. Kein "peinlich
-  // leer" durch Fake-Auffüllen (PRD).
-  const showEmpty = curtain || (!isLoading && clips.length === 0);
+  // Kein einwilligender Moment in der Stadt: ehrlicher Leerzustand statt Mock.
+  // Kein „peinlich leer" durch Fake-Auffüllen (PRD §4.6).
+  const showEmpty = !isLoading && clips.length === 0;
 
-  // Enthüllungs-Animation: Wer den Countdown live verfolgt, sieht die Ziehung
-  // hier ERSCHEINEN (Leerzustand/Vorhang → Clips), nicht nur „plötzlich da".
-  // Der Übergang wird erkannt, indem wir uns merken, ob zuletzt der Leerzustand
-  // stand — nur dann animiert der erste Moment herein.
+  // Enthüllungs-Animation: Rückt jemand nach, während man zuschaut, tritt der
+  // Moment auf, statt einfach da zu sein. Erkannt am Übergang leer → besetzt.
   const wasEmptyRef = useRef(showEmpty);
   const [reveal, setReveal] = useState(false);
   useEffect(() => {
@@ -373,6 +302,11 @@ function StoryPage() {
         const offset = i - currentIndex;
         const isActive = offset === 0;
         const isNeighbor = Math.abs(offset) === 1;
+        // Steht der gerade gezeigte Schritt auf dem Moment, der den Slot belegt?
+        // Nicht-aktive Kacheln zeigen ihren Anfang — dort gilt der Slot-Moment
+        // nur, wenn er zufällig der erste ist.
+        const shownPostId = isActive ? seq.step?.postId : c.moments[0]?.postId;
+        const isSlotMoment = shownPostId === c.slotPostId;
 
         return (
           <div
@@ -393,8 +327,17 @@ function StoryPage() {
                 ref={cardRef(i)}
                 className="relative w-full h-full rounded-[2rem] overflow-hidden"
                 style={{
-                  boxShadow:
-                    "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                  // Der Moment, der WIRKLICH einen Corso-Platz belegt, bekommt
+                  // einen weißen Rand plus einen weichen Schein. Beim Blättern
+                  // durch die anderen freigegebenen Momente derselben Person
+                  // erlischt er — daran erkennt man auf einen Blick, welcher
+                  // gerade auf der Bühne steht (Entscheidung Dominik, 9. Sep 2026).
+                  // Bewusst nur Licht statt Farbe: der Screen kennt keine
+                  // Akzentfarbe, und Weiß ist hier ohnehin die Sprache.
+                  boxShadow: isSlotMoment
+                    ? "0 0 0 2px rgba(255,255,255,0.92), 0 0 28px -6px rgba(255,255,255,0.45), 0 30px 80px -20px rgba(0,0,0,0.6)"
+                    : "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                  transition: "box-shadow 320ms ease",
                   // Die Ziehung tritt auf, statt nur da zu sein (nur der Moment im Blick).
                   animation:
                     reveal && isActive
@@ -402,11 +345,29 @@ function StoryPage() {
                       : undefined,
                 }}
               >
-                {c.photoUrls ? (
-                  <PhotoStackTile urls={c.photoUrls} isActive={isActive} />
-                ) : c.videoUrl ? (
-                  <VideoTile src={c.videoUrl} isActive={isActive} />
-                ) : null}
+                {(() => {
+                  const shown = isActive
+                    ? { step: seq.step, moment: seq.currentMoment }
+                    : firstStepOf(c.moments);
+                  if (!shown.step) return null;
+                  return (
+                    <SequenceMedia
+                      step={shown.step}
+                      moment={shown.moment}
+                      isActive={isActive}
+                      isLastStep={isActive ? seq.isLastStep : false}
+                      onEnded={seq.autoNext}
+                    />
+                  );
+                })()}
+
+                {/* Fortschritt der Sequenz — eine Zeile oben. Liegt über der
+                    „Stadt Corso · läuft"-Pille, deshalb etwas tiefer. */}
+                {isActive && seq.hasSequence && (
+                  <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+                    <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
+                  </div>
+                )}
 
                 {/* Glanzkante, identisch zur Discovery — dort steht die
                     ausführliche Begründung, warum hier kein mix-blend-mode mehr
@@ -424,13 +385,10 @@ function StoryPage() {
                 <div className="absolute top-4 right-4 z-20">
                   <MomentMenu
                     reportedUserId={c.authorId}
-                    reportedPostId={c.postId}
+                    reportedPostId={(isActive ? seq.step?.postId : c.slotPostId) ?? c.slotPostId}
                     handle={c.handle}
                   />
                 </div>
-                {/* Zu welchem Prompt ist dieser Moment entstanden? */}
-                {c.promptText && <MomentPrompt text={c.promptText} date={c.promptDate} />}
-
                 {/* Herz-Burst beim Folgen — geteilt mit Discovery */}
                 <HeartBurst active={burstHandle === c.handle} />
 
@@ -449,10 +407,20 @@ function StoryPage() {
                     <span className="text-white/40 text-xs">· Stadt Corso</span>
                   </div>
                   <div className="flex justify-between items-end">
+                    {/* Reiner Text — kein Einstieg in eine Zwischenebene mehr
+                        (9. Sep 2026): geblättert wird direkt auf der Kachel. */}
                     <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                       {c.handle}
                     </span>
-                    {isFollowing(c.handle) ? (
+                    {circleIds.has(c.authorId) ? (
+                      // Achse 2 — folgen wäre wirkungslos, also gar nicht anbieten.
+                      <div className="pointer-events-none flex items-center gap-1.5 rounded-full bg-white/15 px-3.5 py-1.5 backdrop-blur-md">
+                        <span className="material-symbols-outlined text-[16px] leading-none text-white">
+                          hub
+                        </span>
+                        <span className="text-xs font-semibold text-white">in deinem Circle</span>
+                      </div>
+                    ) : isFollowing(c.handle) ? (
                       // Reiner Status, kein Button — der Clip bleibt in der Story.
                       <div className="pointer-events-none flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5">
                         <span className="text-xs font-semibold text-black">folgst du</span>
@@ -487,19 +455,17 @@ function StoryPage() {
       </div>
 
       {/* Läuft-noch-Anzeige — die Story steht bis zur nächsten Ziehung um 21:00. */}
-      <StoryRunningBadge />
+      <CorsoRunningBadge />
 
       <SwipeHint />
     </div>
   );
 }
 
-// Dezente Pille oben mittig: zeigt, wie lange die laufende Story noch sichtbar
-// ist (bis zur nächsten Ziehung um 21:00). Keine Sekunden — es sind Stunden.
-function StoryRunningBadge() {
-  const { hours, minutes } = useTimeLeft(storyEndsAt);
-  const label = hours > 0 ? `noch ${hours} h ${minutes} min` : `noch ${minutes} min`;
-
+// Dezente Pille oben mittig. Früher zeigte sie die Restzeit bis zur nächsten
+// 21:00-Ziehung — die gibt es nicht mehr. Jetzt sagt sie nur noch, dass man den
+// laufenden Corso sieht: er wechselt, sobald jemand nachrückt.
+function CorsoRunningBadge() {
   return (
     <div
       className="absolute left-0 right-0 z-20 flex justify-center pointer-events-none"
@@ -510,9 +476,7 @@ function StoryRunningBadge() {
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70" />
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
         </span>
-        <span className="text-white text-xs font-medium tracking-tight tabular-nums">
-          Stadt Corso · {label}
-        </span>
+        <span className="text-white text-xs font-medium tracking-tight">Stadt Corso · läuft</span>
       </div>
     </div>
   );
@@ -592,57 +556,20 @@ function StoryEmpty() {
       <div className="relative z-10 flex flex-col items-center text-center gap-6 text-white/70">
         <span className="material-symbols-outlined text-[40px] text-white/50">nights_stay</span>
 
-        <div className="flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-3">
           <span className="text-[11px] uppercase tracking-[0.4em] text-white/50 font-medium">
-            Stadt Corso um 21:00
+            Stadt Corso
           </span>
-          <StoryCountdown />
+          <span className="text-2xl font-semibold tracking-tight text-white">
+            Die Bühne ist frei
+          </span>
         </div>
 
         <p className="text-sm text-white/60 max-w-xs">
-          Um 21:00 enthüllt sich {CITY}. Dann zeigt die ganze Stadt dieselben Momente.
+          Gerade zeigt niemand in {CITY} etwas. Sobald jemand einen Moment freigibt, steht er hier —
+          vielleicht deiner.
         </p>
       </div>
-    </div>
-  );
-}
-
-// Großer Countdown auf die nächste 21:00 — das Gegenstück zum kleinen „läuft
-// noch"-Badge, solange die Story noch nicht begonnen hat.
-function StoryCountdown() {
-  const { hours, minutes, seconds, total } = useTimeLeft(nextStoryTarget);
-
-  // Direkt nach 21:00 läuft die Ziehung noch (und dieser Screen pollt). Statt
-  // eines Countdowns, der auf 23:59:59 springt: sagen, was gerade passiert.
-  const sinceCycleStart = 24 * 60 * 60 * 1000 - total;
-  if (sinceCycleStart >= 0 && sinceCycleStart < DRAW_GRACE_MS) {
-    return (
-      <div className="flex flex-col items-center gap-3">
-        <span className="text-2xl font-semibold tracking-tight text-white animate-pulse">
-          Die Stadt enthüllt sich …
-        </span>
-        <span className="text-xs text-white/40">Die Momente erscheinen gleich hier.</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-end gap-3 tabular-nums">
-      {[
-        { v: pad(hours), l: "Std" },
-        { v: pad(minutes), l: "Min" },
-        { v: pad(seconds), l: "Sek" },
-      ].map((u, idx) => (
-        <div key={u.l} className="flex items-end gap-3">
-          <div className="flex flex-col items-center">
-            <span className="text-5xl font-semibold tracking-tight text-white">{u.v}</span>
-            <span className="text-[10px] uppercase tracking-[0.25em] text-white/40 mt-2 font-medium">
-              {u.l}
-            </span>
-          </div>
-          {idx < 2 && <span className="text-3xl font-semibold text-white/30 pb-6">:</span>}
-        </div>
-      ))}
     </div>
   );
 }

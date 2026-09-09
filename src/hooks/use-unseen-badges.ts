@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
-import { corsoDay } from "@/lib/corso-day";
 
 // „Neu seit deinem letzten Besuch"-Punkte an den Tabs Discovery und Stadt Corso.
 //
@@ -58,18 +57,17 @@ async function fetchLatestPostAt(userId: string): Promise<string | null> {
   return data?.created_at ?? null;
 }
 
-/** Jüngste Ziehung des laufenden Corso-Tags — derselbe Ausschnitt, den city_story() zeigt. */
-async function fetchLatestStoryDrawAt(): Promise<string | null> {
-  const { data, error } = await supabase
-    .from("city_story_slots")
-    .select("created_at")
-    .eq("city", CITY)
-    .eq("story_date", corsoDay())
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+/**
+ * Jüngster Einzug in den laufenden Corso. Seit 0031 gibt es keine Tages-Ziehung
+ * mehr, die man abfragen könnte — der Corso besetzt laufend nach. Gelesen wird
+ * über corso_latest_entry(), das auf corso_now() aufsetzt und damit Block-Filter
+ * und Lebend-Prüfung erbt; die Tabelle corso_slots selbst hat bewusst keinen
+ * Client-Lesepfad. 🔒 Zurück kommt ein Zeitstempel, keine Zahl, kein Handle.
+ */
+async function fetchLatestCorsoEntryAt(): Promise<string | null> {
+  const { data, error } = await supabase.rpc("corso_latest_entry", { target_city: CITY });
   if (error) throw new Error(error.message);
-  return data?.created_at ?? null;
+  return (data as string | null) ?? null;
 }
 
 function useUnseen(key: BadgeKey, latest: string | null | undefined, isOpen: boolean): boolean {
@@ -110,9 +108,9 @@ export function useUnseenBadges(pathname: string): { discovery: boolean; story: 
     staleTime: 0,
   });
 
-  const latestDraw = useQuery({
+  const latestCorsoEntry = useQuery({
     queryKey: ["unseen", "story", user?.id],
-    queryFn: fetchLatestStoryDrawAt,
+    queryFn: fetchLatestCorsoEntryAt,
     enabled: !!user,
     refetchInterval: POLL_MS,
     refetchOnWindowFocus: true,
@@ -122,16 +120,16 @@ export function useUnseenBadges(pathname: string): { discovery: boolean; story: 
   // Beim Betreten eines Tabs sofort frisch holen, damit der Merker den echten
   // Stand bekommt (nicht den bis zu 60 s alten Poll-Wert).
   const refetchPost = latestPost.refetch;
-  const refetchDraw = latestDraw.refetch;
+  const refetchCorso = latestCorsoEntry.refetch;
   useEffect(() => {
     if (onDiscovery) void refetchPost();
   }, [onDiscovery, refetchPost]);
   useEffect(() => {
-    if (onStory) void refetchDraw();
-  }, [onStory, refetchDraw]);
+    if (onStory) void refetchCorso();
+  }, [onStory, refetchCorso]);
 
   return {
     discovery: useUnseen("discovery", latestPost.data, onDiscovery),
-    story: useUnseen("story", latestDraw.data, onStory),
+    story: useUnseen("story", latestCorsoEntry.data, onStory),
   };
 }

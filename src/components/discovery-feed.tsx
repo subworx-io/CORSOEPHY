@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useFollow } from "@/lib/follow-context";
 import { useCircle } from "@/lib/circle/use-circle";
 import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
@@ -8,14 +8,14 @@ import { useSwipeFollow, SWIPE_EXIT_MS } from "@/hooks/use-swipe-follow";
 import { SwipeFollowOverlay, SwipeHintChip } from "@/components/swipe-follow-overlay";
 import { useHeartBurst } from "@/components/heart-burst";
 import { supabase } from "@/lib/supabase/client";
+import { isControlTap, tapDirection } from "@/lib/utils";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { useAuth } from "@/lib/auth-context";
 import { recordView } from "@/lib/record-view";
 import { MomentMenu } from "@/components/moment-menu";
-import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
-import { MomentPrompt } from "@/components/moment-prompt";
-import { PhotoStackTile } from "@/components/photo-stack";
-import { VideoTile } from "@/components/video-tile";
+import { SequenceMedia } from "@/components/sequence-media";
+import { MomentProgress } from "@/components/moment-progress";
+import { useMomentSequence, firstStepOf, type SequenceMoment } from "@/hooks/use-moment-sequence";
 
 // Discovery (Achse 1, Feed „komplett neue, fremde Menschen"): lebender 24h-Topf
 // der Stadt, neueste zuerst, Infinite Scroll. Seit dem Zwei-Achsen-Umbau eine
@@ -25,20 +25,23 @@ import { VideoTile } from "@/components/video-tile";
 // Wer rausfliegt: eigene Momente, Leute denen du folgst (→ „Ich folge"-Feed)
 // und Circle-Partner (→ Circle-Tab, Achse 2).
 
+// Eine Seite der Query liefert ROHE Momente — einen je Post. Gruppiert wird
+// erst in `activeTiles`, über ALLE geladenen Seiten hinweg.
+//
+// ⚠️ Das war am 9. Sep 2026 zweimal falsch herum gebaut und hat zwei Fehler
+// erzeugt, die beide dieselbe Wurzel hatten (zu früh gruppiert):
+//   1. `getNextPageParam` verglich die Zahl der PERSONEN mit PAGE_SIZE (=Zahl
+//      der POSTS). Sobald jemand zwei Momente auf einer Seite hatte, galt die
+//      Seite als „kürzer" und das Nachladen stand für immer still.
+//   2. Ein Mensch mit einem Moment auf Seite 1 und einem auf Seite 2 bekam ZWEI
+//      Kacheln — doppelter React-Key, zerrissene Sequenz.
+type MomentRow = SequenceMoment & { handle: string };
+
+// Eine Kachel = EIN Mensch mit ALLEN seinen lebenden Momenten als Sequenz.
 type Tile = {
   handle: string;
-  src?: string;
-  alt?: string;
-  videoUrl?: string;
-  // Foto-Moment (0023): geordnete Foto-URLs — gesetzt statt videoUrl.
-  photoUrls?: string[];
-  postId?: string;
-  authorId?: string;
-  // Der Prompt, zu dem dieser Moment entstanden ist. Der Feed reicht über die
-  // Zyklus-Grenze (21:00) hinaus — ein Moment lebt 24h ab Post, die Kacheln
-  // gehören also zu zwei Prompts. null = keine Historie für den Tag → nichts zeigen.
-  promptText?: string | null;
-  promptDate?: string | null;
+  authorId: string;
+  moments: SequenceMoment[];
 };
 type TileSlide = { kind: "tile" } & Tile;
 type EmptySlide = { kind: "empty" };
@@ -49,7 +52,7 @@ const buildSlides = (tiles: Tile[]): Slide[] =>
     ? tiles.map((t) => ({ kind: "tile" as const, ...t }))
     : [{ kind: "empty" as const }];
 
-// Momente pro Nachlade-Schritt (Posts + Prompts + signierte URLs = 3 Requests pro Seite).
+// Momente pro Nachlade-Schritt (Posts + signierte URLs = 2 Requests pro Seite).
 const PAGE_SIZE = 20;
 // So viele Kacheln vor dem Ende wird nachgeladen, damit nie eine Lücke entsteht.
 const PREFETCH_MARGIN = 3;
@@ -63,8 +66,12 @@ const VIDEO_WINDOW = 2;
 // Kachel unter dem Finger weiter. Nach einer Minute darf das passieren, nach einem
 // kurzen Blick in „Ich folge" nicht.
 const FEED_STALE_MS = 60_000;
+// Stabile leere Liste: eine frische [] pro Render würde die Sequenz bei jedem
+// Render neu aufbauen und den Schritt-Zustand zurücksetzen.
+const EMPTY_MOMENTS: SequenceMoment[] = [];
 
 export function DiscoveryFeed() {
+  const navigate = useNavigate();
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { user } = useAuth();
 
@@ -80,16 +87,16 @@ export function DiscoveryFeed() {
     queryKey: ["discovery", user?.id],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
-      if (!user) return [] as Tile[];
+      if (!user) return [] as MomentRow[];
       const from = (pageParam as number) * PAGE_SIZE;
       const { data, error } = await supabase
         .from("posts")
-        .select("id, author_id, media_path, media_type, media_paths, prompt_date, profiles(handle)")
+        .select("id, author_id, media_path, media_type, media_paths, created_at, profiles(handle)")
         .neq("author_id", user.id)
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
-      if (error || !data?.length) return [] as Tile[];
+      if (error || !data?.length) return [] as MomentRow[];
       // Alle Medienpfade eines Posts (Video: einer, Foto-Moment: bis zu 5).
       const pathsOf = (post: {
         media_path: string;
@@ -99,14 +106,15 @@ export function DiscoveryFeed() {
         post.media_type === "photo" && post.media_paths?.length
           ? post.media_paths
           : [post.media_path];
-      // Prompt-Texte und signierte URLs je in EINER Abfrage, parallel. Die URLs
-      // kommen aus dem Cache (signed-urls.ts): ein Refetch liefert dieselben URLs
-      // wie zuvor, die <video>-Elemente laden also nicht neu.
-      const [promptsByDate, urlsByPath] = await Promise.all([
-        fetchPromptsByDate(data.map((p) => p.prompt_date)),
-        getSignedMomentUrls(data.flatMap((p) => pathsOf(p))),
-      ]);
-      return data.flatMap((post): Tile[] => {
+      // Signierte URLs in EINER Abfrage. Sie kommen aus dem Cache
+      // (signed-urls.ts): ein Refetch liefert dieselben URLs wie zuvor, die
+      // <video>-Elemente laden also nicht neu.
+      const urlsByPath = await getSignedMomentUrls(data.flatMap((p) => pathsOf(p)));
+
+      // Roh zurückgeben — EIN Eintrag je Post. Nur so bleibt die Seitenlänge
+      // mit PAGE_SIZE vergleichbar (siehe getNextPageParam). Gruppiert wird
+      // erst in `activeTiles`, über alle Seiten hinweg.
+      return data.flatMap((post): MomentRow[] => {
         const urls = pathsOf(post)
           .map((path) => urlsByPath[path])
           .filter((u): u is string => !!u);
@@ -115,12 +123,11 @@ export function DiscoveryFeed() {
         return [
           {
             handle: (post.profiles as unknown as { handle: string }).handle,
-            videoUrl: isPhoto ? undefined : urls[0],
-            photoUrls: isPhoto ? urls : undefined,
             postId: post.id,
             authorId: post.author_id,
-            promptDate: post.prompt_date,
-            promptText: promptsByDate[post.prompt_date] ?? null,
+            videoUrl: isPhoto ? null : urls[0],
+            photoUrls: isPhoto ? urls : null,
+            createdAt: post.created_at,
           },
         ];
       });
@@ -135,7 +142,32 @@ export function DiscoveryFeed() {
   });
 
   // Nur echte Posts aus der Stadt — kein Demo-Fallback mehr (F&F-Pilot: echt statt Fake).
-  const activeTiles: Tile[] = useMemo(() => (pages?.pages ?? []).flat(), [pages]);
+  // Gruppierung über alle geladenen Seiten hinweg: eine Kachel je Mensch, seine
+  // Momente chronologisch aufsteigend. Die Query sortiert created_at DESC, die
+  // Reihenfolge der Kacheln bleibt damit „zuletzt aktive Person zuerst".
+  const activeTiles: Tile[] = useMemo(() => {
+    const rows: MomentRow[] = (pages?.pages ?? []).flat();
+    const byAuthor = new Map<string, Tile>();
+    for (const row of rows) {
+      const moment: SequenceMoment = {
+        postId: row.postId,
+        authorId: row.authorId,
+        videoUrl: row.videoUrl,
+        photoUrls: row.photoUrls,
+        createdAt: row.createdAt,
+      };
+      const existing = byAuthor.get(row.authorId);
+      if (existing)
+        existing.moments.unshift(moment); // älter → nach vorn
+      else
+        byAuthor.set(row.authorId, {
+          handle: row.handle,
+          authorId: row.authorId,
+          moments: [moment],
+        });
+    }
+    return [...byAuthor.values()];
+  }, [pages]);
 
   // Discovery zeigt nur Fremde (PRD §4.4): wem du folgst, verlässt den Feed —
   // und Circle-Partner gehören zur Achse 2, nicht in die Stadt.
@@ -199,7 +231,7 @@ export function DiscoveryFeed() {
       onCommit: (i) => {
         const s = slides[i];
         if (s?.kind !== "tile") return;
-        follow({ handle: s.handle, src: s.src ?? null });
+        follow({ handle: s.handle, src: null });
         handleFollowed(s.handle, i);
       },
       exitOnCommit: true,
@@ -210,8 +242,39 @@ export function DiscoveryFeed() {
     count: slides.length,
     axis: "y",
     onSwipeX: swipeHandlers,
+    // Tipp = EIN Schritt weiter in der Sequenz dieser Person (nächstes Bild
+    // ODER nächster Moment — für den Nutzer derselbe Fluss). Linkes Drittel =
+    // zurück. Bewusst über den Snap-Hook statt per onClick: siehe TapInfo in
+    // use-snap-scroll.ts — innerhalb des Containers feuert auf iOS kein click.
+    onTap: ({ index, x, y, target }) => {
+      if (isControlTap(target)) return; // Ton-Knopf, Menü
+      if (index !== currentIndexRef.current) return; // nur die aktive Kachel
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+      else seqRef.current?.next();
+    },
   });
   snapRef.current = { snapTo, realign };
+
+  // Die Sequenz der GERADE AKTIVEN Person. Bewusst nur eine — Kacheln, die man
+  // nicht ansieht, brauchen keinen laufenden Schritt-Zustand (und ein Hook pro
+  // Kachel ginge in einer .map() ohnehin nicht).
+  const activeTile =
+    slides[currentIndex]?.kind === "tile" ? (slides[currentIndex] as TileSlide) : undefined;
+  const seq = useMomentSequence({
+    moments: activeTile?.moments ?? EMPTY_MOMENTS,
+    isActive: true,
+    // Tipp auf den letzten Schritt → nahtlos zur nächsten Person (Entscheidung
+    // Dominik: kein Loop, kein Stehenbleiben).
+    onExhausted: () => snapTo(Math.min(slides.length - 1, currentIndex + 1)),
+  });
+
+  // Refs, damit der onTap-Handler im Snap-Hook immer den frischen Stand sieht.
+  const seqRef = useRef(seq);
+  seqRef.current = seq;
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
 
   // Endlos-Scroll: rechtzeitig vor dem Ende die nächste Seite holen, damit der
   // Feed unter dem Finger weiterläuft statt an einer Kante zu stehen.
@@ -224,12 +287,14 @@ export function DiscoveryFeed() {
   // Kurze Verweil-Schwelle: der aktive Index wechselt jetzt schon beim Überqueren
   // der Hälfte (damit das Video sofort spielt). Ohne die Schwelle würde jeder Clip,
   // an dem man nur vorbeizieht, als Zuschauer zählen — die Zahl ist Kill-Metrik.
+  // Verbucht wird der MOMENT, auf dem die Sequenz gerade steht — nicht mehr
+  // pauschal der neueste der Person. Blättert man weiter, zählt der nächste.
+  const activePostId = seq.step?.postId;
   useEffect(() => {
-    const active = slides[currentIndex];
-    if (active?.kind !== "tile") return;
-    const t = setTimeout(() => recordView(active.postId), 500);
+    if (!activePostId) return;
+    const t = setTimeout(() => recordView(activePostId), 500);
     return () => clearTimeout(t);
-  }, [currentIndex, slides]);
+  }, [activePostId]);
 
   return (
     <div ref={containerRef} className="absolute inset-0" style={{ touchAction: "none" }}>
@@ -257,9 +322,10 @@ export function DiscoveryFeed() {
 
         return (
           <div
-            // Key = Post, nicht Handle: bleibt über Refetches stabil und kollidiert
-            // nicht, falls eine Person über die Zyklus-Grenze zwei Momente hat.
-            key={slide.kind === "tile" ? (slide.postId ?? slide.handle) : slide.kind}
+            // Key = Person: eine Kachel ist seit dem In-Place-Blättern ein
+            // Mensch mit Sequenz, nicht ein einzelner Moment. Über Refetches
+            // stabil, auch wenn ein Moment dazukommt oder abläuft.
+            key={slide.kind === "tile" ? slide.authorId : slide.kind}
             ref={slideRef(i)}
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
@@ -285,19 +351,32 @@ export function DiscoveryFeed() {
               >
                 {slide.kind === "tile" ? (
                   <>
-                    {slide.photoUrls ? (
-                      mountVideo && <PhotoStackTile urls={slide.photoUrls} isActive={isActive} />
-                    ) : slide.videoUrl ? (
-                      mountVideo && (
-                        <VideoTile src={slide.videoUrl} isActive={isActive} preload={preload} />
-                      )
-                    ) : (
-                      <img
-                        src={slide.src}
-                        alt={slide.alt ?? ""}
-                        className="w-full h-full object-cover"
-                        draggable={false}
-                      />
+                    {/* Aktive Kachel zeigt den Schritt, auf dem die Sequenz steht;
+                        Nachbarn (die beim Wischen aufblitzen) ihren Anfang. */}
+                    {mountVideo &&
+                      (() => {
+                        const shown = isActive
+                          ? { step: seq.step, moment: seq.currentMoment }
+                          : firstStepOf(slide.moments);
+                        if (!shown.step) return null;
+                        return (
+                          <SequenceMedia
+                            step={shown.step}
+                            moment={shown.moment}
+                            isActive={isActive}
+                            isLastStep={isActive ? seq.isLastStep : false}
+                            onEnded={seq.autoNext}
+                            preload={preload}
+                          />
+                        );
+                      })()}
+
+                    {/* Fortschritt der Sequenz — eine Zeile, sofort sichtbar,
+                        sobald es mehr als einen Schritt gibt. */}
+                    {isActive && seq.hasSequence && (
+                      <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+                        <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
+                      </div>
                     )}
                     {/* Glanzkante. Bewusst OHNE mix-blend-mode: Ein Blend-Modus
                         zwingt den Browser, für jeden Frame den Untergrund unter
@@ -318,14 +397,12 @@ export function DiscoveryFeed() {
                       <div className="absolute top-4 right-4 z-20">
                         <MomentMenu
                           reportedUserId={slide.authorId}
-                          reportedPostId={slide.postId ?? null}
+                          reportedPostId={
+                            (isActive ? seq.step?.postId : slide.moments[0]?.postId) ?? null
+                          }
                           handle={slide.handle}
                         />
                       </div>
-                    )}
-                    {/* Zu welchem Prompt ist dieser Moment entstanden? */}
-                    {slide.promptText && (
-                      <MomentPrompt text={slide.promptText} date={slide.promptDate} />
                     )}
                     {/* Herzanimation mittig über dem Bild */}
                     {burstHandle === slide.handle && (
@@ -343,6 +420,9 @@ export function DiscoveryFeed() {
                     {/* Bottom overlay — Folgen passiert per Rechts-Wisch, kein Button */}
                     <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
                       <div className="flex justify-between items-end">
+                        {/* Reiner Text: Seit dem In-Place-Blättern (9. Sep 2026)
+                            führt von hier kein Weg mehr in eine Zwischenebene —
+                            geblättert wird direkt auf der Kachel. */}
                         <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
                           {slide.handle}
                         </span>
@@ -369,8 +449,8 @@ export function DiscoveryFeed() {
                         Du bist früh dran
                       </p>
                       <p className="mt-2 text-white/40 text-sm leading-snug max-w-[16rem] mx-auto">
-                        Noch ist niemand draußen. Nimm jetzt deinen Moment auf — oder warte, bis um
-                        21 Uhr die Stadt gemeinsam spazieren geht.
+                        Noch ist niemand draußen. Nimm jetzt deinen Moment auf — im Corso ist gerade
+                        Platz.
                       </p>
                     </div>
                     <Link

@@ -126,7 +126,6 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { FollowProvider } from "../lib/follow-context";
 import { AuthProvider } from "../lib/auth-context";
 import { AuthGate } from "../components/auth-gate";
-import { DailyPromptSplash } from "../components/daily-prompt-splash";
 import { PushOptinSplash } from "../components/push-optin-splash";
 import { CircleSplash } from "../components/circle-splash";
 
@@ -280,10 +279,8 @@ function RootComponent() {
                     die Meldung soll sie nicht verdecken. */}
                 <Toaster position="top-center" />
               </div>
-              <DailyPromptSplash />
               <PushOptinSplash />
-              {/* Circle-Eintritt: gefeierte Ankündigung beim nächsten App-Öffnen
-                  (liegt per z-Index über dem Prompt-Splash, falls beide fällig sind). */}
+              {/* Circle-Eintritt: gefeierte Ankündigung beim nächsten App-Öffnen. */}
               <CircleSplash />
             </CircleInboxProvider>
           </FollowProvider>

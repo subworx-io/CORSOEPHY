@@ -1,12 +1,22 @@
 # Corso — Roadmap
 
-**Version:** 0.2 (Stand 19. August 2026)
+**Version:** 0.3 (Stand 9. September 2026)
 **Bezug:** Ergänzt das PRD (`docs/PRD.md`). Bei Konflikt gewinnt das PRD.
 **Zweck:** Priorisierte Bau-Reihenfolge vom aktuellen Klick-Prototyp zu einem mit Freunden teilbaren MVP.
 
 > **Agent-Hinweis:** Diese Roadmap ist nach Abhängigkeit sortiert, nicht nach Wunsch. Phase 0 blockt fast alles. Nicht an Phase 2/3 anfangen, solange Phase 0/1 nicht durch sind. Bei jeder `[ENTSCHEIDUNG OFFEN]` eskalieren, nicht stillschweigend entscheiden.
 
 ---
+
+> **Konzept-Änderung 9. September 2026 — der laufende Corso.** Die 21:00-Ziehung und der
+> tägliche Prompt sind abgeschafft; der Stadt Corso hat feste Plätze und besetzt laufend
+> nach (PRD v0.6 §4.6, Migrationen `0031`/`0032`). Für diese Roadmap heißt das:
+> - Der „Konsum-Loop end-to-end" aus Phase 1 gilt weiter, nur ohne Prompt und ohne Ritual-Uhrzeit.
+> - **Neu und ungetestet:** Profil-Screen `/p/$handle`, persönlicher Push „Du stehst im Corso".
+> - **Die zentrale offene Wette:** Prompt und 21:00 waren die beiden Dinge, die die Stadt
+>   gleichzeitig aktiviert haben. Ob die ständige, leisere Chance auf einen freien Platz genug
+>   Zug erzeugt, entscheidet sich erst im Pilot an der Post-Rate (PRD §8, Risiko 5).
+> - „Was um 21 Uhr als Event passiert" ist **bewusst geparkt** — nichts dafür bauen.
 
 ## Aktueller Stand (19. August 2026)
 

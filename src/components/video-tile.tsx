@@ -13,12 +13,22 @@ export function VideoTile({
   src,
   isActive,
   preload = "auto",
+  loop = true,
+  onEnded,
 }: {
   src: string;
   isActive: boolean;
   // "auto" für den aktiven Moment und seine direkten Nachbarn (Bild liegt bereit,
   // wenn man hinzieht), "metadata" für den Rand des Fensters.
   preload?: "auto" | "metadata";
+  /**
+   * Endlos wiederholen? Seit dem In-Place-Blättern (9. Sep 2026) NUR noch für
+   * den LETZTEN Schritt einer Sequenz true. Steht danach noch etwas an, muss das
+   * Video enden dürfen — sonst käme `onEnded` nie und die Sequenz stünde still.
+   */
+  loop?: boolean;
+  /** Auto-Advance: das Video ist durchgelaufen, der nächste Schritt ist dran. */
+  onEnded?: () => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
@@ -70,8 +80,9 @@ export function VideoTile({
         src={src}
         playsInline
         muted
-        loop
+        loop={loop}
         preload={preload}
+        onEnded={onEnded}
         onLoadedData={() => setReady(true)}
         onCanPlay={() => setReady(true)}
         onPlaying={() => setReady(true)}

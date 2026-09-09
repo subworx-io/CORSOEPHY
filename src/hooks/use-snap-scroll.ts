@@ -87,6 +87,26 @@ export interface SwipeXHandlers {
 }
 
 /**
+ * Ein Tipp auf den Feed — ohne Bewegung losgelassen.
+ *
+ * ⚠️ WARUM DAS HIER SITZT UND NICHT ALS onClick AM ELEMENT:
+ * `onMove` ruft `e.preventDefault()`, sobald eine Geste im Container beginnt.
+ * Nach der Touch-Events-Spezifikation unterdrückt ein abgebrochenes touchmove
+ * die Kompatibilitäts-Mausereignisse — WebKit dispatcht dann **kein `click`**.
+ * Da ein echter Fingertipp praktisch immer ein paar Pixel zittert, sind
+ * `onClick`-Handler INNERHALB eines Snap-Containers auf iOS unzuverlässig.
+ * Der Tipp muss deshalb aus der Touch-Geste selbst kommen.
+ */
+export interface TapInfo {
+  /** Slide, auf dem getippt wurde. */
+  index: number;
+  x: number;
+  y: number;
+  /** Getroffenes Element — für Aufrufer, die Bedienelemente aussparen wollen. */
+  target: EventTarget | null;
+}
+
+/**
  * Physik-basiertes Snap-Scroll: Bild folgt direkt dem Finger,
  * nach dem Loslassen schnappt es mit RAF + easeOutCubic ein.
  */
@@ -94,11 +114,14 @@ export function useSnapScroll({
   count,
   axis = "y",
   onSwipeX,
+  onTap,
 }: {
   count: number;
   axis?: "x" | "y";
   /** Nur für axis "y" ausgewertet: horizontale Wisch-Gesten (Swipe-Follow). */
   onSwipeX?: SwipeXHandlers;
+  /** Tipp ohne Bewegung. Siehe TapInfo — bewusst hier statt als onClick. */
+  onTap?: (info: TapInfo) => void;
 }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   // Zwei Indizes, bewusst getrennt:
@@ -327,6 +350,8 @@ export function useSnapScroll({
   // gebunden, auch wenn der Aufrufer die Callbacks pro Render neu erzeugt.
   const swipeXRef = useRef<SwipeXHandlers | undefined>(onSwipeX);
   swipeXRef.current = onSwipeX;
+  const onTapRef = useRef<((info: TapInfo) => void) | undefined>(onTap);
+  onTapRef.current = onTap;
 
   // Touch: Finger folgt direkt, Velocity-Projektion beim Loslassen.
   // Achsen-Lock: die erste eindeutige Bewegungsrichtung entscheidet, ob die
@@ -416,6 +441,19 @@ export function useSnapScroll({
       if (!gestureActive) return;
       gestureActive = false;
       gestureRef.current = false;
+
+      // Achse nie festgelegt = der Finger hat sich nicht über den Slop hinaus
+      // bewegt: das war ein Tipp, kein Wisch.
+      if (axisLock === "none") {
+        const t = e.changedTouches[0];
+        onTapRef.current?.({
+          index: indexRef.current,
+          x: t.clientX,
+          y: t.clientY,
+          target: e.target,
+        });
+        return;
+      }
 
       if (axisLock === "cross") {
         const endCross = axis === "y" ? e.changedTouches[0].clientX : e.changedTouches[0].clientY;

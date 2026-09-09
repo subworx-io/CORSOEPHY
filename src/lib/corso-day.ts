@@ -1,8 +1,12 @@
 // Corso-Zeitlogik clientseitig — Gegenstück zu corso_day() in der DB.
 //
-// Der Corso-Zyklus läuft 21:00 → 21:00 (Europe/Berlin): um 21:00 wird die
-// Stadt Corso gezogen UND der neue Prompt startet. Der Zyklus trägt weiterhin
-// Prompt-Historie, story_date, Anstups-Limit und Snapshot-Basis.
+// Der Corso-Zyklus läuft 21:00 → 21:00 (Europe/Berlin).
+//
+// ⚠️ Seit dem laufenden Corso (9. Sep 2026) ist der Zyklus NICHT mehr sichtbar:
+// es gibt keine Ziehung um 21:00 und keinen Tages-Prompt. Die Zeitgrenze bleibt
+// aber intern tragend und darf nicht entfernt werden — an ihr hängen der
+// verdeckte Circle-Zähler (`follow_mutual_days`, „5 gegenseitige Corso-Tage"),
+// das Anstups-Limit, die Snapshot-Basis und die dedupe_keys der Push-Anlässe.
 //
 // NICHT verwechseln mit dem Verfall: Momente und Follows leben 24h ab ihrem
 // eigenen Zeitstempel (expires_at), völlig unabhängig vom Zyklus-Wechsel.
@@ -48,7 +52,7 @@ export function cycleStart(now: Date = new Date()): number {
 }
 
 /**
- * Nächster Zyklus-Wechsel (nächste 21:00 Berlin) — Ziel des Story-Countdowns.
+ * Nächster Zyklus-Wechsel (nächste 21:00 Berlin).
  * An den beiden Zeitumstellungstagen im Jahr ist das um eine Stunde daneben;
  * für einen Countdown ist das vertretbar.
  */

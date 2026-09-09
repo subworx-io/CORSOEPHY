@@ -1,14 +1,16 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { HapticTapTarget } from "@/components/haptic-tap";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
-import { promptDayLabel } from "@/lib/prompts/prompt-history";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { CityStoryHitSplash } from "@/components/city-story-hit-splash";
-import { PhotoStackTile } from "@/components/photo-stack";
+import { SequenceMedia } from "@/components/sequence-media";
+import { MomentProgress } from "@/components/moment-progress";
+import { useMomentSequence, type SequenceMoment } from "@/hooks/use-moment-sequence";
 import type { MyFeedback } from "@/lib/supabase/types";
+import { isControlTap, tapDirection } from "@/lib/utils";
 
 export const Route = createFileRoute("/feedback")({
   head: () => ({
@@ -25,20 +27,27 @@ export const Route = createFileRoute("/feedback")({
 
 interface FeedbackData {
   feedback: MyFeedback;
-  videoUrl: string | null;
-  // Foto-Moment (0023): geordnete Foto-URLs — gesetzt statt videoUrl.
-  photoUrls: string[] | null;
-  cityStoryConsent: boolean;
-  // Der Prompt, zu dem dieser Moment entstanden ist. null, wenn für den Tag keine
-  // Historie existiert — dann lieber nichts zeigen als den falschen Prompt.
-  promptText: string | null;
-  promptDate: string | null;
+  /** ALLE eigenen lebenden Momente, chronologisch — die Sequenz zum Blättern. */
+  moments: SequenceMoment[];
+}
+
+// Stabile leere Liste — eine frische [] pro Render würde die Sequenz zurücksetzen.
+const EMPTY_MOMENTS: SequenceMoment[] = [];
+
+/** Moment-bezogene Zahlen aus my_moment_stats() (Migration 0033/0034). */
+interface MomentStats {
+  views: number;
+  stayed: number;
+  moment_live: boolean;
+  in_city_story: boolean;
+  is_record: boolean;
+  consent: boolean;
+  moment_created_at: string | null;
+  moment_expires_at: string | null;
 }
 
 function FeedbackPage() {
   const { user, profile } = useAuth();
-  const [muted, setMuted] = useState(true);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["my-feedback", user?.id],
@@ -53,53 +62,45 @@ function FeedbackPage() {
         (Array.isArray(rows) ? (rows[0] as MyFeedback) : (rows as MyFeedback)) ?? null;
       if (!feedback) return null;
 
-      // Das Video nur, solange der Moment wirklich lebt. Abgelaufene Posts sind
-      // per RLS auch für den Autor weg (0015) — der Screen friert dann nur die
-      // Zahlen ein, nicht den Moment selbst.
-      let videoUrl: string | null = null;
-      let photoUrls: string[] | null = null;
-      let consent = false;
-      let promptText: string | null = null;
-      let promptDate: string | null = null;
+      // ALLE eigenen lebenden Momente, chronologisch aufsteigend — dieselbe
+      // Sequenz-Logik wie in den Feeds (In-Place-Blättern, 9. Sep 2026).
+      // Abgelaufene Posts sind per RLS auch für den Autor weg (0015); der Screen
+      // friert dann nur die Zahlen ein, nicht den Moment selbst.
+      const { data: posts } = await supabase
+        .from("posts")
+        .select("id, author_id, media_path, media_type, media_paths, created_at")
+        .eq("author_id", user.id)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: true });
 
-      if (feedback.moment_id) {
-        const { data: post } = await supabase
-          .from("posts")
-          .select("media_path, media_type, media_paths, city_story_consent, prompt_date")
-          .eq("id", feedback.moment_id)
-          .maybeSingle();
+      const pathsOf = (post: {
+        media_path: string;
+        media_type: string;
+        media_paths: string[] | null;
+      }) =>
+        post.media_type === "photo" && post.media_paths?.length
+          ? post.media_paths
+          : [post.media_path];
 
-        if (post?.media_path) {
-          const isPhoto = post.media_type === "photo";
-          const paths: string[] =
-            isPhoto && post.media_paths?.length ? post.media_paths : [post.media_path];
-          const urlsByPath = await getSignedMomentUrls(paths);
-          const urls = paths.map((p) => urlsByPath[p]).filter((u): u is string => !!u);
-          if (isPhoto) {
-            photoUrls = urls.length ? urls : null;
-          } else {
-            videoUrl = urls[0] ?? null;
-          }
-          consent = post.city_story_consent;
-          promptDate = post.prompt_date;
-        }
+      const urlsByPath = await getSignedMomentUrls((posts ?? []).flatMap((p) => pathsOf(p)));
+      const moments = (posts ?? []).flatMap((post): SequenceMoment[] => {
+        const urls = pathsOf(post)
+          .map((path) => urlsByPath[path])
+          .filter((u): u is string => !!u);
+        if (!urls.length) return [];
+        const isPhoto = post.media_type === "photo";
+        return [
+          {
+            postId: post.id,
+            authorId: post.author_id,
+            videoUrl: isPhoto ? null : urls[0],
+            photoUrls: isPhoto ? urls : null,
+            createdAt: post.created_at,
+          },
+        ];
+      });
 
-        // daily_prompt ist die kanonische Historie. Bewusst KEIN Rückfall auf
-        // prompts.active_date — das ist seit 0013 nur ein LRU-Marker.
-        if (promptDate) {
-          const { data: dp } = await supabase
-            .from("daily_prompt")
-            .select("prompts (text)")
-            .eq("corso_day", promptDate)
-            .maybeSingle();
-          const joined = (dp as { prompts?: { text?: string } | { text?: string }[] } | null)
-            ?.prompts;
-          const row = Array.isArray(joined) ? joined[0] : joined;
-          promptText = row?.text ?? null;
-        }
-      }
-
-      return { feedback, videoUrl, photoUrls, cityStoryConsent: consent, promptText, promptDate };
+      return { feedback, moments };
     },
     enabled: !!user,
     staleTime: 0,
@@ -107,17 +108,31 @@ function FeedbackPage() {
     refetchOnWindowFocus: true,
   });
 
-  function toggleMute() {
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setMuted(v.muted);
-  }
+  // Die Sequenz der eigenen Momente. Der Rücklauf ist KEIN Snap-Container
+  // (natives Scrollen), deshalb reicht hier ein normales onClick — das
+  // preventDefault-Problem aus den Feeds gibt es nur dort.
+  const moments = data?.moments ?? EMPTY_MOMENTS;
+  const seq = useMomentSequence({ moments, isActive: true });
 
-  useEffect(() => {
-    const v = videoRef.current;
-    if (v && data?.videoUrl) v.play().catch(() => {});
-  }, [data?.videoUrl]);
+  // 🔒 Zahlen zum GERADE ANGEZEIGTEN Moment (my_moment_stats, 0033/0034).
+  // Ohne das zeigte der Rücklauf beim Blättern weiter die Zahlen von Moment 1.
+  // Die Funktion prüft serverseitig author_id = auth.uid() — eine fremde
+  // post_id liefert keine Zeile.
+  const activePostId = seq.step?.postId ?? null;
+  const { data: stats } = useQuery({
+    queryKey: ["moment-stats", activePostId],
+    queryFn: async (): Promise<MomentStats | null> => {
+      if (!activePostId) return null;
+      const { data: rows, error } = await supabase.rpc("my_moment_stats", {
+        p_post_id: activePostId,
+      });
+      if (error) return null;
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      return (row as MomentStats) ?? null;
+    },
+    enabled: !!activePostId,
+    staleTime: 30_000,
+  });
 
   if (!user) {
     return <Centered icon="lock">Melde dich an, um deinen Rücklauf zu sehen.</Centered>;
@@ -136,8 +151,14 @@ function FeedbackPage() {
   }
 
   const { feedback } = data;
-  const hasMoment = !!feedback.moment_id;
-  const live = feedback.moment_live;
+  const hasMoment = moments.length > 0 || !!feedback.moment_id;
+  // Moment-bezogene Zahlen kommen aus `stats` (blättert mit), personen-bezogene
+  // (Follower, auf der Kippe, Serie) weiterhin aus my_feedback().
+  const views = stats?.views ?? feedback.views;
+  const stayed = stats?.stayed ?? feedback.stayed;
+  const isRecord = stats?.is_record ?? feedback.is_record;
+  const live = stats?.moment_live ?? feedback.moment_live;
+  const consent = stats?.consent ?? false;
 
   return (
     // Der Root-Container ist h-dvh + overflow-hidden (für die Snap-Feeds), also
@@ -177,61 +198,65 @@ function FeedbackPage() {
         </span>
       </div>
 
-      {/* --- Dein Moment ------------------------------------------------ */}
-      {hasMoment && live && (data.videoUrl || data.photoUrls) && (
+      {/* --- Deine Momente ---------------------------------------------- */}
+      {seq.step && (
         <div className="mt-4 px-4">
           <div
             className="relative aspect-[4/5] overflow-hidden rounded-[1.75rem]"
-            style={{ boxShadow: "0 0 0 1px rgba(255,255,255,0.08)" }}
+            style={{
+              // Steht DIESER Moment gerade im Corso, bekommt er denselben weißen
+              // Rand wie auf dem Corso-Screen. Beim Blättern durch die eigenen
+              // Momente sieht man so sofort, welcher es auf die Bühne geschafft
+              // hat (Entscheidung Dominik, 9. Sep 2026).
+              boxShadow: stats?.in_city_story
+                ? "0 0 0 2px rgba(255,255,255,0.92), 0 0 28px -6px rgba(255,255,255,0.45)"
+                : "0 0 0 1px rgba(255,255,255,0.08)",
+              transition: "box-shadow 320ms ease",
+            }}
+            // In-Place-Blättern wie in den Feeds: rechte Hauptfläche = weiter,
+            // linkes Drittel = zurück. Hier reicht onClick — der Rücklauf ist
+            // kein Snap-Container, es gibt also kein preventDefault, das die
+            // click-Ereignisse schluckt (siehe TapInfo in use-snap-scroll.ts).
+            onClick={(e) => {
+              if (isControlTap(e.target)) return; // Ton-Knopf
+              const rect = e.currentTarget.getBoundingClientRect();
+              if (tapDirection(e.clientX, e.clientY, rect) === "prev") seq.prev();
+              else seq.next();
+            }}
           >
-            {data.photoUrls ? (
-              <PhotoStackTile urls={data.photoUrls} isActive />
-            ) : (
-              <>
-                <video
-                  ref={videoRef}
-                  src={data.videoUrl ?? undefined}
-                  playsInline
-                  muted
-                  loop
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
+            <SequenceMedia
+              step={seq.step}
+              moment={seq.currentMoment}
+              isActive
+              isLastStep={seq.isLastStep}
+              onEnded={seq.autoNext}
+            />
 
-                <span className="absolute top-4 left-4 z-10 inline-flex">
-                  <HapticTapTarget label="Ton umschalten" onTap={toggleMute} />
-                  <button
-                    onClick={toggleMute}
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-black/50 backdrop-blur-md active:scale-95 transition-transform"
-                    aria-label={muted ? "Ton einschalten" : "Ton ausschalten"}
-                  >
-                    <span className="material-symbols-outlined text-white text-[18px]">
-                      {muted ? "volume_off" : "volume_up"}
-                    </span>
-                  </button>
-                </span>
-              </>
-            )}
-
-            {data.cityStoryConsent && (
-              <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-md">
-                <span className="material-symbols-outlined text-white/80 text-[14px]">movie</span>
-                <span className="text-[11px] font-medium text-white/80">Freigegeben</span>
+            {/* Fortschritt — dieselbe eine Zeile wie in den Feeds. */}
+            {seq.hasSequence && (
+              <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+                <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
               </div>
             )}
 
-            {/* Prompt-Overlay unten — gleiche Optik wie auf allen Feed-Screens */}
+            {consent && (
+              <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-md">
+                <span className="material-symbols-outlined text-white/80 text-[14px]">movie</span>
+                <span className="text-[11px] font-medium text-white/80">
+                  {stats?.in_city_story ? "Im Corso" : "Freigegeben"}
+                </span>
+              </div>
+            )}
+
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-5 pt-14">
-              {data.promptText && data.promptDate && (
-                <>
-                  <div className="font-serif text-[13px] italic text-white/50">
-                    {promptDayLabel(data.promptDate)}
+              <div className="flex items-end justify-between gap-3">
+                <div className="text-[11px] text-white/50">{momentVisibility(stats)}</div>
+                {seq.groups.length > 1 && (
+                  <div className="shrink-0 text-[11px] text-white/50 tabular-nums">
+                    Moment {(seq.step?.momentIndex ?? 0) + 1} von {seq.groups.length}
                   </div>
-                  <h1 className="mt-0.5 font-serif text-[19px] font-medium leading-[1.2] tracking-[-0.01em] text-white/95">
-                    {data.promptText}
-                  </h1>
-                </>
-              )}
-              <div className="mt-2 text-[11px] text-white/50">{visibilityLabel(feedback)}</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -239,7 +264,7 @@ function FeedbackPage() {
 
       {/* Moment abgelaufen (oder im Corso, aber per RLS nicht mehr lesbar):
           keine Wiedergabe, nur die eingefrorene Bilanz. */}
-      {hasMoment && (!live || (!data.videoUrl && !data.photoUrls)) && (
+      {hasMoment && !seq.step && (
         <div className="mt-4 px-5">
           <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] px-5 py-4">
             <div className="flex items-center gap-2 text-white/40">
@@ -279,16 +304,16 @@ function FeedbackPage() {
         {hasMoment ? (
           <div className="mt-5 flex flex-col gap-5">
             <GainMetric
-              value={feedback.views}
+              value={views}
               label="Views"
               sublabel={live ? "haben deinen Moment gesehen" : "haben ihn gesehen"}
-              badge={feedback.is_record ? "Rekord" : null}
+              badge={isRecord ? "Rekord" : null}
             />
             <GainMetric
-              value={feedback.stayed}
-              label={feedback.stayed === 1 ? "ist geblieben" : "sind geblieben"}
+              value={stayed}
+              label={stayed === 1 ? "ist geblieben" : "sind geblieben"}
               sublabel="neue Follower durch diesen Moment"
-              highlight={feedback.stayed > 0}
+              highlight={stayed > 0}
             />
           </div>
         ) : (
@@ -355,12 +380,12 @@ function FeedbackPage() {
   );
 }
 
-// Wie lange der Moment noch steht. Ein gezogener Moment überlebt seine 24h im
-// Stadt Corso (PRD §4.6) — dann ist die Restzeit des Posts irreführend.
-function visibilityLabel(f: MyFeedback): string {
-  if (!f.moment_expires_at) return "";
-  const msLeft = new Date(f.moment_expires_at).getTime() - Date.now();
-  if (msLeft <= 0) return f.in_city_story ? "Steht im Stadt Corso" : "Abgelaufen";
+// Wie lange DIESER Moment noch steht — bezogen auf den gerade angezeigten,
+// nicht mehr pauschal auf den neuesten.
+function momentVisibility(s: MomentStats | null | undefined): string {
+  if (!s?.moment_expires_at) return "";
+  const msLeft = new Date(s.moment_expires_at).getTime() - Date.now();
+  if (msLeft <= 0) return s.in_city_story ? "Steht im Stadt Corso" : "Abgelaufen";
   const hours = Math.floor(msLeft / 3_600_000);
   if (hours >= 1) return `noch ${hours} ${hours === 1 ? "Stunde" : "Stunden"} sichtbar`;
   const mins = Math.max(1, Math.floor(msLeft / 60_000));

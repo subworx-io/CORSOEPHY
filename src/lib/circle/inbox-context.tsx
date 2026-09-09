@@ -158,10 +158,19 @@ export function CircleInboxProvider({ children }: { children: ReactNode }) {
           // haltung wie beim Push (0028). Die App kann über der Schulter
           // mitgelesen werden wie ein Sperrbildschirm.
           const name = handleRef.current.get(partnerId);
+          // Seit 0035 gibt es Medien-Nachrichten. Die Meldung sagt WAS ankam,
+          // 🔒 aber weiterhin nie den Inhalt — dieselbe Zurückhaltung wie der
+          // Push, dessen Text seit 0035 ebenso unterscheidet.
+          const what =
+            message.kind === "photo"
+              ? "hat dir ein Foto geschickt."
+              : message.kind === "video"
+                ? "hat dir ein Video geschickt."
+                : message.kind === "voice"
+                  ? "hat dir eine Sprachnachricht geschickt."
+                  : "hat dir geschrieben.";
           toast(name ?? "Neue Nachricht", {
-            description: name
-              ? "hat dir geschrieben."
-              : "Jemand aus deinem Circle hat geschrieben.",
+            description: name ? what : "Jemand aus deinem Circle hat geschrieben.",
             action: {
               label: "Öffnen",
               onClick: () =>

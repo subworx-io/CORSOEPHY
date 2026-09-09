@@ -1,21 +1,21 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { HapticTapTarget } from "@/components/haptic-tap";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase/client";
+import { isControlTap, tapDirection } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { useCircle, type CirclePartner } from "@/lib/circle/use-circle";
 import { useCircleInbox } from "@/lib/circle/inbox-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
 import { recordView } from "@/lib/record-view";
-import { fetchPromptsByDate } from "@/lib/prompts/prompt-history";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
-import { MomentPrompt } from "@/components/moment-prompt";
 import { MomentMenu } from "@/components/moment-menu";
-import { PhotoStackTile } from "@/components/photo-stack";
 import { CircleChat } from "@/components/circle-chat";
-import { VideoTile } from "@/components/video-tile";
+import { SequenceMedia } from "@/components/sequence-media";
+import { MomentProgress } from "@/components/moment-progress";
+import { useMomentSequence, firstStepOf, type SequenceMoment } from "@/hooks/use-moment-sequence";
 
 // Der Circle (Achse 2): beständige, gegenseitige Verbindungen. Kein Verfall,
 // kein Erneuern — aber die MOMENTE der Partner folgen weiter der 24h-Regel:
@@ -71,13 +71,8 @@ function useCircleInviteShare() {
   return { share, busy };
 }
 
-// Lebender Moment eines Circle-Partners (Video ODER Foto-Stapel) + sein Prompt.
-type PartnerMoment = {
-  videoUrl?: string;
-  photoUrls?: string[];
-  postId: string;
-  prompt: { text: string; date: string } | null;
-};
+// Stabile leere Liste — eine frische [] pro Render würde die Sequenz zurücksetzen.
+const EMPTY_MOMENTS: SequenceMoment[] = [];
 
 function CirclePage() {
   const { user } = useAuth();
@@ -95,26 +90,20 @@ function CirclePage() {
     .sort()
     .join(",");
 
-  // Lebende Momente der Partner — gleiche Mechanik wie im „Ich folge"-Feed:
-  // nur `expires_at > now()`, neuester Post pro Person, Foto-Stapel unterstützt.
-  const { data: momentsById = {} } = useQuery<Record<string, PartnerMoment>>({
+  // ALLE lebenden Momente der Partner als Sequenz — gleiche Mechanik wie im
+  // „Ich folge"-Feed (In-Place-Blättern, 9. Sep 2026).
+  const { data: momentsById = {} } = useQuery<Record<string, SequenceMoment[]>>({
     queryKey: ["circle-moments", partnerIdsKey],
     queryFn: async () => {
       const ids = partnerIdsKey.split(",").filter(Boolean);
       if (!ids.length) return {};
       const { data: posts } = await supabase
         .from("posts")
-        .select("id, media_path, media_type, media_paths, author_id, prompt_date")
+        .select("id, media_path, media_type, media_paths, author_id")
         .in("author_id", ids)
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false });
       if (!posts?.length) return {};
-
-      const newestByAuthor = new Map<string, (typeof posts)[number]>();
-      for (const post of posts) {
-        if (!newestByAuthor.has(post.author_id)) newestByAuthor.set(post.author_id, post);
-      }
-      const newest = Array.from(newestByAuthor.values());
 
       const pathsOf = (post: {
         media_path: string;
@@ -125,24 +114,23 @@ function CirclePage() {
           ? post.media_paths
           : [post.media_path];
 
-      const [promptsByDate, urlsByPath] = await Promise.all([
-        fetchPromptsByDate(newest.map((p) => p.prompt_date)),
-        getSignedMomentUrls(newest.flatMap((p) => pathsOf(p))),
-      ]);
+      const urlsByPath = await getSignedMomentUrls(posts.flatMap((p) => pathsOf(p)));
 
-      const result: Record<string, PartnerMoment> = {};
-      for (const post of newest) {
+      // Query liefert created_at DESC; innerhalb einer Person umdrehen, damit
+      // man chronologisch vorwärts blättert.
+      const result: Record<string, SequenceMoment[]> = {};
+      for (const post of posts) {
         const urls = pathsOf(post)
           .map((path) => urlsByPath[path])
           .filter((u): u is string => !!u);
         if (!urls.length) continue;
-        const promptText = promptsByDate[post.prompt_date];
-        result[post.author_id] = {
-          videoUrl: post.media_type === "photo" ? undefined : urls[0],
-          photoUrls: post.media_type === "photo" ? urls : undefined,
+        const isPhoto = post.media_type === "photo";
+        (result[post.author_id] ??= []).unshift({
           postId: post.id,
-          prompt: promptText ? { text: promptText, date: post.prompt_date } : null,
-        };
+          authorId: post.author_id,
+          videoUrl: isPhoto ? null : urls[0],
+          photoUrls: isPhoto ? urls : null,
+        });
       }
       return result;
     },
@@ -152,22 +140,44 @@ function CirclePage() {
   });
 
   // Sichtbar im Feed ist nur, wer gerade einen lebenden Moment hat.
-  const withMoment = partners.filter((p) => momentsById[p.partnerId]);
+  const withMoment = partners.filter((p) => momentsById[p.partnerId]?.length);
 
-  const { currentIndex, slideRef, containerRef } = useSnapScroll({
+  const { currentIndex, slideRef, containerRef, snapTo } = useSnapScroll({
     count: withMoment.length,
     axis: "y",
+    // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
+    // Die „Nachricht"-Pille und die Partner-Leiste sind ausgenommen — sie sind
+    // Bedienelemente und führen weiterhin in den Chat (isControlTap).
+    onTap: ({ index, x, y, target }) => {
+      if (isControlTap(target)) return;
+      if (index !== currentIndexRef.current) return;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+      else seqRef.current?.next();
+    },
   });
 
+  // Sequenz des aktiven Partners.
+  const activePartner = withMoment[currentIndex];
+  const seq = useMomentSequence({
+    moments: (activePartner && momentsById[activePartner.partnerId]) || EMPTY_MOMENTS,
+    isActive: true,
+    onExhausted: () => snapTo(Math.min(withMoment.length - 1, currentIndex + 1)),
+  });
+  const seqRef = useRef(seq);
+  seqRef.current = seq;
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
+
   // Ansicht verbuchen (Verweil-Schwelle wie überall — Views sind Kill-Metrik).
-  const activeMoment = withMoment[currentIndex]
-    ? momentsById[withMoment[currentIndex].partnerId]
-    : undefined;
+  // Verbucht wird der Moment, auf dem die Sequenz gerade steht.
+  const activePostId = seq.step?.postId;
   useEffect(() => {
-    if (!activeMoment?.postId) return;
-    const t = setTimeout(() => recordView(activeMoment.postId), 500);
+    if (!activePostId) return;
+    const t = setTimeout(() => recordView(activePostId), 500);
     return () => clearTimeout(t);
-  }, [activeMoment?.postId]);
+  }, [activePostId]);
 
   const chatPartner = chat ? partners.find((p) => p.partnerId === chat) : undefined;
   const openChat = (partner: CirclePartner) =>
@@ -220,7 +230,7 @@ function CirclePage() {
             const offset = i - currentIndex;
             const isActive = offset === 0;
             const isNeighbor = Math.abs(offset) === 1;
-            const moment = momentsById[partner.partnerId];
+            const moments = momentsById[partner.partnerId] ?? EMPTY_MOMENTS;
 
             return (
               <div
@@ -244,23 +254,36 @@ function CirclePage() {
                         "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
                     }}
                   >
-                    {moment.photoUrls ? (
-                      <PhotoStackTile urls={moment.photoUrls} isActive={isActive} />
-                    ) : moment.videoUrl ? (
-                      <VideoTile src={moment.videoUrl} isActive={isActive} />
-                    ) : null}
+                    {(() => {
+                      const shown = isActive
+                        ? { step: seq.step, moment: seq.currentMoment }
+                        : firstStepOf(moments);
+                      if (!shown.step) return null;
+                      return (
+                        <SequenceMedia
+                          step={shown.step}
+                          moment={shown.moment}
+                          isActive={isActive}
+                          isLastStep={isActive ? seq.isLastStep : false}
+                          onEnded={seq.autoNext}
+                        />
+                      );
+                    })()}
+
+                    {/* Fortschritt der Sequenz — unter der Partner-Leiste. */}
+                    {isActive && seq.hasSequence && (
+                      <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+                        <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
+                      </div>
+                    )}
 
                     <div className="absolute top-4 right-4 z-20">
                       <MomentMenu
                         reportedUserId={partner.partnerId}
-                        reportedPostId={moment.postId}
+                        reportedPostId={(isActive ? seq.step?.postId : moments[0]?.postId) ?? null}
                         handle={partner.handle}
                       />
                     </div>
-
-                    {moment.prompt && (
-                      <MomentPrompt text={moment.prompt.text} date={moment.prompt.date} />
-                    )}
 
                     {/* Bottom overlay: Handle + Chat-Einstieg. Kein Erneuern, kein
                         Verfalls-Herz — die Verbindung ist beständig. */}

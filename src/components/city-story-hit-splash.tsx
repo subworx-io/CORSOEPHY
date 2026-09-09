@@ -11,9 +11,10 @@ const FADE_MS = 600;
 // Wurde dein Moment in den laufenden Stadt Corso gezogen, bekommt das beim ersten
 // Öffnen des Rücklaufs einen Vollbild-Auftritt — einmal pro Corso-Tag.
 //
-// Bewusst an den Rücklauf gehängt und nicht app-weit: app-weit würde es um 21:00
-// mit dem DailyPromptSplash kollidieren, und der Rücklauf ist der Ort, an dem der
-// Aufstieg seine Auszahlung hat.
+// Bewusst an den Rücklauf gehängt und nicht app-weit: der Rücklauf ist der Ort,
+// an dem der Aufstieg seine Auszahlung hat. Den unmittelbaren Anstoß liefert seit
+// dem laufenden Corso ohnehin der persönliche Push „Du stehst im Corso" (0031);
+// dieser Splash ist die Auszahlung beim nächsten bewussten Blick.
 export function CityStoryHitSplash({ active }: { active: boolean }) {
   const [phase, setPhase] = useState<"pending" | "visible" | "fading" | "done">("pending");
 

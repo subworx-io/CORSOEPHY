@@ -21,7 +21,9 @@ export interface FollowedPerson {
 interface FollowContextType {
   followed: Map<string, FollowedPerson>;
   isFollowing: (handle: string) => boolean;
-  follow: (person: { handle: string; src?: string | null }) => void;
+  // `isCirclePartner`: unterdrückt den „Neu"-Punkt am „Ich folge"-Toggle —
+  // Circle-Partner erscheinen dort nie (PRD §4.4).
+  follow: (person: { handle: string; src?: string | null; isCirclePartner?: boolean }) => void;
   // Follow sofort beenden → Person fällt aus „Ich folge" und taucht wieder in Discovery auf.
   unfollow: (handle: string) => void;
   renew: (handle: string) => void;
@@ -161,9 +163,14 @@ export function FollowProvider({ children }: { children: ReactNode }) {
 
   // Folgen: optimistisch lokal einfügen, dann in die DB schreiben und reconcilen.
   const follow = useCallback(
-    (person: { handle: string; src?: string | null }) => {
+    (person: { handle: string; src?: string | null; isCirclePartner?: boolean }) => {
       haptic("success");
-      setHasUnseenFollow(true);
+      // Der Punkt am „Ich folge"-Toggle darf nur angehen, wenn die Person dort
+      // auch auftauchen KANN. Circle-Partner filtert der Feed bewusst raus
+      // (PRD §4.4, Achse 2) — ein Punkt für sie zeigte ins Leere und genau das
+      // ist am 9. Sep 2026 aufgefallen: gefolgt aus dem Corso, Punkt an,
+      // „Ich folge" leer.
+      if (!person.isCirclePartner) setHasUnseenFollow(true);
       setFollowed((prev) => {
         if (prev.has(person.handle)) return prev;
         return new Map(prev).set(person.handle, {

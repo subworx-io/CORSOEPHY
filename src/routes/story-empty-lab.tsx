@@ -12,6 +12,12 @@ import { nextCycleStart } from "@/lib/corso-day";
 //
 // Wenn dir das Ergebnis gefällt → Bescheid geben, dann wird der Look in den
 // echten `StoryEmpty` in src/routes/story.tsx übernommen.
+//
+// ⚠️ VERALTET seit dem laufenden Corso (9. Sep 2026): Diese Sandbox zeigt noch
+// den Countdown auf 21:00. Den gibt es nicht mehr — der echte Leerzustand in
+// story.tsx sagt jetzt „Die Bühne ist frei". Der Hintergrund (Clips, Grain,
+// Vignette) ist unverändert gültig und weiter der Grund, diese Route zu haben.
+// Wer hier am Look schraubt: den Countdown-Teil nicht zurückportieren.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const Route = createFileRoute("/story-empty-lab")({

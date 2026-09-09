@@ -1,34 +1,29 @@
-import { useEffect, useState } from "react";
-
-// Foto-Moment im Feed: mehrere Fotos als überlappender Stapel („Prints auf dem
-// Tisch"). Das aktive Foto liegt obenauf, die nächsten lugen versetzt und leicht
-// gedreht darunter hervor. Tippen blättert weiter; solange die Kachel aktiv ist,
-// blättert der Stapel auch von selbst. Ein einzelnes Foto füllt die Kachel
-// einfach ganz — kein Stapel-Theater um genau ein Bild.
+// Foto-Moment: mehrere Fotos als überlappender Stapel („Prints auf dem Tisch").
+// Das aktive Foto liegt obenauf, die nächsten lugen versetzt und leicht gedreht
+// darunter hervor. Ein einzelnes Foto füllt die Kachel einfach ganz — kein
+// Stapel-Theater um genau ein Bild.
 //
-// Wird von Discovery, Stadt Corso, „Ich folge" und Rücklauf geteilt — gleiche
-// Optik überall, wie bei VideoTile.
+// ⚠️ GESTEUERT VON AUSSEN (Umbau 9. Sep 2026): Die Kachel hat KEINEN eigenen
+// Index, KEINEN eigenen Timer und KEINEN eigenen Tipp-Handler mehr. Welches Foto
+// oben liegt, bestimmt `useMomentSequence` — für den Nutzer sind die Bilder
+// gleichberechtigte Schritte in der Sequenz einer Person, nicht eine eigene
+// Ebene „innerhalb" eines Moments. Zwei Uhren für dieselbe Bewegung wären sonst
+// nicht synchron zu halten (der Fortschrittsbalken zeigt genau diese Schritte).
+//
+// Wird von Discovery, Corso, „Ich folge", Circle und dem Rücklauf geteilt.
 
-const ADVANCE_MS = 3000;
 // Leichte, pro Foto stabile Drehungen — der Stapel soll gelegt aussehen, nicht generiert.
 const ROTATIONS = [-2.4, 2.1, -1.6, 2.7, -2.0];
 
-export function PhotoStackTile({ urls, isActive }: { urls: string[]; isActive: boolean }) {
+export function PhotoStackTile({
+  urls,
+  index,
+}: {
+  urls: string[];
+  /** Welches Foto liegt oben? Kommt aus useMomentSequence (step.photoIndex). */
+  index: number;
+}) {
   const count = urls.length;
-  const [index, setIndex] = useState(0);
-
-  // Kachel verlassen → Stapel zurück auf Anfang (wie ein pausiertes Video bei 0).
-  useEffect(() => {
-    if (!isActive) setIndex(0);
-  }, [isActive]);
-
-  // Auto-Weiterblättern nur auf der aktiven Kachel. Timeout statt Interval:
-  // ein manueller Tipp setzt die Wartezeit dadurch automatisch zurück.
-  useEffect(() => {
-    if (!isActive || count <= 1) return;
-    const id = window.setTimeout(() => setIndex((i) => (i + 1) % count), ADVANCE_MS);
-    return () => window.clearTimeout(id);
-  }, [isActive, count, index]);
 
   if (count === 1) {
     return (
@@ -45,10 +40,7 @@ export function PhotoStackTile({ urls, isActive }: { urls: string[]; isActive: b
     // `isolate`: eigener Stacking-Context. Ohne ihn ragten die z-indizierten
     // Foto-Karten ÜBER die Geschwister-Overlays der Kachel (Handle, Prompt,
     // Folgen-Hinweis) — der Name wirkte „hinter dem Stapel" und war unlesbar.
-    <div
-      className="absolute inset-0 isolate overflow-hidden"
-      onClick={() => setIndex((i) => (i + 1) % count)}
-    >
+    <div className="absolute inset-0 isolate overflow-hidden">
       {/* Grund: das aktive Foto als geblurrte Fläche, damit die Kachel nie leer wirkt */}
       <img
         src={urls[index]}
@@ -88,17 +80,10 @@ export function PhotoStackTile({ urls, isActive }: { urls: string[]; isActive: b
         );
       })}
 
-      {/* Blätter-Stand — kleine Punkte, keine Zahlen. */}
-      <div className="pointer-events-none absolute bottom-[7.5rem] left-0 right-0 z-30 flex justify-center gap-1.5">
-        {urls.map((url, i) => (
-          <div
-            key={url}
-            className={`h-1.5 rounded-full transition-all duration-300 ${
-              i === index ? "w-5 bg-white/90" : "w-1.5 bg-white/40"
-            }`}
-          />
-        ))}
-      </div>
+      {/* Kein eigener Blätter-Stand mehr (9. Sep 2026): Den Stand zeigt der EINE
+          Fortschrittsbalken oben auf der Kachel (components/moment-progress.tsx).
+          Die frühere Punktreihe hier unten war seit dem In-Place-Blättern eine
+          zweite Anzeige derselben Sache — mitten im Bild und doppelt. */}
     </div>
   );
 }

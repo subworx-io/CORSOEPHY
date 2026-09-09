@@ -1,17 +1,229 @@
 # Corso — Status
 
-**Stand: 4. September 2026.**
+**Stand: 9. September 2026.**
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
 
 ---
 
+## ⭐ Der laufende Corso (9. September 2026) — die größte Konzept-Änderung seit dem Start
+
+**Auftrag Dominik, als Eigner-Entscheidung freigegeben. PRD auf v0.6 nachgezogen.**
+
+Der Stadt Corso war ein **Ereignis um 21:00**: einmal täglich zog `draw_city_story()`
+bis zu 8 Momente und fror sie 24 h ein. Das ist ersetzt durch eine **Bühne, die
+läuft**:
+
+- **Feste Platzzahl** (`app_config.corso_slot_count`, Default **10**, ohne Migration skalierbar).
+- **Eine Belegung endet exakt dann, wenn ihr Moment 24 h alt wird.** Dann ist der Platz frei.
+- **`refill_corso()` besetzt jede Minute nach** (pg_cron `corso-refill`) — gewichtet
+  wie bisher (`w = 1 + ln(1 + aktive Follower)`, Efraimidis-Spirakis).
+- **Pro Person immer nur EIN Moment im Corso.** Ein neuer Post verdrängt den
+  laufenden Platz nicht — er lebt daneben.
+- **Kein 21-Uhr-Reset, kein Prompt, kein Countdown, kein Vorhang.**
+  „Was um 21 Uhr als Event passiert" ist **bewusst geparkt** — es wurde absichtlich
+  kein Ersatz gebaut. Nichts dafür erfinden.
+
+**Was dafür strukturell fallen musste:**
+- `posts` hatte `UNIQUE (author_id, prompt_date)` + Trigger `posts_single_living` +
+  Upsert im Client → alle drei sind weg (`0032`). **Mehrere lebende Momente pro
+  Person sind jetzt erlaubt.** Feeds zeigen davon nur den neuesten, alle weiteren
+  stehen im neuen **Profil-Screen `/p/$handle`**.
+- PRD §4.6 „Rampenlicht verlängert den Moment auf bis zu ~48 h" ist **gestrichen**.
+- 🔒 **Härtung nebenbei:** Der „media_path geändert → Uhr startet neu"-Zweig in
+  `enforce_post_expiry()` war korrekt, solange der Re-Post ein Upsert war. Mit
+  reinen INSERTs wäre er eine **Verlängerungs-Lücke** geworden (Client darf seine
+  eigene Zeile updaten → alle 24 h frische Lebensdauer auf derselben Zeile). Zweig
+  entfernt: bei INSERT startet die Uhr, bei UPDATE steht sie.
+
+**Cron-Bilanz:** sechs Jobs abgestellt (`city-story-draw-*`, `city-story-push-*`,
+`city-story-soon-*`), einer neu (`corso-refill`, `* * * * *`). Die zugehörigen
+Funktionen bleiben append-only stehen und sind als **ÜBERHOLT** kommentiert.
+
+**Neuer Push-Anlass:** `corso_entered` — „Du stehst im Corso", persönlich, wenn der
+eigene Moment nachrückt. 🔒 Ohne Zahl. Ersetzt den weggefallenen Post-Anlass.
+
+### Die Gerechtigkeits-Frage — gemessen, nicht geraten
+
+Die Sorge war, dass der Follower-Bias sich verstärkt, weil jeder Moment jetzt an
+*jeder* Nachbesetzung seiner 24 h teilnimmt statt an einer Ziehung pro Tag.
+**Das Gegenteil ist der Fall** (`node scripts/verify-corso-weighting.mjs`,
+1200 simulierte Tage, 22 aktive Menschen):
+
+| Follower | ALT 21:00 (8 Plätze) | NEU laufend (10 Plätze) |
+|---|---|---|
+| 0 (Neuling) | 10,0 % | **34,6 %** |
+| 50 | 46,6 % | 81,0 % |
+| 800 („Whale") | 61,3 % | 87,4 % |
+| **Spreizung Whale/Neuling** | **6,1×** | **2,5×** |
+
+Grund: Pro Person ist immer nur ein Platz belegt, und der Durchsatz steigt
+(≈15,4 Einzüge/Tag statt 8, mittlere Standzeit 15,5 h). Die Bühne verteilt sich
+auf mehr Menschen. ⚠️ Die absoluten Werte hängen an der angenommenen Bevölkerung —
+aussagekräftig ist der **Vergleich ALT/NEU bei identischer Population**.
+
+---
+
+## ⭐ Medien und Antworten im Circle-Chat (9. September 2026, abends)
+
+**Auftrag Dominik, freigegeben. Migration `0035_chat_media_and_replies.sql`.**
+
+- **Foto, Video, Sprachnachricht.** Anhang-Knopf für Galerie-Dateien; bei leerem
+  Textfeld wird der Senden-Pfeil zum **Mikrofon** (halten = aufnehmen, loslassen
+  = senden, nach links ziehen = abbrechen). Grenzen: Foto 10 MB (auf 1920 px
+  skaliert), Video 60 s / 50 MB, Sprachnachricht 120 s.
+- **Antworten per Zieh-Geste** nach rechts; Tipp aufs Zitat springt zum Original.
+- **Kein Verfall** — der Circle ist die beständige Achse (PRD §4.8). Die 24h-Uhr
+  gilt weiterhin nur für öffentliche Momente.
+
+### 🔒 Die Galerie-Ausnahme — und warum sie nicht durchsickern kann
+
+Im Chat ist Galerie-Upload **erlaubt** (Entscheidung Dominik: privater
+Eins-zu-eins-Raum ohne Publikum). Überall sonst bleibt die Live-Kamera-Pflicht.
+Die Trennung ist physisch, nicht bloß Konvention:
+
+| Ebene | öffentlich | Chat |
+|---|---|---|
+| Bucket | `moments` (für alle Angemeldeten lesbar) | **`chat-media`** (privat) |
+| Modul | `lib/supabase/upload.ts` | `lib/circle/chat-media.ts` |
+| Aufnahme | `use-camera.ts` (🔒 live) | `use-voice-recorder.ts` (nur Mikro) |
+| Tabelle | `posts` | `circle_messages` |
+
+Der Chat-Code fasst `posts` und `moments` **nirgends** an; das einzige
+`<input type="file">` der App steht in `circle-chat.tsx`.
+
+### 🔒 Warum ein Dritter die Chat-Medien nicht bekommt
+
+`moments` trägt `using (bucket_id = 'moments')` — jeder Eingeloggte darf dort
+alles lesen. Signierte URLs wären dort **keine** Schutzschicht. `chat-media`
+prüft dagegen bei jedem Zugriff die Verbindungs-Mitgliedschaft. Gegen die
+Live-DB mit simulierten Anmeldungen belegt: Absender **1**, Partner **1**,
+Dritter **0**, anon bekommt keine URL. Festgeschrieben in
+`scripts/security-test-chat-media.mjs`.
+
+Nebenbei repariert: Der alte `body`-Check verlangte 1–2000 Zeichen NICHT-leeren
+Text — eine reine Foto-Nachricht wäre strukturell nicht einfügbar gewesen. Und
+`reply_to` prüft jetzt serverseitig, dass das Zitat aus DEMSELBEN Chat stammt.
+
+---
+
+## 🐞 Regressionen des Umbautags — gefunden und behoben (9. September, spät)
+
+Ein gezielter Nachprüf-Durchgang nach dem Deploy förderte vier Fehler zutage,
+alle am selben Tag selbst eingebaut:
+
+1. **Infinite Scroll in Discovery stand still.** `getNextPageParam` verglich die
+   Länge der Seite mit `PAGE_SIZE` (=20 POSTS), die Seite lieferte seit dem
+   Sequenz-Umbau aber PERSONEN. Sobald jemand zwei Momente hatte, galt die Seite
+   als „kürzer" → nie wieder nachgeladen. Beim aktuellen Dünnbestand unsichtbar,
+   im Pilot sofort.
+2. **Person doppelt im Feed.** Gruppiert wurde nur INNERHALB einer Seite → ein
+   Mensch mit Momenten auf Seite 1 und 2 bekam zwei Kacheln (doppelter
+   React-Key, zerrissene Sequenz).
+   → Wurzel bei beiden: zu früh gruppiert. Die Query liefert jetzt wieder rohe
+   Momente, gruppiert wird in `activeTiles` über alle Seiten hinweg.
+3. **Sprachnachrichten verschwanden bei genau 2 Minuten.** Der Recorder beendet
+   sich am Limit selbst, aber niemand hörte zu — das Loslassen fand keine
+   laufende Aufnahme mehr. Auto-Stopp ist jetzt verdrahtet und sendet.
+4. **In-App-Meldung sagte weiter „hat dir geschrieben"**, während der Push seit
+   0035 die Sorte nennt. Angeglichen (🔒 weiterhin ohne Inhalt).
+
+Vorbeugend: Der Corso erzwingt jetzt, dass der Slot-Moment immer in der Sequenz
+steckt — sonst zeigte die Bühne jemand anderen als den, der wirklich draufsteht.
+
+**Kein Fehler, sondern die Regel:** Der Corso hat 2 von 10 Plätzen belegt,
+obwohl 7 Momente leben — alle sieben stammen von zwei Menschen, und pro Person
+steht nur einer auf der Bühne.
+
+---
+
+## ⭐ In-Place-Blättern durch die Sequenz einer Person (9. September 2026)
+
+**Auftrag Dominik, freigegeben. PRD auf v0.7 nachgezogen.**
+
+Die Momente eines Menschen sind jetzt **EINE flache, lineare Sequenz**. Für den
+Nutzer gibt es keine verschachtelten Ebenen „Bilder in Moment in Person":
+
+```
+Moment 1 (Video) → Moment 2, Bild 1 → Bild 2 → … → Bild 5 → Moment 3 → nächste Person
+```
+
+- **Tipp = ein Schritt weiter**, egal ob nächstes Bild oder nächster Moment.
+  Rechte Hauptfläche = weiter, **linkes Drittel = zurück**; die oberen 96 px
+  blättern nie zurück, damit der Ton-Knopf bedienbar bleibt.
+- **Keine Zwischenebene mehr.** Der Vollbild-Layer vom Vormittag ist abgeschafft;
+  `/p/$handle` bleibt **nur als Deep-Link-Ziel** (Push „Du stehst im Corso",
+  geteilte Links). Aus den Feeds führt dorthin kein Tap mehr.
+- **Ende der Sequenz:** per Tipp nahtlos zur nächsten Person (kein Loop).
+  **Auto-Advance bleibt am Ende stehen** — es reißt niemanden ungefragt weiter.
+- **Ein einziger segmentierter Balken** oben (`components/moment-progress.tsx`):
+  Bilder eines Moments als enge Gruppe (2 px), zwischen Momenten mehr Luft (7 px).
+  Jeder Schritt ist gleich breit — der Balken zeigt die Länge der Sequenz, nicht
+  die Zahl der Momente.
+- 🔒 **Im Corso nur freigegebene Momente.** Das Blättern dort läuft ausschließlich
+  über Momente mit `city_story_consent` — der Filter steht in der Query
+  (`story.tsx`), nicht in der Darstellung. Ohne das hätte das Blättern die
+  Einwilligungs-Leitplanke ausgehebelt.
+
+### Was dafür umgebaut wurde
+
+| Datei | Änderung |
+|---|---|
+| `hooks/use-moment-sequence.ts` (**neu**) | Die Sequenz-Logik — eine Quelle für alle fünf Screens. Baut die flache Schrittliste, hält Position, Auto-Advance, vor/zurück. |
+| `components/moment-progress.tsx` (**neu**) | Der Balken. |
+| `components/sequence-media.tsx` (**neu**) | Rendert genau den aktuellen Schritt (Video oder oberstes Foto). |
+| `components/photo-stack.tsx` | **Kein eigener Index, kein eigener Timer, kein eigener Tipp** mehr — der Stapel wird von außen gesteuert. Zwei Uhren für dieselbe Bewegung wären nicht synchron zu halten (der Balken zeigt genau diese Schritte). |
+| `components/video-tile.tsx` | `loop` ist jetzt eine Prop und nur für den **letzten** Schritt true; sonst löst `onEnded` den nächsten Schritt aus. Vorher lief jedes Video endlos — eine gemischte Sequenz wäre nie weitergelaufen. |
+| Discovery, „Ich folge", Corso, Circle, Rücklauf | Laden alle lebenden Momente je Person statt nur den neuesten; Tipp blättert; Balken; `recordView` verbucht den Moment, auf dem die Sequenz **gerade steht**. |
+| `routes/p.$handle.tsx` | Vom Vollbild-Layer zum reinen Deep-Link-Ziel, innen dieselbe Sequenz-Mechanik. |
+
+### Rücklauf: die Zahlen blättern mit
+
+`my_feedback()` liefert 🔒 argumentlos immer nur den **neuesten** Moment. Ohne
+Gegenmaßnahme hätte der Rücklauf beim Blättern zu Moment 2 weiter die Zahlen von
+Moment 1 gezeigt — eine stille Lüge auf dem Screen, dessen einziger Zweck Zahlen
+sind. Deshalb **`my_moment_stats(post_id)`** (Migrationen `0033`/`0034`):
+
+- Nimmt als einzige Kennzahl-Funktion ein Argument — aber eine **Post-ID**, keine
+  User-ID, und der erste Filter im Rumpf ist `p.author_id = auth.uid()`.
+- **Live-Negativtest bestanden:** eigener Moment → 1 Zeile, fremder Moment → 0
+  Zeilen, unbekannte ID → 0 Zeilen, `anon` → `permission denied`. Dauerhaft
+  abgesichert in `scripts/security-test-feedback.mjs` (Layer 1 + Layer 2).
+- Personen-bezogene Zahlen (Follower, „auf der Kippe", Serie) bleiben in
+  `my_feedback()` — sie hängen nicht am einzelnen Moment und würden beim Blättern
+  nur flackern.
+
+> ⚠️ **`0033` war fehlerhaft und wurde per `0034` repariert** (append-only, Muster
+> wie `0026` → `0027`): Die Ausgabespalten hießen `created_at`/`expires_at` und
+> verdeckten damit im plpgsql-Rumpf die gleichnamigen Tabellenspalten
+> (`ERROR 42702: column reference "expires_at" is ambiguous`). Der Fehler schlägt
+> erst beim **Ausführen** zu, nicht beim Anlegen — gefunden hat ihn erst der
+> Negativtest, nicht der Trockenlauf. Lehre: eine neue SQL-Funktion nicht nur
+> anlegen, sondern einmal aufrufen.
+
+### ⏳ Nicht am Gerät geprüft — und das ist hier der Kern
+
+Typecheck, Lint und Production-Build sind grün, **es ist aber weder committet
+noch deployed** (ausdrücklicher Wunsch Dominik: erst Gesten am echten Gerät
+prüfen). Offen:
+
+- **Tipp-Zonen:** trifft man „zurück" im linken Drittel zuverlässig, ohne den
+  Ton-Knopf zu erwischen? Reicht der 96-px-Schutzstreifen oben?
+- **Kollision** zwischen Tipp (weiter), vertikalem Wisch (nächste Person) und
+  horizontalem Wisch (folgen/entfolgen) — der Achsen-Lock im Snap-Hook entscheidet
+  das, gemessen ist es nicht.
+- **Gemischte Sequenz** Video → 5er-Bilderreihe → Moment: läuft sie ohne Ruckler
+  ineinander, und stimmt der Balken dabei?
+- Testweg ohne Deploy: `bun run dev:mobile` (ngrok, HTTPS).
+
+---
+
 ## Die Kurzfassung
 
-**Phase 0 (Backend-Fundament) ist durch. Phase 1 (Konsum-Loop end-to-end echt) ist zu ~60 % gebaut.**
+**Phase 0 (Backend-Fundament) ist durch. Phase 1 (Konsum-Loop end-to-end echt) ist feature-vollständig.**
 
-Die App läuft live auf `https://corso-app.pages.dev`, das Git-Repo ist sauber (alles committet und gepusht, letzter Commit `d7c6932` vom 20. August), und **alle drei Server-Jobs laufen nachweislich mit echten Daten** (Beleg unten). Der Kern-Loop — posten → in Discovery erscheinen → folgen → in den Stadt Corso gezogen werden → private Zahl im Rücklauf — funktioniert vollständig ohne Mock.
+Die App läuft live auf `https://corso-app.pages.dev`. Der Kern-Loop — posten → in Discovery erscheinen → folgen → in den Stadt Corso nachrücken → private Zahl im Rücklauf — funktioniert vollständig ohne Mock.
 
 **Am Abend des 19. August umgestellt:** Der feste Tagesrhythmus ist weg. Verfall läuft jetzt **pro Datensatz 24 h ab Entstehung**, der Zyklus-Wechsel (Prompt + Stadt-Corso-Ziehung) liegt auf **21:00** statt 08:00/20:00. Details unten unter „Rollender 24h-Verfall". Discovery hat dabei ihr Infinite Scroll bekommen.
 
@@ -75,14 +287,19 @@ Verdrahtet: Haupt-Auslöser (Tippen/Halten, Pointer-Handler liegen auf dem Schal
 
 Alles hier wurde an diesem Tag **gegen die echte DB und die echte Deployment-Umgebung** geprüft, nicht aus älteren Notizen übernommen.
 
-### ✅ Cron-Fahrplan (Stand 19. August abends, nach `0015`)
+### ✅ Cron-Fahrplan (Stand 9. September 2026, live verifiziert — 7 Jobs)
 
 | Job | Schedule (UTC) | Bedeutung |
 |---|---|---|
-| `city-story-draw-summer` / `-winter` | `0 19` / `0 20` | Stadt-Corso-Ziehung um **21:00 Berlin**. Beide Slots feuern täglich, `run_city_story_draw()` prüft selbst die Berliner Stunde → DST-sicher. |
-| `reach-snapshot-summer` / `-winter` | `5 19` / `5 20` | Basislinie für die „seit gestern"-Deltas, jetzt am **Zyklus-Start (21:05)** statt morgens. Gleicher Stunden-Guard. |
-| `city-story-soon-summer` / `-winter` | `45 18` / `45 19` | **Vorab-Push um 20:45 Berlin** („Gleich geht deine Stadt spazieren", `0022`, angewendet 21. Aug). Gleicher Stunden-Guard (=20). Gleicher Push-`tag` wie der 21:01-Ritual-Push → wird von ihm auf dem Gerät ersetzt, nicht gestapelt. |
-| ~~`expire-follows-daily`~~ | — | **Ersatzlos entfallen.** Verfall wird nicht mehr markiert, sondern in jeder Query über `expires_at > now()` gerechnet. |
+| **`corso-refill`** | `* * * * *` | **Die laufende Nachbesetzung.** Schließt abgelaufene Belegungen, besetzt freie Plätze gewichtet nach. Kein Stunden-Guard, kein DST-Problem, kein Doppel-Job mehr. |
+| `push-dispatch` | `* * * * *` | leert `push_outbox` |
+| `push-outbox-prune` | `30 3` | Aufräumen |
+| `audience-expiring-summer` / `-winter` | `0 16` / `0 17` | „Dein Publikum wird still" (18:00 Berlin) |
+| `reach-snapshot-summer` / `-winter` | `5 19` / `5 20` | Basislinie der Zeitreihe, 21:05 Berlin. Bleibt am Zyklus — wird auf keinem Screen mehr gelesen, ist aber die Pilot-Zeitreihe. |
+| ~~`city-story-draw-*`~~ | — | **abgestellt 9. Sep** (die 21:00-Ziehung) |
+| ~~`city-story-push-*`~~ | — | **abgestellt 9. Sep** (Ritual-Push 21:01) |
+| ~~`city-story-soon-*`~~ | — | **abgestellt 9. Sep** (Vorab-Push 20:45) |
+| ~~`expire-follows-daily`~~ | — | **Ersatzlos entfallen (0015).** Verfall wird in jeder Query über `expires_at > now()` gerechnet. |
 
 Historischer Beleg (vor der Umstellung): echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Momenten. Der Mechanismus ist also mit echtem Content bewiesen, nur die Uhrzeit hat sich verschoben.
 
@@ -154,6 +371,21 @@ Der Rücklauf war ein Kontoauszug (zwei Bestandszahlen + „seit gestern"-Delta)
 
 ## 🚧 Offene Punkte — nach Dringlichkeit
 
+### 0. Der laufende Corso ist NICHT am Gerät geprüft (9. Sep) ⏳
+
+Backend ist gegen die Live-DB verifiziert (erster Refill-Lauf hat real 2 Momente auf die
+Plätze 0 und 1 gesetzt, Cron-Fahrplan stimmt, Migrationen verbucht). **Der Client ist
+nur per Typecheck + Production-Build geprüft und nicht deployed.** Offen:
+
+- Der neue **Profil-Screen** auf dem iPhone: horizontales Wischen zwischen den Momenten,
+  Wisch-nach-unten-Schließen, und vor allem **ob die Gesten sauber vom Feed getrennt sind**
+  (das ist die Kernfrage der Gesten-Entscheidung).
+- **Nachrücken live sehen:** läuft ein Moment ab, während man auf dem Corso-Screen steht —
+  taucht der Nachrücker binnen ~60 s auf, ohne Tab-Wechsel?
+- Der neue Push **„Du stehst im Corso"** ist noch nie zugestellt worden.
+- **Mehrere Momente hintereinander posten** und prüfen, dass der erste seinen Platz behält
+  und beide im Profil stehen.
+
 ### 1. ~~Migration `0014` nicht angewendet~~ ✅ erledigt (19. Aug abends)
 
 `0014_profile_settings.sql` **und** `0015_rolling_24h_expiry.sql` sind angewendet. `profiles.display_name` / `push_enabled` existieren, der Einstellungen-Screen ist repariert.
@@ -213,7 +445,8 @@ Damit ist diese Liste leer — Phase 1 ist feature-vollständig. Was bleibt, ist
 | Route | Screen | Stand |
 |---|---|---|
 | `index.tsx` | **„Stadt"** (Toggle: Discovery ⇄ Ich folge, seit 2. Sep) | Dünner Screen: halbdurchsichtiger Toggle oben mittig + Stadt-Zähler darunter; die Feeds leben in `components/discovery-feed.tsx` (Infinite Scroll, nur Fremde, Circle-Partner raus, ehrlicher Leerzustand) und `components/following-feed.tsx` (nur Gefolgte MIT lebendem Moment, GlassHeart/Erneuern/Entfolgen, kein Anstupsen mehr). Das Settings-Zahnrad ist raus — der Weg führt über „Du". |
-| `story.tsx` | **Stadt Corso** (21:00-Ritual) | Liest die stadtweit eingefrorene Auswahl über `city_story()`; serverseitige gewichtete Ziehung um 21:00 via pg_cron. Leerzustand mit atmosphärischem Video-Hintergrund (cross-fadende s/w Düsseldorf-Clips, körnig, Blue-Hour-Tint, `blur(5px)`) + großem `Std:Min:Sek`-Countdown auf die nächste 21:00. Läuft die Story, zeigt eine dezente Pille oben „Stadt Corso · noch X h Y min" bis zur nächsten Ziehung. 🔒 Keine Follower-/Reaktions-Zahlen. |
+| `story.tsx` | **Stadt Corso** (laufend, seit 9. Sep) | Liest die aktuelle Besetzung über `corso_now()` (SECURITY DEFINER: Block-Filter + Lebend-Prüfung serverseitig), Polling alle 30 s + bei Fokus. Kein Countdown, kein Vorhang, kein Tages-Key mehr — die Pille oben sagt nur noch „Stadt Corso · läuft". Leerzustand mit demselben atmosphärischen Video-Hintergrund, Text „Die Bühne ist frei". Tipp auf den Handle → Profil-Ansicht. 🔒 Keine Follower-/Reaktions-Zahlen. |
+| `p.$handle.tsx` | **Profil** (neu, 9. Sep) | Alle lebenden Momente eines Menschen, horizontal durchswipebar (`useSnapScroll({axis:"x"})`). Eigener Gesten-Container → kein Durchgreifen auf den Feed darunter. Wisch nach unten schließt, Tipp links/rechts blättert, Folgen/Erneuern über einen **expliziten Knopf** (bewusst kein Follow-Wisch: dieselbe Geste darf nicht an zwei Orten Verschiedenes bedeuten). Liest direkt `posts` — RLS `posts_read_living` erledigt Verfall und Block. |
 | `record.tsx` | **Aufnahme** (echte Live-Kamera) | Kamera-first: Auto-Start beim Betreten, full-bleed Live-Bild, Prompt-Overlay im **Editorial-Stil** (System-Serif, linksbündige Magazin-Headline, Kursiv-Label „Heute", weicher Scrim), runder Auslöser mit Fortschrittsring bis 15 s, freundliche „Zugriff verweigert"-Karte mit iOS-Anleitung. Freigabe für den Stadt Corso als kompakte Pille, **erscheint erst nach der Aufnahme**. Tages-Prompt aus `get_today_prompt()`. Echo-Fix: beim Stopp wird der Live-Stream beendet, die Vorschau spielt die echte Aufnahme. **Pinch-Zoom (21. Aug):** Zwei-Finger-Geste auf dem Live-Bild (auch während der Aufnahme) → echter **Hardware-Zoom** via `track.applyConstraints({ zoom })`, landet damit im Clip; bewusst **kein CSS-Scale-Fallback**, weil der nur die Vorschau zoomen würde, nicht die Aufnahme. Nur aktiv, wenn `getCapabilities().zoom` vorhanden (Front-Kameras können das oft nicht), sonst passiert stumm nichts. Zoomfaktor-Pille blendet während der Geste ein. Hooks: `use-camera.ts` (`zoom`/`canZoom`/`setZoom`), `use-pinch-zoom.ts` (Geste). **Tippen/Halten (2. Sep):** EIN Auslöser statt Modus-Umschalter — Tippen legt ein Foto auf den Stapel (bis 5, `PhotoControls`), Halten (≥300 ms) nimmt Video auf (`UnifiedShutter`, Pointer-Capture gegen abrutschende Finger); vor Video-Start wird der Foto-Digital-Zoom zurückgesetzt (Preview = Aufnahme). 🔒 Kein Galerie-Upload. |
 | `circle.tsx` | **Circle** (Achse 2, seit 2. Sep) | Beständige Partner-Leiste oben (Chat-Einstieg für ALLE Partner, auch ohne Moment) + moment-gated Snap-Feed (nur Partner mit lebendem Moment, „Nachricht"-Pill statt Folgen). Chat als Vollbild-Overlay (`components/circle-chat.tsx`, Polling 4 s, RLS + Block-Trigger serverseitig). Circle-Ankündigung als Vollbild-Splash (`components/circle-splash.tsx`, serverseitiger Gesehen-Stand via `acknowledge_circle()`). 🔒 Kein Zähler, keine Schwelle sichtbar. *(`connections.tsx` ist gelöscht — „Ich folge" lebt jetzt im Stadt-Screen.)* |
 | `feedback.tsx` | **„Du"** (Nav-Label seit 2. Sep; Rücklauf: private Bilanz + Self-Screen) | Entlang der zwei Kräfte (PRD §1), bezogen auf **deinen laufenden Moment**: oben „Gewonnen" (**Views** · **sind geblieben** · Stadt-Corso-Auftritt mit Vollbild-Moment), unten „Auf der Kippe" (**Follower**, die in den nächsten 12 h neu entscheiden). Kein „seit gestern"-Delta mehr. Rekord-Marker + Serie. Kopf trägt Handle/Anzeigename und den Weg in die Einstellungen (löst PRD Screen 9 ab). Ohne lebenden Moment: Zahlen eingefroren, Video weg. Zeigt den **Prompt, zu dem der Moment entstand** (`posts.prompt_date` → `daily_prompt.corso_day` → `prompts.text`). |
@@ -258,9 +491,17 @@ und 6 Variables (`SUPABASE_PROJECT_REF`, `VITE_SUPABASE_URL`, `VITE_APP_URL`, `V
 zum lokalen Build ist — womit alle Secret-Werte als korrekt belegt sind.
 
 **Migrations-Ledger:** `scripts/migrate.mjs` führt `public.schema_migrations` in der DB. Gefahren wird
-nur, was im Repo liegt und dort nicht verbucht ist. Stand 20. August: **24 Dateien, 24 verbucht,
-nichts ausstehend.** Stand 2. September: **`0023`–`0027` dazugekommen, alle angewendet und
-verbucht — weiterhin nichts ausstehend.** Von Hand gefahrene Migrationen mit
+nur, was im Repo liegt und dort nicht verbucht ist. Stand 9. September: **35 Dateien, 35 verbucht,
+nichts ausstehend.**
+
+> ⚠️ **Am 9. September aufgefallen und behoben:** Der Ledger stand noch auf `0027`, obwohl `0022`,
+> `0028`, `0029` und `0030` längst live auf der DB waren — sie waren von Hand über
+> `db-apply.mjs` gefahren und nie mit `--mark-applied` nachgetragen worden. Ein `migrate.mjs`
+> ohne Prüfung hätte sie erneut ausgeführt und wäre an `create table circle_messages` gescheitert.
+> Alle vier wurden zuerst **gegen die Live-DB verifiziert** (Tabelle vorhanden, Cron-Job vorhanden,
+> `ltrim`-@-Fix und `exception`-Handler im Funktionsrumpf) und dann verbucht.
+> **Regel, die daraus folgt:** Wer von Hand migriert, trägt es sofort nach —
+> `node scripts/migrate.mjs --mark-applied supabase/migrations/<datei>.sql`. Von Hand gefahrene Migrationen mit
 `node scripts/migrate.mjs --mark-applied supabase/migrations/<datei>.sql` nachtragen, nicht in die
 Baseline schreiben. Drift-Schutz: eine nachträglich veränderte, bereits angewendete Datei bricht den
 Lauf ab — Migrationen sind append-only.
@@ -306,7 +547,13 @@ Repository-Secrets gelten für alle Collaborators.
 
 ## Architektur & Mechanik im Detail
 
-### Ziehung für den Stadt Corso (live seit 15. Juli, `0005_city_story_draw.sql`)
+### ⚠️ HISTORIE — Ziehung für den Stadt Corso (15. Juli bis 8. September 2026)
+
+> Der folgende Abschnitt beschreibt die **abgelöste** Tages-Ziehung. Sie ist seit dem
+> 9. September nicht mehr in Betrieb (Cron abgestellt, Funktionen als ÜBERHOLT
+> kommentiert). Er bleibt stehen, weil die 52 Zeilen in `city_story_slots` aus 25
+> echten Ziehungen daran hängen und für die Auswertung erklärt sein müssen.
+> **Der Sollzustand steht oben unter „Der laufende Corso".**
 
 - **Kandidaten (serverseitig gefiltert):** alle **lebenden** Momente (`expires_at > now()`, also jünger als 24 h) **mit** `city_story_consent = true`, Autor in der Zielstadt. 🔒 Consent wird in der SQL-Funktion erzwungen, nicht im Client. *(Bis 19. Aug: `prompt_date = corso_day()`.)*
 - **Ein Moment kann höchstens von EINER Ziehung gesehen werden** — Ziehungen liegen 24 h auseinander, genau wie die Lebensdauer.
@@ -331,7 +578,15 @@ Repository-Secrets gelten für alle Collaborators.
 - ✅ **Zwei-User-Beweis erbracht** (residue-frei, in-DB via simulierte JWT-Claims, alles zurückgerollt): A hat 1 aktiven Follower → Angreifer B zählt via `followee_id=A` **0**, B's `my_reach` = B's eigene, A's `my_reach` = **1**. B kommt über keinen Pfad an A's Zahl.
 - **Bewusst NICHT geändert:** `follows_update_own` — das Zurücksetzen von `expires_at` ist der legitime `renew()`-Pfad; eine Policy dagegen würde Erneuern brechen und ist keine Privatsphäre-Frage.
 
-### Täglicher Prompt aus der DB
+### ⚠️ HISTORIE — Täglicher Prompt aus der DB (bis 8. September 2026)
+
+> **Abgeschafft am 9. September 2026** (Eigner-Entscheidung, PRD v0.6). Der Client
+> liest nichts davon mehr; `use-today-prompt.ts`, `prompt-history.ts`,
+> `daily-prompt-splash.tsx` und `moment-prompt.tsx` sind gelöscht. Die Tabellen
+> `prompts` (40 aktive) und `daily_prompt` (35 Zeilen) **bleiben in der DB liegen** —
+> nichts wird gelöscht, die Historie bleibt auswertbar. `get_today_prompt()` ruft
+> niemand mehr auf; ein Cron hing dort nie. Bewusst in Kauf genommen: die
+> `prompt_performance`-Auswertung entfällt.
 
 - **40 leichte, filmbare Prompts** mit Kategorie-Hebel `zeig` / `augenzwinkern` / `funken` (14/16/10). Die 50 alten introspektiven Prompts sind **deaktiviert, nicht gelöscht** (Audit bleibt heil).
 - **`get_today_prompt()`** (SECURITY DEFINER, atomar mit Advisory-Lock) zieht **gewichtet ~40/40/20**, **nie zweimal hintereinander**, friert pro Corso-Tag ein und protokolliert in `daily_prompt` — Grundlage, um Moment-Raten pro Prompt zu messen. Über 60 simulierte Tage verifiziert: 0 Doppel, Gewichtung stimmt, alle 40 rotieren.
@@ -361,8 +616,8 @@ Repository-Secrets gelten für alle Collaborators.
 | Moment | lebt **24 h ab dem Post** (`posts.expires_at = created_at + 24 h`) | Trigger `posts_enforce_expiry` + RLS `posts_read_living` |
 | Follow | lebt **24 h ab dem letzten (Re-)Follow** | Trigger `follows_enforce_expiry` |
 | Erneuern | erst ab **12 h** Follow-Alter | Trigger + `canRenew()` im Client |
-| Ein Moment pro Person | ein neuer Post beendet den bisherigen sofort | Trigger `posts_single_living` |
-| Zyklus (Prompt + Ziehung) | **21:00 → 21:00** Berlin | `corso_day()` (`- interval '21 hours'`) |
+| ~~Ein Moment pro Person~~ | **aufgehoben 9. Sep 2026** (`0032`): mehrere lebende Momente erlaubt, Feeds zeigen den neuesten | Trigger `posts_single_living` entfernt |
+| Zyklus (intern) | **21:00 → 21:00** Berlin — trägt nur noch Circle-Zähler, Nudge-Limit, Snapshots, Push-dedupe | `corso_day()` (`- interval '21 hours'`) |
 
 ### Warum Query-Filter statt Verfalls-Cron
 
@@ -393,9 +648,13 @@ Jede Abfrage mit `.is("expires_at", null)` liefert ab jetzt **null aktive Follow
 - **Prompt-Historie** (`daily_prompt`) — eine Zeile pro Zyklus, unverändert.
 - **Die Mediendatei im Storage** — bleibt liegen. Die 24 h werden auf Datensatz-Ebene erzwungen, nicht auf Datei-Ebene (nötig für die eingefrorenen Stadt Corso, und entspricht dem „nicht löschen"-Prinzip).
 
-### Stadt-Corso schlägt Verfall
+### ~~Stadt-Corso schlägt Verfall~~ — gestrichen am 9. September 2026
 
-Ein gezogener Moment bleibt die **ganze Story lang sichtbar** (21:00 bis zur nächsten Ziehung), auch wenn seine 24 h währenddessen ablaufen. In Discovery/Ich folge/Rücklauf ist er dann weg, im Stadt Corso steht er weiter — ein Moment kann so bis zu ~48 h im Corso stehen. Deshalb liest die Story über `city_story()` an der RLS vorbei. Damit die Kill-Metrik dabei nicht lügt, zählt `my_feedback()` die Zuschauer des Moments, der **gerade sichtbar ist** (lebend ODER im laufenden Corso) — sonst zeigte der Rücklauf 0 Zuschauer, während die halbe Stadt den Clip sieht (`latest_visible_post()`).
+Bis zum 8. September blieb ein gezogener Moment die ganze Story lang stehen, auch wenn seine 24 h währenddessen abliefen (bis zu ~48 h im Corso). **Das gibt es nicht mehr:** im laufenden Corso endet eine Belegung exakt mit den 24 h ihres Moments — das ist ja gerade der Auslöser für die Nachbesetzung. PRD §4.6 entsprechend gestrichen.
+
+Folge im Code: der Zweig „abgelaufen, aber im Stadt Corso" in `latest_visible_post()` und das `in_city_story`-Lebensverlängerung in `my_feedback()` sind **totes Holz** — beide bleiben append-only stehen und sind als überholt kommentiert. `in_city_story` selbst bleibt korrekt und bedeutet weiterhin „steht mein Moment gerade im Corso?".
+
+Der Lesepfad `corso_now()` prüft zusätzlich selbst `expires_at > now()`. Damit ist das Lag-Fenster von bis zu 60 s zwischen dem Ablauf eines Moments und dem nächsten Cron-Lauf geschlossen: ein toter Moment ist sofort weg, nicht erst nach dem Tick.
 
 ---
 

@@ -47,6 +47,15 @@ const anon = client(null);
   check("anon ruft my_feedback", ok, `data=${JSON.stringify(r.data)} error=${r.error?.message ?? "none"}`);
 }
 {
+  // my_moment_stats (0033/0034) nimmt als EINZIGE Kennzahl-Funktion ein Argument.
+  // Es ist eine POST-ID, kein User — der Guard im Rumpf ist author_id = auth.uid().
+  // anon darf sie gar nicht erst ausfuehren.
+  const r = await anon.rpc("my_moment_stats", {
+    p_post_id: "00000000-0000-0000-0000-000000000000",
+  });
+  check("anon ruft my_moment_stats", r.error != null, `error=${r.error?.message ?? "none (sollte permission denied sein)"}`);
+}
+{
   const r = await anon.rpc("record_view", { target_post: "00000000-0000-0000-0000-000000000000" });
   check("anon ruft record_view", r.error != null, `error=${r.error?.message ?? "none (sollte permission denied sein)"}`);
 }
@@ -125,6 +134,19 @@ if (aPostId) {
     const r = await B.from("post_views").select("*", { count: "exact", head: true }).eq("post_id", aPostId);
     check("B sieht nach eigenem record_view A's Zahl NICHT", (r.count ?? 0) === 0, `write_error=${w.error?.message ?? "none"} danach sichtbar count=${r.count}`);
   }
+}
+
+// Angriff 5b: B ruft my_moment_stats MIT A's post_id auf. Die Funktion nimmt ein
+// Argument — genau hier muss der Guard author_id = auth.uid() greifen. Erwartet:
+// leeres Ergebnis, KEINE Zahlen von A, und kein Hinweis darauf, ob die ID existiert.
+if (A_TOKEN && B_TOKEN && aPostId) {
+  const r = await B.rpc("my_moment_stats", { p_post_id: aPostId });
+  const rows = Array.isArray(r.data) ? r.data : r.data ? [r.data] : [];
+  check(
+    "B ruft my_moment_stats mit A's post_id",
+    rows.length === 0,
+    `Zeilen=${rows.length} data=${JSON.stringify(r.data)} error=${r.error?.message ?? "none"}`,
+  );
 }
 
 // Angriff 6: B liest A's persistierten reach_snapshot (Basis der Deltas).

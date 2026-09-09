@@ -10,7 +10,7 @@ import { corsoDay } from "@/lib/corso-day";
  *
  * Grund: die Pilot-Nutzer bleiben dauerhaft eingeloggt. Ein Onboarding-Schritt
  * am Login würde sie nie wieder erreichen, obwohl genau sie es sind, die den
- * 21:00-Push brauchen.
+ * Corso-Push brauchen.
  *
  * Diese Komponente hält außerdem den Startabgleich des Push-Abos am Laufen
  * (usePush() unten) und ersetzt damit die frühere PushSync-Komponente.
@@ -69,7 +69,7 @@ export function PushOptinSplash() {
       toast.error("Konnte nicht gespeichert werden.");
       return;
     }
-    toast.success("Push ist an. Wir sehen uns um 21:00.");
+    toast.success("Push ist an. Wir melden uns, wenn du im Corso stehst.");
     remember();
   }
 
@@ -102,8 +102,8 @@ export function PushOptinSplash() {
             </>
           ) : (
             <>
-              Um 21:00 geht deine Stadt gemeinsam spazieren — und der neue Prompt startet. Ohne
-              Benachrichtigung erfährst du davon nichts.
+              Der Corso läuft rund um die Uhr. Ohne Benachrichtigung erfährst du nicht, wenn dein
+              Moment auf die Bühne rückt.
             </>
           )}
         </p>

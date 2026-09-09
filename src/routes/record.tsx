@@ -5,7 +5,6 @@ import { useCamera } from "@/hooks/use-camera";
 import { usePinchZoom } from "@/hooks/use-pinch-zoom";
 import { useAuth } from "@/lib/auth-context";
 import { uploadMoment, uploadPhotoMoment } from "@/lib/supabase/upload";
-import { useTodayPrompt } from "@/lib/prompts/use-today-prompt";
 import { logEvent } from "@/lib/events";
 import { haptic } from "@/lib/haptics";
 import { HapticTapTarget } from "@/components/haptic-tap";
@@ -29,10 +28,6 @@ function RecordPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  // Täglicher Prompt (PRD 4.2) aus der DB — geteilter Cache mit dem Tages-Splash,
-  // daher kein zweiter API-Call. Wechselt mit dem Zyklus-Start um 21:00 (corso_day).
-  const { data: todayPrompt } = useTodayPrompt();
-  const promptText = todayPrompt?.text ?? "";
 
   // Kamera-first: beim Betreten des Screens startet die Kamera automatisch.
   // getUserMedia braucht keine User-Geste; der Berechtigungs-Dialog erscheint
@@ -199,10 +194,7 @@ function RecordPage() {
           style={{ opacity: flash ? 0.7 : 0, transitionDuration: flash ? "0ms" : "300ms" }}
         />
 
-        {/* Prompt des Tages — dezentes Overlay oben, in jedem Zustand sichtbar */}
-        {promptText && <PromptOverlay text={promptText} />}
-
-        {/* Aufnahme-Indikator — oben links, damit er nicht mit dem Prompt kollidiert */}
+        {/* Aufnahme-Indikator — oben links */}
         {cam.status === "recording" && (
           <div className="absolute left-3 top-3 z-30 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5 backdrop-blur-md">
             <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
@@ -331,21 +323,6 @@ function RecordPage() {
   );
 }
 
-// Prompt des Tages — Editorial-Overlay: ruhige System-Serif (`font-serif`),
-// linksbündig wie eine Magazin-Headline, mit kleinem Kursiv-Label statt gesperrter
-// Caps. Liegt über dem Live-Bild → weicher Scrim-Verlauf (keine harte Box) +
-// drop-shadow für Lesbarkeit auch vor hellem Hintergrund. Nur Tailwind-Tokens.
-function PromptOverlay({ text }: { text: string }) {
-  return (
-    <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/60 via-black/25 to-transparent px-6 pt-5 pb-11">
-      <div className="font-serif text-[13px] italic text-white/55">Heute</div>
-      <h2 className="mt-1 max-w-[15rem] font-serif text-[27px] font-medium leading-[1.15] tracking-[-0.01em] text-white drop-shadow-md">
-        {text}
-      </h2>
-    </div>
-  );
-}
-
 // Dezenter An/Aus-Toggle für die Freigabe zum Stadt Corso (🔒 Einwilligung pro Moment).
 // Zustand bleibt klar erkennbar: gefüllt/weiß = an, gedimmt/outline = aus.
 function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => void }) {
@@ -356,7 +333,7 @@ function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => 
         onClick={onToggle}
         role="switch"
         aria-checked={value}
-        aria-label="Für den Stadt Corso freigeben – kann um 21:00 stadtweit erscheinen"
+        aria-label="Für den Stadt Corso freigeben – kann jederzeit stadtweit erscheinen"
         className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-2 backdrop-blur-md transition-all active:scale-[0.98] ${
           value ? "border-white bg-white text-black" : "border-white/25 bg-black/40 text-white/80"
         }`}
@@ -371,7 +348,7 @@ function CityStoryToggle({ value, onToggle }: { value: boolean; onToggle: () => 
         </span>
       </button>
       <p className="text-[10px] text-white/50">
-        {value ? "Kann um 21:00 stadtweit erscheinen" : "Bleibt privat in deinem Corso"}
+        {value ? "Kann jederzeit in den Corso rücken" : "Bleibt privat in deinem Corso"}
       </p>
     </div>
   );
