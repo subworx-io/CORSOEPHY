@@ -9,12 +9,14 @@ import { useAuth } from "@/lib/auth-context";
 import { useCircle, type CirclePartner } from "@/lib/circle/use-circle";
 import { useCircleInbox } from "@/lib/circle/inbox-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
+import { mediaWindow } from "@/lib/feed-media-window";
 import { recordView } from "@/lib/record-view";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { MomentMenu } from "@/components/moment-menu";
 import { CircleChat } from "@/components/circle-chat";
 import { SequenceMedia } from "@/components/sequence-media";
 import { MomentProgress } from "@/components/moment-progress";
+import { FeedStatus } from "@/components/feed-status";
 import { useMomentSequence, firstStepOf, type SequenceMoment } from "@/hooks/use-moment-sequence";
 
 // Der Circle (Achse 2): beständige, gegenseitige Verbindungen. Kein Verfall,
@@ -73,10 +75,16 @@ function useCircleInviteShare() {
 
 // Stabile leere Liste — eine frische [] pro Render würde die Sequenz zurücksetzen.
 const EMPTY_MOMENTS: SequenceMoment[] = [];
+const NO_MOMENTS_BY_ID: Record<string, SequenceMoment[]> = {};
 
 function CirclePage() {
   const { user } = useAuth();
-  const { partners } = useCircle();
+  const {
+    partners,
+    hasData: hasPartners,
+    failed: partnersFailed,
+    refetch: refetchPartners,
+  } = useCircle();
   // Ungelesene Nachrichten — Punkt am jeweiligen Partner-Chip, damit man sieht,
   // WER geschrieben hat, nicht nur DASS jemand geschrieben hat.
   // 🔒 Punkt, keine Anzahl.
@@ -92,17 +100,24 @@ function CirclePage() {
 
   // ALLE lebenden Momente der Partner als Sequenz — gleiche Mechanik wie im
   // „Ich folge"-Feed (In-Place-Blättern, 9. Sep 2026).
-  const { data: momentsById = {} } = useQuery<Record<string, SequenceMoment[]>>({
+  const {
+    data: momentsData,
+    isError: momentsError,
+    isFetching: momentsFetching,
+    refetch: refetchMoments,
+  } = useQuery<Record<string, SequenceMoment[]>>({
     queryKey: ["circle-moments", partnerIdsKey],
     queryFn: async () => {
       const ids = partnerIdsKey.split(",").filter(Boolean);
       if (!ids.length) return {};
-      const { data: posts } = await supabase
+      // Fehler WERFEN — sonst hieße ein Funkloch „gerade zeigt niemand etwas".
+      const { data: posts, error } = await supabase
         .from("posts")
         .select("id, media_path, media_type, media_paths, author_id")
         .in("author_id", ids)
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false });
+      if (error) throw error;
       if (!posts?.length) return {};
 
       const pathsOf = (post: {
@@ -138,25 +153,24 @@ function CirclePage() {
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
+  const momentsById = momentsData ?? NO_MOMENTS_BY_ID;
 
   // Sichtbar im Feed ist nur, wer gerade einen lebenden Moment hat.
   const withMoment = partners.filter((p) => momentsById[p.partnerId]?.length);
 
-  const { currentIndex, slideRef, containerRef, snapTo } = useSnapScroll({
-    count: withMoment.length,
-    axis: "y",
-    // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
-    // Die „Nachricht"-Pille und die Partner-Leiste sind ausgenommen — sie sind
-    // Bedienelemente und führen weiterhin in den Chat (isControlTap).
-    onTap: ({ index, x, y, target }) => {
-      if (isControlTap(target)) return;
-      if (index !== currentIndexRef.current) return;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
-      else seqRef.current?.next();
-    },
-  });
+  const { currentIndex, settledIndex, direction, slideRef, containerRef, shieldRef, snapTo } =
+    useSnapScroll({
+      count: withMoment.length,
+      // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
+      // Die „Nachricht"-Pille und die Partner-Leiste sind ausgenommen — sie sind
+      // Bedienelemente und führen weiterhin in den Chat (isControlTap).
+      onTap: ({ index, x, y, rect, target }) => {
+        if (isControlTap(target)) return;
+        if (index !== currentIndexRef.current) return;
+        if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+        else seqRef.current?.next();
+      },
+    });
 
   // Sequenz des aktiven Partners.
   const activePartner = withMoment[currentIndex];
@@ -183,6 +197,19 @@ function CirclePage() {
   const openChat = (partner: CirclePartner) =>
     void navigate({ to: "/circle", search: { chat: partner.partnerId } });
   const closeChat = () => void navigate({ to: "/circle", search: {} });
+
+  // Noch keine Antwort zu den Verbindungen: „Dein Circle ist noch leer" wäre
+  // eine Behauptung ohne Deckung (und blitzte bisher bei jedem Öffnen auf).
+  if (!hasPartners) {
+    return (
+      <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
+        <FeedStatus
+          state={partnersFailed ? "error" : "pending"}
+          onRetry={() => void refetchPartners()}
+        />
+      </div>
+    );
+  }
 
   if (partners.length === 0) {
     return (
@@ -225,93 +252,104 @@ function CirclePage() {
     <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
       {/* Feed: nur Partner mit lebendem Moment */}
       {withMoment.length > 0 ? (
-        <div ref={containerRef} className="absolute inset-0" style={{ touchAction: "none" }}>
-          {withMoment.map((partner, i) => {
-            const offset = i - currentIndex;
-            const isActive = offset === 0;
-            const isNeighbor = Math.abs(offset) === 1;
-            const moments = momentsById[partner.partnerId] ?? EMPTY_MOMENTS;
+        <>
+          <div ref={containerRef} className="snap-feed">
+            {withMoment.map((partner, i) => {
+              const isActive = i === currentIndex;
+              // Medien-Fenster: Regel in lib/feed-media-window.ts.
+              const media = mediaWindow(i, currentIndex, settledIndex, direction);
+              const moments = momentsById[partner.partnerId] ?? EMPTY_MOMENTS;
 
-            return (
-              <div
-                key={partner.partnerId}
-                ref={slideRef(i)}
-                className="absolute inset-0 h-full w-full"
-                style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
-              >
-                <div
-                  className="absolute inset-0 px-4"
-                  style={{
-                    // Mehr Kopffreiheit als in Discovery: oben sitzt die Partner-Leiste.
-                    paddingTop: "calc(env(safe-area-inset-top) + 4.5rem)",
-                    paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
-                  }}
-                >
+              return (
+                <div key={partner.partnerId} ref={slideRef(i)} className="snap-feed-slide">
                   <div
-                    className="relative h-full w-full overflow-hidden rounded-[2rem]"
+                    className="absolute inset-0 px-4"
                     style={{
-                      boxShadow:
-                        "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                      // Mehr Kopffreiheit als in Discovery: oben sitzt die Partner-Leiste.
+                      paddingTop: "calc(env(safe-area-inset-top) + 4.5rem)",
+                      paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
                     }}
                   >
-                    {(() => {
-                      const shown = isActive
-                        ? { step: seq.step, moment: seq.currentMoment }
-                        : firstStepOf(moments);
-                      if (!shown.step) return null;
-                      return (
-                        <SequenceMedia
-                          step={shown.step}
-                          moment={shown.moment}
-                          isActive={isActive}
-                          isLastStep={isActive ? seq.isLastStep : false}
-                          onEnded={seq.autoNext}
+                    <div
+                      className="relative h-full w-full overflow-hidden rounded-[2rem]"
+                      style={{
+                        boxShadow:
+                          "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                      }}
+                    >
+                      {media.mount &&
+                        (() => {
+                          const shown = isActive
+                            ? { step: seq.step, moment: seq.currentMoment }
+                            : firstStepOf(moments);
+                          if (!shown.step) return null;
+                          return (
+                            <SequenceMedia
+                              step={shown.step}
+                              moment={shown.moment}
+                              isActive={isActive}
+                              isLastStep={isActive ? seq.isLastStep : false}
+                              onEnded={seq.autoNext}
+                              preload={media.preload}
+                              warm={media.warm}
+                            />
+                          );
+                        })()}
+
+                      {/* Fortschritt der Sequenz — unter der Partner-Leiste. */}
+                      {isActive && seq.hasSequence && (
+                        <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+                          <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
+                        </div>
+                      )}
+
+                      <div className="absolute top-4 right-4 z-20">
+                        <MomentMenu
+                          reportedUserId={partner.partnerId}
+                          reportedPostId={
+                            (isActive ? seq.step?.postId : moments[0]?.postId) ?? null
+                          }
+                          handle={partner.handle}
                         />
-                      );
-                    })()}
-
-                    {/* Fortschritt der Sequenz — unter der Partner-Leiste. */}
-                    {isActive && seq.hasSequence && (
-                      <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
-                        <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
                       </div>
-                    )}
 
-                    <div className="absolute top-4 right-4 z-20">
-                      <MomentMenu
-                        reportedUserId={partner.partnerId}
-                        reportedPostId={(isActive ? seq.step?.postId : moments[0]?.postId) ?? null}
-                        handle={partner.handle}
-                      />
-                    </div>
-
-                    {/* Bottom overlay: Handle + Chat-Einstieg. Kein Erneuern, kein
+                      {/* Bottom overlay: Handle + Chat-Einstieg. Kein Erneuern, kein
                         Verfalls-Herz — die Verbindung ist beständig. */}
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent p-5">
-                      <div className="flex items-end justify-between gap-3">
-                        <span className="min-w-0 truncate text-lg font-semibold tracking-tight text-white drop-shadow-md">
-                          {partner.handle}
-                        </span>
-                        <span className="relative inline-flex">
-                          <HapticTapTarget label="Chat öffnen" onTap={() => openChat(partner)} />
-                          <button
-                            onClick={() => openChat(partner)}
-                            className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black transition-all active:scale-95"
-                          >
-                            <span className="material-symbols-outlined text-[16px] leading-none">
-                              chat
-                            </span>
-                            Nachricht
-                          </button>
-                        </span>
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent p-5">
+                        <div className="flex items-end justify-between gap-3">
+                          <span className="min-w-0 truncate text-lg font-semibold tracking-tight text-white drop-shadow-md">
+                            {partner.handle}
+                          </span>
+                          <span className="relative inline-flex">
+                            <HapticTapTarget label="Chat öffnen" onTap={() => openChat(partner)} />
+                            <button
+                              onClick={() => openChat(partner)}
+                              className="flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-black transition-all active:scale-95"
+                            >
+                              <span className="material-symbols-outlined text-[16px] leading-none">
+                                chat
+                              </span>
+                              Nachricht
+                            </button>
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+          {/* Fängt Berührungen ab, solange der Feed nachläuft (use-snap-scroll). */}
+          <div ref={shieldRef} className="snap-feed-shield" aria-hidden />
+        </>
+      ) : momentsData === undefined ? (
+        // Momente noch unterwegs oder gescheitert — Scroller und Shield fehlen
+        // hier gemeinsam, wie im Leerzustand darunter.
+        <FeedStatus
+          state={momentsError && !momentsFetching ? "error" : "pending"}
+          onRetry={() => void refetchMoments()}
+        />
       ) : (
         // Verbindung beständig, Moment flüchtig: gerade zeigt niemand etwas.
         <div className="absolute inset-0 flex flex-col items-center justify-center px-8 text-center">

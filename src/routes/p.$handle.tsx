@@ -155,7 +155,7 @@ function ProfilePage() {
 
   // ── Wisch nach unten = schließen ──────────────────────────────────────────
   // Kein Snap-Container mehr (es gibt nur diese eine Person), deshalb ein
-  // eigener kleiner Handler — und deshalb funktionieren hier normale
+  // eigener kleiner, passiver Handler — und deshalb reichen hier normale
   // click-Ereignisse für die Tipp-Zonen (siehe TapInfo in use-snap-scroll.ts).
   const sheetRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);

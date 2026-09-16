@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase/client";
 import { isControlTap, tapDirection } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { useSnapScroll } from "@/hooks/use-snap-scroll";
+import { mediaWindow } from "@/lib/feed-media-window";
 import { useSwipeFollow } from "@/hooks/use-swipe-follow";
 import { useFollow } from "@/lib/follow-context";
 import { useCircle } from "@/lib/circle/use-circle";
@@ -16,6 +17,7 @@ import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { MomentMenu } from "@/components/moment-menu";
 import { SequenceMedia } from "@/components/sequence-media";
 import { MomentProgress } from "@/components/moment-progress";
+import { FeedStatus } from "@/components/feed-status";
 import { useMomentSequence, firstStepOf, type SequenceMoment } from "@/hooks/use-moment-sequence";
 
 export const Route = createFileRoute("/story")({
@@ -49,6 +51,8 @@ const CITY = (import.meta.env.VITE_PILOT_CITY as string | undefined) ?? "Düssel
 const CORSO_POLL_MS = 30_000;
 // Stabile leere Liste — eine frische [] pro Render würde die Sequenz zurücksetzen.
 const EMPTY_MOMENTS: SequenceMoment[] = [];
+// Stabil statt `= []` pro Render — sonst liefen Effekte an `clips` jedes Mal neu.
+const NO_CLIPS: StoryClip[] = [];
 
 // Rückgabezeile von corso_now() — 🔒 nur Anzeige-Daten, keine Zahlen.
 interface CorsoRow {
@@ -90,13 +94,16 @@ function StoryPage() {
   // Der aktuelle Stand des laufenden Corso. Alle Nutzer der Stadt sehen
   // dieselben Slots — die Besetzung liegt serverseitig in corso_slots, nicht in
   // einer Ziehung pro Client.
-  const { data: clips = [], isLoading } = useQuery({
+  const { data, isError, isFetching, refetch } = useQuery({
     queryKey: ["corso-now", CITY, user?.id],
     queryFn: async () => {
       if (!user) return [];
       const { data, error } = await supabase.rpc("corso_now", { target_city: CITY });
+      // Ein Fehler WIRFT. Vorher leerte ein einziger gescheiterter 30-s-Poll
+      // die Bühne mitten im Zuschauen; jetzt bleibt der letzte Stand stehen.
+      if (error) throw error;
       const rows = (data ?? []) as CorsoRow[];
-      if (error || !rows.length) return [];
+      if (!rows.length) return [];
 
       // Alle Medienpfade eines Slots (Video: einer, Foto-Moment: bis zu 5).
       // Bewusst auf das Minimum getypt: dieselbe Funktion bedient die Slot-Zeilen
@@ -195,6 +202,7 @@ function StoryPage() {
     // Ereignis zu einer festen Uhrzeit zu warten.
     refetchInterval: CORSO_POLL_MS,
   });
+  const clips: StoryClip[] = data ?? NO_CLIPS;
 
   const { burstHandle, triggerBurst } = useHeartBurst();
   const { isFollowing, follow, unfollow } = useFollow();
@@ -232,21 +240,19 @@ function StoryPage() {
     },
   });
 
-  const { currentIndex, slideRef, containerRef, snapTo } = useSnapScroll({
-    count: clips.length,
-    axis: "y",
-    onSwipeX: swipeHandlers,
-    // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
-    // 🔒 Die Sequenz enthält nur freigegebene Momente (Filter in der Query).
-    onTap: ({ index, x, y, target }) => {
-      if (isControlTap(target)) return;
-      if (index !== currentIndexRef.current) return;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
-      else seqRef.current?.next();
-    },
-  });
+  const { currentIndex, settledIndex, direction, slideRef, containerRef, shieldRef, snapTo } =
+    useSnapScroll({
+      count: clips.length,
+      onSwipeX: swipeHandlers,
+      // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
+      // 🔒 Die Sequenz enthält nur freigegebene Momente (Filter in der Query).
+      onTap: ({ index, x, y, rect, target }) => {
+        if (isControlTap(target)) return;
+        if (index !== currentIndexRef.current) return;
+        if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+        else seqRef.current?.next();
+      },
+    });
 
   // Sequenz des aktiven Slots. Startpunkt ist der Moment auf der Bühne.
   const activeClip = clips[currentIndex];
@@ -272,7 +278,11 @@ function StoryPage() {
 
   // Kein einwilligender Moment in der Stadt: ehrlicher Leerzustand statt Mock.
   // Kein „peinlich leer" durch Fake-Auffüllen (PRD §4.6).
-  const showEmpty = !isLoading && clips.length === 0;
+  //
+  // Leer heißt: eine Antwort ist da und sie ist leer. Nicht „noch nichts da" —
+  // ohne Antwort zeigt der Feed FeedStatus (laden / keine Verbindung).
+  const hasData = data !== undefined;
+  const showEmpty = hasData && clips.length === 0;
 
   // Enthüllungs-Animation: Rückt jemand nach, während man zuschaut, tritt der
   // Moment auf, statt einfach da zu sein. Erkannt am Übergang leer → besetzt.
@@ -293,154 +303,166 @@ function StoryPage() {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="relative h-dvh w-full overflow-hidden bg-neutral-950"
-      style={{ touchAction: "none" }}
-    >
-      {clips.map((c, i) => {
-        const offset = i - currentIndex;
-        const isActive = offset === 0;
-        const isNeighbor = Math.abs(offset) === 1;
-        // Steht der gerade gezeigte Schritt auf dem Moment, der den Slot belegt?
-        // Nicht-aktive Kacheln zeigen ihren Anfang — dort gilt der Slot-Moment
-        // nur, wenn er zufällig der erste ist.
-        const shownPostId = isActive ? seq.step?.postId : c.moments[0]?.postId;
-        const isSlotMoment = shownPostId === c.slotPostId;
+    <div className="relative h-dvh w-full overflow-hidden bg-neutral-950">
+      {/* Nativ gescrollter Feed. Pille, Seitenpunkte und Hinweis liegen
+          AUSSERHALB davon, sonst scrollten sie mit. */}
+      <div ref={containerRef} className="snap-feed">
+        {clips.map((c, i) => {
+          const isActive = i === currentIndex;
+          // Medien-Fenster: Regel in lib/feed-media-window.ts. Vorher liefen
+          // bis zu corso_slot_count Videos gleichzeitig.
+          const media = mediaWindow(i, currentIndex, settledIndex, direction);
+          // Steht der gerade gezeigte Schritt auf dem Moment, der den Slot belegt?
+          // Nicht-aktive Kacheln zeigen ihren Anfang — dort gilt der Slot-Moment
+          // nur, wenn er zufällig der erste ist.
+          const shownPostId = isActive ? seq.step?.postId : c.moments[0]?.postId;
+          const isSlotMoment = shownPostId === c.slotPostId;
 
-        return (
-          <div
-            key={c.slot}
-            ref={slideRef(i)}
-            className="absolute inset-0 w-full h-full"
-            style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
-          >
-            {/* Gerahmte Karte wie in der Discovery */}
-            <div
-              className="absolute inset-0 px-4"
-              style={{
-                paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)",
-                paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
-              }}
-            >
+          return (
+            <div key={c.slot} ref={slideRef(i)} className="snap-feed-slide">
+              {/* Gerahmte Karte wie in der Discovery */}
               <div
-                ref={cardRef(i)}
-                className="relative w-full h-full rounded-[2rem] overflow-hidden"
+                className="absolute inset-0 px-4"
                 style={{
-                  // Der Moment, der WIRKLICH einen Corso-Platz belegt, bekommt
-                  // einen weißen Rand plus einen weichen Schein. Beim Blättern
-                  // durch die anderen freigegebenen Momente derselben Person
-                  // erlischt er — daran erkennt man auf einen Blick, welcher
-                  // gerade auf der Bühne steht (Entscheidung Dominik, 9. Sep 2026).
-                  // Bewusst nur Licht statt Farbe: der Screen kennt keine
-                  // Akzentfarbe, und Weiß ist hier ohnehin die Sprache.
-                  boxShadow: isSlotMoment
-                    ? "0 0 0 2px rgba(255,255,255,0.92), 0 0 28px -6px rgba(255,255,255,0.45), 0 30px 80px -20px rgba(0,0,0,0.6)"
-                    : "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
-                  transition: "box-shadow 320ms ease",
-                  // Die Ziehung tritt auf, statt nur da zu sein (nur der Moment im Blick).
-                  animation:
-                    reveal && isActive
-                      ? "storyReveal 900ms cubic-bezier(0.22, 1, 0.36, 1) both"
-                      : undefined,
+                  paddingTop: "calc(env(safe-area-inset-top) + 2.5rem)",
+                  paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
                 }}
               >
-                {(() => {
-                  const shown = isActive
-                    ? { step: seq.step, moment: seq.currentMoment }
-                    : firstStepOf(c.moments);
-                  if (!shown.step) return null;
-                  return (
-                    <SequenceMedia
-                      step={shown.step}
-                      moment={shown.moment}
-                      isActive={isActive}
-                      isLastStep={isActive ? seq.isLastStep : false}
-                      onEnded={seq.autoNext}
-                    />
-                  );
-                })()}
+                <div
+                  ref={cardRef(i)}
+                  className="relative w-full h-full rounded-[2rem] overflow-hidden"
+                  style={{
+                    // Der Moment, der WIRKLICH einen Corso-Platz belegt, bekommt
+                    // einen weißen Rand plus einen weichen Schein. Beim Blättern
+                    // durch die anderen freigegebenen Momente derselben Person
+                    // erlischt er — daran erkennt man auf einen Blick, welcher
+                    // gerade auf der Bühne steht (Entscheidung Dominik, 9. Sep 2026).
+                    // Bewusst nur Licht statt Farbe: der Screen kennt keine
+                    // Akzentfarbe, und Weiß ist hier ohnehin die Sprache.
+                    boxShadow: isSlotMoment
+                      ? "0 0 0 2px rgba(255,255,255,0.92), 0 0 28px -6px rgba(255,255,255,0.45), 0 30px 80px -20px rgba(0,0,0,0.6)"
+                      : "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                    transition: "box-shadow 320ms ease",
+                    // Die Ziehung tritt auf, statt nur da zu sein (nur der Moment im Blick).
+                    animation:
+                      reveal && isActive
+                        ? "storyReveal 900ms cubic-bezier(0.22, 1, 0.36, 1) both"
+                        : undefined,
+                  }}
+                >
+                  {media.mount &&
+                    (() => {
+                      const shown = isActive
+                        ? { step: seq.step, moment: seq.currentMoment }
+                        : firstStepOf(c.moments);
+                      if (!shown.step) return null;
+                      return (
+                        <SequenceMedia
+                          step={shown.step}
+                          moment={shown.moment}
+                          isActive={isActive}
+                          isLastStep={isActive ? seq.isLastStep : false}
+                          onEnded={seq.autoNext}
+                          preload={media.preload}
+                          warm={media.warm}
+                        />
+                      );
+                    })()}
 
-                {/* Fortschritt der Sequenz — eine Zeile oben. Liegt über der
+                  {/* Fortschritt der Sequenz — eine Zeile oben. Liegt über der
                     „Stadt Corso · läuft"-Pille, deshalb etwas tiefer. */}
-                {isActive && seq.hasSequence && (
-                  <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
-                    <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
-                  </div>
-                )}
+                  {isActive && seq.hasSequence && (
+                    <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+                      <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
+                    </div>
+                  )}
 
-                {/* Glanzkante, identisch zur Discovery — dort steht die
+                  {/* Glanzkante, identisch zur Discovery — dort steht die
                     ausführliche Begründung, warum hier kein mix-blend-mode mehr
                     steht: Der Blend-Modus kostet auf einer bewegten Kachel
                     jeden Frame eine Neuberechnung des Untergrunds. */}
-                <div
-                  className="pointer-events-none absolute inset-0 rounded-[2rem]"
-                  style={{
-                    background:
-                      "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.06) 100%)",
-                  }}
-                />
-
-                {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
-                <div className="absolute top-4 right-4 z-20">
-                  <MomentMenu
-                    reportedUserId={c.authorId}
-                    reportedPostId={(isActive ? seq.step?.postId : c.slotPostId) ?? c.slotPostId}
-                    handle={c.handle}
+                  <div
+                    className="pointer-events-none absolute inset-0 rounded-[2rem]"
+                    style={{
+                      background:
+                        "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.06) 100%)",
+                    }}
                   />
-                </div>
-                {/* Herz-Burst beim Folgen — geteilt mit Discovery */}
-                <HeartBurst active={burstHandle === c.handle} />
 
-                {/* Herz/gebrochenes Herz blenden mit dem Wisch-Fortschritt ein */}
-                <SwipeFollowOverlay label="folgen" />
-                <SwipeFollowOverlay label="entfolgen" direction="left" />
-
-                {/* Bottom overlay — Ort/Zeit + Handle; Folgen per Rechts-Wisch.
-                    🔒 KEINE Reaktions- oder Follower-Zahlen sichtbar (PRD §4.6). */}
-                <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
-                  <div className="flex items-center gap-1.5 text-white/70 mb-2.5">
-                    <span className="material-symbols-outlined text-[16px] leading-none">
-                      location_on
-                    </span>
-                    <span className="text-xs font-medium tracking-tight">{CITY}</span>
-                    <span className="text-white/40 text-xs">· Stadt Corso</span>
+                  {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+                  <div className="absolute top-4 right-4 z-20">
+                    <MomentMenu
+                      reportedUserId={c.authorId}
+                      reportedPostId={(isActive ? seq.step?.postId : c.slotPostId) ?? c.slotPostId}
+                      handle={c.handle}
+                    />
                   </div>
-                  <div className="flex justify-between items-end">
-                    {/* Reiner Text — kein Einstieg in eine Zwischenebene mehr
+                  {/* Herz-Burst beim Folgen — geteilt mit Discovery */}
+                  <HeartBurst active={burstHandle === c.handle} />
+
+                  {/* Herz/gebrochenes Herz blenden mit dem Wisch-Fortschritt ein */}
+                  <SwipeFollowOverlay label="folgen" />
+                  <SwipeFollowOverlay label="entfolgen" direction="left" />
+
+                  {/* Bottom overlay — Ort/Zeit + Handle; Folgen per Rechts-Wisch.
+                    🔒 KEINE Reaktions- oder Follower-Zahlen sichtbar (PRD §4.6). */}
+                  <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
+                    <div className="flex items-center gap-1.5 text-white/70 mb-2.5">
+                      <span className="material-symbols-outlined text-[16px] leading-none">
+                        location_on
+                      </span>
+                      <span className="text-xs font-medium tracking-tight">{CITY}</span>
+                      <span className="text-white/40 text-xs">· Stadt Corso</span>
+                    </div>
+                    <div className="flex justify-between items-end">
+                      {/* Reiner Text — kein Einstieg in eine Zwischenebene mehr
                         (9. Sep 2026): geblättert wird direkt auf der Kachel. */}
-                    <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
-                      {c.handle}
-                    </span>
-                    {circleIds.has(c.authorId) ? (
-                      // Achse 2 — folgen wäre wirkungslos, also gar nicht anbieten.
-                      <div className="pointer-events-none flex items-center gap-1.5 rounded-full bg-white/15 px-3.5 py-1.5 backdrop-blur-md">
-                        <span className="material-symbols-outlined text-[16px] leading-none text-white">
-                          hub
-                        </span>
-                        <span className="text-xs font-semibold text-white">in deinem Circle</span>
-                      </div>
-                    ) : isFollowing(c.handle) ? (
-                      // Reiner Status, kein Button — der Clip bleibt in der Story.
-                      <div className="pointer-events-none flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5">
-                        <span className="text-xs font-semibold text-black">folgst du</span>
-                        <span
-                          className="material-symbols-outlined text-[16px] leading-none text-black"
-                          style={{ fontVariationSettings: "'FILL' 1" }}
-                        >
-                          favorite
-                        </span>
-                      </div>
-                    ) : (
-                      <SwipeHintChip label="wischen zum Folgen" />
-                    )}
+                      <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
+                        {c.handle}
+                      </span>
+                      {circleIds.has(c.authorId) ? (
+                        // Achse 2 — folgen wäre wirkungslos, also gar nicht anbieten.
+                        <div className="pointer-events-none flex items-center gap-1.5 rounded-full bg-white/15 px-3.5 py-1.5 backdrop-blur-md">
+                          <span className="material-symbols-outlined text-[16px] leading-none text-white">
+                            hub
+                          </span>
+                          <span className="text-xs font-semibold text-white">in deinem Circle</span>
+                        </div>
+                      ) : isFollowing(c.handle) ? (
+                        // Reiner Status, kein Button — der Clip bleibt in der Story.
+                        <div className="pointer-events-none flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5">
+                          <span className="text-xs font-semibold text-black">folgst du</span>
+                          <span
+                            className="material-symbols-outlined text-[16px] leading-none text-black"
+                            style={{ fontVariationSettings: "'FILL' 1" }}
+                          >
+                            favorite
+                          </span>
+                        </div>
+                      ) : (
+                        <SwipeHintChip label="wischen zum Folgen" />
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {/* Fängt Berührungen ab, solange der Feed nachläuft (use-snap-scroll). */}
+      <div ref={shieldRef} className="snap-feed-shield" aria-hidden />
+
+      {/* Noch keine Antwort: laden oder keine Verbindung. Liegt über dem
+          (dann leeren) Scroller, der samt Shield stehen bleibt. */}
+      {!hasData && (
+        <div className="absolute inset-0 z-20">
+          <FeedStatus
+            state={isError && !isFetching ? "error" : "pending"}
+            onRetry={() => void refetch()}
+          />
+        </div>
+      )}
 
       {/* Seitenindikatoren — identisch zur Discovery */}
       <div className="absolute top-1/2 right-3 z-20 -translate-y-1/2 flex flex-col gap-1.5">

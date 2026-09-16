@@ -3,7 +3,9 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useFollow } from "@/lib/follow-context";
 import { useCircle } from "@/lib/circle/use-circle";
-import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
+import { useSnapScroll } from "@/hooks/use-snap-scroll";
+import { mediaWindow } from "@/lib/feed-media-window";
+import { FeedStatus } from "@/components/feed-status";
 import { useSwipeFollow, SWIPE_EXIT_MS } from "@/hooks/use-swipe-follow";
 import { SwipeFollowOverlay, SwipeHintChip } from "@/components/swipe-follow-overlay";
 import { useHeartBurst } from "@/components/heart-burst";
@@ -45,7 +47,11 @@ type Tile = {
 };
 type TileSlide = { kind: "tile" } & Tile;
 type EmptySlide = { kind: "empty" };
-type Slide = TileSlide | EmptySlide;
+// Noch gar keine Daten: laden oder gescheitert (components/feed-status.tsx).
+// Bewusst eine eigene Art statt „empty": Der Leerzustand behauptet, niemand sei
+// draußen — das weiß der Feed erst, wenn eine Antwort da ist.
+type StatusSlide = { kind: "status"; state: "pending" | "error" };
+type Slide = TileSlide | EmptySlide | StatusSlide;
 
 const buildSlides = (tiles: Tile[]): Slide[] =>
   tiles.length > 0
@@ -55,12 +61,9 @@ const buildSlides = (tiles: Tile[]): Slide[] =>
 // Momente pro Nachlade-Schritt (Posts + signierte URLs = 2 Requests pro Seite).
 const PAGE_SIZE = 20;
 // So viele Kacheln vor dem Ende wird nachgeladen, damit nie eine Lücke entsteht.
-const PREFETCH_MARGIN = 3;
-// Nur der aktive Moment ± VIDEO_WINDOW bekommt ein <video>-Element. Vorher luden
-// alle 20+ Kacheln einer Seite gleichzeitig — der Clip, den man gerade ansieht,
-// konkurrierte mit 19 anderen um die Leitung, und iOS drosselt viele Media-
-// Elemente ohnehin. Zwei Slides Vorlauf reichen, eine Wischgeste bewegt ~eine.
-const VIDEO_WINDOW = 2;
+// 8 statt früher 3: Wer schnell wischt, war sonst an der Seitengrenze, bevor die
+// nächste Seite samt signierten URLs da war.
+const PREFETCH_MARGIN = 8;
 // Solange bleibt der Feed nach einem Screen-/App-Wechsel ohne Neuladen stehen.
 // Ein Refetch sortiert neue Momente oben ein — mitten im Wischen rutscht dann die
 // Kachel unter dem Finger weiter. Nach einer Minute darf das passieren, nach einem
@@ -80,6 +83,9 @@ export function DiscoveryFeed() {
   // der Feed scrollt endlos durch den lebenden Topf.
   const {
     data: pages,
+    isError,
+    isFetching,
+    refetch,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -96,7 +102,11 @@ export function DiscoveryFeed() {
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
-      if (error || !data?.length) return [] as MomentRow[];
+      // Ein Fehler WIRFT, statt als leere Seite durchzugehen. Sonst leerte ein
+      // Funkloch beim Refetch den Feed, und eine leere Folgeseite beendete das
+      // Endlos-Scrollen für die ganze Sitzung (getNextPageParam unten).
+      if (error) throw error;
+      if (!data?.length) return [] as MomentRow[];
       // Alle Medienpfade eines Posts (Video: einer, Foto-Moment: bis zu 5).
       const pathsOf = (post: {
         media_path: string;
@@ -179,44 +189,51 @@ export function DiscoveryFeed() {
   // rausgleiten kann, statt unter dem Finger zu verschwinden.
   const [exiting, setExiting] = useState<Set<string>>(() => new Set());
 
+  // Ohne Daten bleibt der Scroller trotzdem stehen (mit einer Status-Kachel):
+  // Scroller und Shield gehören zusammen und sollen nicht an- und abgebaut werden.
+  const hasData = pages !== undefined;
+  // Während eines neuen Versuchs wieder „lädt" statt weiter „Keine Verbindung".
+  const failed = isError && !isFetching;
   const slides = useMemo(
-    () =>
-      buildSlides(
-        activeTiles.filter(
-          (t) =>
-            (!followed.has(t.handle) || exiting.has(t.handle)) &&
-            !(t.authorId && circleIds.has(t.authorId)),
-        ),
-      ),
-    [activeTiles, followed, exiting, circleIds],
+    (): Slide[] =>
+      hasData
+        ? buildSlides(
+            activeTiles.filter(
+              (t) =>
+                (!followed.has(t.handle) || exiting.has(t.handle)) &&
+                !(t.authorId && circleIds.has(t.authorId)),
+            ),
+          )
+        : [{ kind: "status", state: failed ? "error" : "pending" }],
+    [hasData, failed, activeTiles, followed, exiting, circleIds],
   );
 
-  // snapTo/realign aus useSnapScroll werden in der Commit-Choreografie unten
-  // gebraucht, der Hook läuft aber erst danach → über ein Ref entkoppelt.
-  const snapRef = useRef<{ snapTo: (i: number) => void; realign: (i: number) => void } | null>(
-    null,
-  );
+  // snapTo aus useSnapScroll wird in der Commit-Choreografie unten gebraucht,
+  // der Hook läuft aber erst danach → über ein Ref entkoppelt.
+  const snapRef = useRef<((i: number, onSettled?: () => void) => void) | null>(null);
 
   // Nach dem Swipe-Follow in drei Schritten weiter (gewünschtes Verhalten:
   // „Kachel verschwindet und ich scrolle automatisch zum nächsten Moment"):
   //   1. Karte fliegt nach rechts raus (macht use-swipe-follow, SWIPE_EXIT_MS).
   //   2. Der Feed scrollt animiert zum nächsten Moment (snapTo).
-  //   3. Die gefolgte Kachel wird aus der Liste genommen und der Index im selben
-  //      Tick unsichtbar nachgezogen (realign) — gleicher Frame, kein Sprung.
+  //   3. Erst wenn der Scroll WIRKLICH steht, fliegt die gefolgte Kachel aus
+  //      der Liste. Die Dauer eines nativen Smooth-Scrolls ist nicht
+  //      vorhersagbar, deshalb hängt Schritt 3 am Ende der Bewegung und nicht
+  //      an einem Timer. Dass das Bild dabei nicht springt, obwohl eine Kachel
+  //      ÜBER der aktuellen verschwindet, regelt use-snap-scroll.
   const handleFollowed = (handle: string, index: number) => {
     triggerBurst(handle);
     setExiting((prev) => new Set(prev).add(handle));
-    window.setTimeout(() => snapRef.current?.snapTo(index + 1), SWIPE_EXIT_MS);
     window.setTimeout(
-      () => {
-        setExiting((prev) => {
-          const next = new Set(prev);
-          next.delete(handle);
-          return next;
-        });
-        snapRef.current?.realign(index);
-      },
-      SWIPE_EXIT_MS + SNAP_MS + 60,
+      () =>
+        snapRef.current?.(index + 1, () =>
+          setExiting((prev) => {
+            const next = new Set(prev);
+            next.delete(handle);
+            return next;
+          }),
+        ),
+      SWIPE_EXIT_MS,
     );
   };
 
@@ -238,24 +255,22 @@ export function DiscoveryFeed() {
     },
   });
 
-  const { currentIndex, settledIndex, slideRef, containerRef, snapTo, realign } = useSnapScroll({
-    count: slides.length,
-    axis: "y",
-    onSwipeX: swipeHandlers,
-    // Tipp = EIN Schritt weiter in der Sequenz dieser Person (nächstes Bild
-    // ODER nächster Moment — für den Nutzer derselbe Fluss). Linkes Drittel =
-    // zurück. Bewusst über den Snap-Hook statt per onClick: siehe TapInfo in
-    // use-snap-scroll.ts — innerhalb des Containers feuert auf iOS kein click.
-    onTap: ({ index, x, y, target }) => {
-      if (isControlTap(target)) return; // Ton-Knopf, Menü
-      if (index !== currentIndexRef.current) return; // nur die aktive Kachel
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
-      else seqRef.current?.next();
-    },
-  });
-  snapRef.current = { snapTo, realign };
+  const { currentIndex, settledIndex, direction, slideRef, containerRef, shieldRef, snapTo } =
+    useSnapScroll({
+      count: slides.length,
+      onSwipeX: swipeHandlers,
+      // Tipp = EIN Schritt weiter in der Sequenz dieser Person (nächstes Bild
+      // ODER nächster Moment — für den Nutzer derselbe Fluss). Linkes Drittel =
+      // zurück. Bewusst über den Snap-Hook statt per onClick: siehe TapInfo in
+      // use-snap-scroll.ts.
+      onTap: ({ index, x, y, rect, target }) => {
+        if (isControlTap(target)) return; // Ton-Knopf, Menü
+        if (index !== currentIndexRef.current) return; // nur die aktive Kachel
+        if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+        else seqRef.current?.next();
+      },
+    });
+  snapRef.current = snapTo;
 
   // Die Sequenz der GERADE AKTIVEN Person. Bewusst nur eine — Kacheln, die man
   // nicht ansieht, brauchen keinen laufenden Schritt-Zustand (und ein Hook pro
@@ -297,178 +312,175 @@ export function DiscoveryFeed() {
   }, [activePostId]);
 
   return (
-    <div ref={containerRef} className="absolute inset-0" style={{ touchAction: "none" }}>
-      {/* Slides */}
-      {slides.map((slide, i) => {
-        const offset = i - currentIndex;
-        const distance = Math.abs(offset);
-        const isActive = offset === 0;
-        const isNeighbor = distance === 1;
-        const isExiting = slide.kind === "tile" && exiting.has(slide.handle);
-        // Video-Fenster: außerhalb bleibt die Slide-Hülle stehen (der Snap-Hook
-        // positioniert sie weiter), nur das <video> darin wird nicht gemountet.
-        //
-        // Bewusst am `settledIndex` statt am `currentIndex`: Das Fenster wandert
-        // erst, wenn die Bewegung steht. Hinge es am aktiven Index, würde mitten
-        // in der Wischgeste ein <video> montiert und ein anderes abgeräumt —
-        // Decoder-Auf- und -Abbau im laufenden Frame, und genau da ruckelte es.
-        // Preis dieser Entkopplung: Wer mit einem sehr schnellen Flick mehr als
-        // VIDEO_WINDOW Kacheln auf einmal überspringt, sieht die Zielkachel für
-        // den Bruchteil einer Sekunde ohne Bild, bis der Snap steht. Eine normale
-        // Wischgeste bewegt eine Kachel und bleibt damit innerhalb des Fensters.
-        const settledDistance = Math.abs(i - settledIndex);
-        const mountVideo = settledDistance <= VIDEO_WINDOW;
-        const preload = settledDistance <= 1 ? "auto" : "metadata";
+    <div className="absolute inset-0">
+      {/* Slides — nativ gescrollt (Klassen in styles.css) */}
+      <div ref={containerRef} className="snap-feed">
+        {slides.map((slide, i) => {
+          const isActive = i === currentIndex;
+          const isExiting = slide.kind === "tile" && exiting.has(slide.handle);
+          // Medien-Fenster: außerhalb bleibt die Slide-Hülle stehen (sie hält
+          // ihre Höhe im Scroll-Fluss), nur <video>/<img> darin fehlen. Nicht
+          // alle 20+ Kacheln einer Seite gleichzeitig laden — der Clip, den man
+          // ansieht, konkurrierte sonst mit allen anderen um die Leitung. Die
+          // Regel (voraus laden, vorwärmen) steht in lib/feed-media-window.ts.
+          const media = mediaWindow(i, currentIndex, settledIndex, direction);
+          const mountVideo = media.mount;
+          const preload = media.preload;
 
-        return (
-          <div
-            // Key = Person: eine Kachel ist seit dem In-Place-Blättern ein
-            // Mensch mit Sequenz, nicht ein einzelner Moment. Über Refetches
-            // stabil, auch wenn ein Moment dazukommt oder abläuft.
-            key={slide.kind === "tile" ? slide.authorId : slide.kind}
-            ref={slideRef(i)}
-            className="absolute inset-0 w-full h-full"
-            style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
-          >
+          return (
             <div
-              className="absolute inset-0 px-4"
-              style={{
-                paddingTop: "calc(env(safe-area-inset-top) + 3.5rem)",
-                paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
-                // Wegblenden erst nach dem Herz-Burst (Delay 600ms), dann sanft schrumpfen.
-                opacity: isExiting ? 0 : 1,
-                transform: isExiting ? "scale(0.9)" : "scale(1)",
-                transition: "opacity 450ms ease 600ms, transform 450ms ease 600ms",
-              }}
+              // Key = Person: eine Kachel ist seit dem In-Place-Blättern ein
+              // Mensch mit Sequenz, nicht ein einzelner Moment. Über Refetches
+              // stabil, auch wenn ein Moment dazukommt oder abläuft.
+              key={slide.kind === "tile" ? slide.authorId : slide.kind}
+              ref={slideRef(i)}
+              className="snap-feed-slide"
             >
               <div
-                ref={cardRef(i)}
-                className="relative w-full h-full rounded-[2rem] overflow-hidden"
+                className="absolute inset-0 px-4"
                 style={{
-                  boxShadow:
-                    "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                  paddingTop: "calc(env(safe-area-inset-top) + 3.5rem)",
+                  paddingBottom: "calc(env(safe-area-inset-bottom) + 6rem)",
+                  // Wegblenden erst nach dem Herz-Burst (Delay 600ms), dann sanft schrumpfen.
+                  opacity: isExiting ? 0 : 1,
+                  transform: isExiting ? "scale(0.9)" : "scale(1)",
+                  transition: "opacity 450ms ease 600ms, transform 450ms ease 600ms",
                 }}
               >
-                {slide.kind === "tile" ? (
-                  <>
-                    {/* Aktive Kachel zeigt den Schritt, auf dem die Sequenz steht;
+                <div
+                  ref={cardRef(i)}
+                  className="relative w-full h-full rounded-[2rem] overflow-hidden"
+                  style={{
+                    boxShadow:
+                      "0 0 0 1px rgba(255,255,255,0.08), 0 1px 0 0 rgba(255,255,255,0.15) inset, 0 30px 80px -20px rgba(0,0,0,0.6)",
+                  }}
+                >
+                  {slide.kind === "tile" ? (
+                    <>
+                      {/* Aktive Kachel zeigt den Schritt, auf dem die Sequenz steht;
                         Nachbarn (die beim Wischen aufblitzen) ihren Anfang. */}
-                    {mountVideo &&
-                      (() => {
-                        const shown = isActive
-                          ? { step: seq.step, moment: seq.currentMoment }
-                          : firstStepOf(slide.moments);
-                        if (!shown.step) return null;
-                        return (
-                          <SequenceMedia
-                            step={shown.step}
-                            moment={shown.moment}
-                            isActive={isActive}
-                            isLastStep={isActive ? seq.isLastStep : false}
-                            onEnded={seq.autoNext}
-                            preload={preload}
-                          />
-                        );
-                      })()}
+                      {mountVideo &&
+                        (() => {
+                          const shown = isActive
+                            ? { step: seq.step, moment: seq.currentMoment }
+                            : firstStepOf(slide.moments);
+                          if (!shown.step) return null;
+                          return (
+                            <SequenceMedia
+                              step={shown.step}
+                              moment={shown.moment}
+                              isActive={isActive}
+                              isLastStep={isActive ? seq.isLastStep : false}
+                              onEnded={seq.autoNext}
+                              preload={preload}
+                              warm={media.warm}
+                            />
+                          );
+                        })()}
 
-                    {/* Fortschritt der Sequenz — eine Zeile, sofort sichtbar,
+                      {/* Fortschritt der Sequenz — eine Zeile, sofort sichtbar,
                         sobald es mehr als einen Schritt gibt. */}
-                    {isActive && seq.hasSequence && (
-                      <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
-                        <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
-                      </div>
-                    )}
-                    {/* Glanzkante. Bewusst OHNE mix-blend-mode: Ein Blend-Modus
+                      {isActive && seq.hasSequence && (
+                        <div className="pointer-events-none absolute inset-x-4 top-3 z-20">
+                          <MomentProgress groups={seq.groups} stepIndex={seq.stepIndex} />
+                        </div>
+                      )}
+                      {/* Glanzkante. Bewusst OHNE mix-blend-mode: Ein Blend-Modus
                         zwingt den Browser, für jeden Frame den Untergrund unter
                         der Kachel mitzurechnen — auf einem bewegten Video fällt
                         die Kachel damit aus dem reinen GPU-Compositing. Der
                         einfache Alpha-Gradient sieht praktisch gleich aus und
                         kostet nichts; die Deckkraft ist leicht abgesenkt, weil
                         „overlay" heller auftrug als reines Weiß auf Alpha. */}
-                    <div
-                      className="pointer-events-none absolute inset-0 rounded-[2rem]"
-                      style={{
-                        background:
-                          "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.06) 100%)",
-                      }}
-                    />
-                    {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
-                    {slide.authorId && (
-                      <div className="absolute top-4 right-4 z-20">
-                        <MomentMenu
-                          reportedUserId={slide.authorId}
-                          reportedPostId={
-                            (isActive ? seq.step?.postId : slide.moments[0]?.postId) ?? null
-                          }
-                          handle={slide.handle}
-                        />
-                      </div>
-                    )}
-                    {/* Herzanimation mittig über dem Bild */}
-                    {burstHandle === slide.handle && (
-                      <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-                        <span
-                          className="material-symbols-outlined animate-heart-burst text-white"
-                          style={{ fontSize: "100px", fontVariationSettings: "'FILL' 1" }}
-                        >
-                          favorite
-                        </span>
-                      </div>
-                    )}
-                    {/* Herz blendet mit dem Wisch-Fortschritt ein */}
-                    <SwipeFollowOverlay label="folgen" />
-                    {/* Bottom overlay — Folgen passiert per Rechts-Wisch, kein Button */}
-                    <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
-                      <div className="flex justify-between items-end">
-                        {/* Reiner Text: Seit dem In-Place-Blättern (9. Sep 2026)
+                      <div
+                        className="pointer-events-none absolute inset-0 rounded-[2rem]"
+                        style={{
+                          background:
+                            "linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 30%, rgba(255,255,255,0) 70%, rgba(255,255,255,0.06) 100%)",
+                        }}
+                      />
+                      {/* Melden/Blockieren — unaufdringlicher Overflow-Einstieg oben rechts */}
+                      {slide.authorId && (
+                        <div className="absolute top-4 right-4 z-20">
+                          <MomentMenu
+                            reportedUserId={slide.authorId}
+                            reportedPostId={
+                              (isActive ? seq.step?.postId : slide.moments[0]?.postId) ?? null
+                            }
+                            handle={slide.handle}
+                          />
+                        </div>
+                      )}
+                      {/* Herzanimation mittig über dem Bild */}
+                      {burstHandle === slide.handle && (
+                        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                          <span
+                            className="material-symbols-outlined animate-heart-burst text-white"
+                            style={{ fontSize: "100px", fontVariationSettings: "'FILL' 1" }}
+                          >
+                            favorite
+                          </span>
+                        </div>
+                      )}
+                      {/* Herz blendet mit dem Wisch-Fortschritt ein */}
+                      <SwipeFollowOverlay label="folgen" />
+                      {/* Bottom overlay — Folgen passiert per Rechts-Wisch, kein Button */}
+                      <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-black/80 via-black/30 to-transparent">
+                        <div className="flex justify-between items-end">
+                          {/* Reiner Text: Seit dem In-Place-Blättern (9. Sep 2026)
                             führt von hier kein Weg mehr in eine Zwischenebene —
                             geblättert wird direkt auf der Kachel. */}
-                        <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
-                          {slide.handle}
-                        </span>
-                        <SwipeHintChip label="wischen zum Folgen" />
+                          <span className="text-white text-lg font-semibold tracking-tight drop-shadow-md">
+                            {slide.handle}
+                          </span>
+                          <SwipeHintChip label="wischen zum Folgen" />
+                        </div>
                       </div>
-                    </div>
-                  </>
-                ) : (
-                  // Kein echter Moment in der Stadt heute — ehrlicher Leerzustand statt Fake-Kacheln.
-                  <div
-                    className="w-full h-full flex flex-col items-center justify-center gap-5 px-8 text-center text-white relative"
-                    style={{
-                      background:
-                        "radial-gradient(circle at 50% 35%, rgba(255,255,255,0.05), transparent 65%), linear-gradient(160deg, #141414 0%, #080808 100%)",
-                    }}
-                  >
-                    <div className="w-20 h-20 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center">
-                      <span className="material-symbols-outlined text-white/30 text-[36px]">
-                        group
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-white text-lg font-semibold tracking-tight">
-                        Du bist früh dran
-                      </p>
-                      <p className="mt-2 text-white/40 text-sm leading-snug max-w-[16rem] mx-auto">
-                        Noch ist niemand draußen. Nimm jetzt deinen Moment auf — im Corso ist gerade
-                        Platz.
-                      </p>
-                    </div>
-                    <Link
-                      to="/record"
-                      className="mt-1 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black active:scale-[0.99] transition-transform"
+                    </>
+                  ) : slide.kind === "status" ? (
+                    <FeedStatus state={slide.state} onRetry={() => void refetch()} />
+                  ) : (
+                    // Kein echter Moment in der Stadt heute — ehrlicher Leerzustand statt Fake-Kacheln.
+                    <div
+                      className="w-full h-full flex flex-col items-center justify-center gap-5 px-8 text-center text-white relative"
+                      style={{
+                        background:
+                          "radial-gradient(circle at 50% 35%, rgba(255,255,255,0.05), transparent 65%), linear-gradient(160deg, #141414 0%, #080808 100%)",
+                      }}
                     >
-                      <span className="material-symbols-outlined text-[18px]">videocam</span>
-                      Moment aufnehmen
-                    </Link>
-                  </div>
-                )}
+                      <div className="w-20 h-20 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-white/30 text-[36px]">
+                          group
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-white text-lg font-semibold tracking-tight">
+                          Du bist früh dran
+                        </p>
+                        <p className="mt-2 text-white/40 text-sm leading-snug max-w-[16rem] mx-auto">
+                          Noch ist niemand draußen. Nimm jetzt deinen Moment auf — im Corso ist
+                          gerade Platz.
+                        </p>
+                      </div>
+                      <Link
+                        to="/record"
+                        className="mt-1 inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black active:scale-[0.99] transition-transform"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">videocam</span>
+                        Moment aufnehmen
+                      </Link>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {/* Fängt Berührungen ab, solange der Feed nachläuft (use-snap-scroll). */}
+      <div ref={shieldRef} className="snap-feed-shield" aria-hidden />
 
-      {/* Page indicators */}
+      {/* Page indicators — außerhalb des Scrollers, damit sie stehen bleiben */}
       <div className="absolute top-1/2 right-3 z-20 -translate-y-1/2 flex flex-col gap-1.5">
         {slides.map((_, i) => (
           <div

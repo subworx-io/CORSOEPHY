@@ -207,3 +207,54 @@
     font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
   }
 }
+
+/* ── Snap-Feed (use-snap-scroll) ─────────────────────────────────────────────
+   Die Feeds scrollen seit dem 16. Sep 2026 NATIV (docs/SCROLL_NATIV_UMBAU.md):
+   Die Bewegung macht der Compositor, nicht mehr JavaScript. Hier steht die
+   einzige Definition, damit alle vier Feeds exakt gleich einrasten. */
+@layer components {
+  .snap-feed {
+    position: absolute;
+    inset: 0;
+    overflow-x: hidden; /* rausfliegende Swipe-Karten dürfen keinen Quer-Scroll erzeugen */
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    /* Kein Pull-to-Refresh und kein Durchreichen an das Dokument. */
+    overscroll-behavior: contain;
+    /* Das Browser-eigene Scroll-Anchoring bleibt AUS: Chrome hätte es, Safari
+       nicht — use-snap-scroll hält die sichtbare Kachel selbst fest, auf allen
+       Engines gleich (Fallstrick 4). */
+    overflow-anchor: none;
+    /* Vertikal scrollt der Browser, horizontal bleibt die Geste für Swipe-Follow
+       in JavaScript (Fallstrick 1). */
+    touch-action: pan-y;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .snap-feed::-webkit-scrollbar {
+    display: none;
+  }
+  /* Schutzfläche über dem Feed, nur aktiv, solange er ohne Finger nachläuft
+     (use-snap-scroll schaltet `pointer-events` um). Sie liegt ÜBER dem
+     Kachel-Inhalt (z 15), aber UNTER den Bedienelementen der Screens (ab z 20:
+     Feed-Umschalter, Seitenpunkte, Circle-Leiste). */
+  .snap-feed-shield {
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    pointer-events: none;
+    touch-action: none;
+  }
+  .snap-feed-slide {
+    position: relative;
+    width: 100%;
+    /* 100 % des Containers, NICHT 100vh: der Container ist h-dvh und wächst mit
+       der Browser-Leiste mit — alle Kacheln müssen exakt gleich hoch sein
+       (Fallstrick 5). */
+    height: 100%;
+    scroll-snap-align: start;
+    /* Höchstens eine Kachel pro Geste — ersetzt die frühere ±1-Klemme. */
+    scroll-snap-stop: always;
+    touch-action: pan-y;
+  }
+}

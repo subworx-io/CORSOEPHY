@@ -1,83 +1,53 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { haptic } from "@/lib/haptics";
 
-// Grobe Dauer einer Einrast-Bewegung. Seit der Umstellung auf die Feder unten
-// ist das KEINE exakte Animationsdauer mehr — die Feder ist mal schneller
-// (harter Flick), mal langsamer (sanftes Loslassen). Der Wert bleibt als
-// großzügige OBERGRENZE für Aufrufer, die eine Choreografie an den Snap hängen:
-// discovery-feed.tsx (Folgen) und following-feed.tsx (Entfolgen) warten damit
-// über `SWIPE_EXIT_MS + SNAP_MS + 60` ab, bis der Feed steht, bevor sie die
-// Kachel aus der Liste nehmen und per `realign` den Index nachziehen.
+// ── Nativer Snap-Feed (Umbau 16. Sep 2026, docs/SCROLL_NATIV_UMBAU.md) ───────
 //
-// Deshalb darf der Wert nur nach OBEN korrigiert werden. Wer ihn auf die neue
-// typische Dauer heruntersetzt, lässt `realign` in eine noch laufende Feder
-// funken — der Feed springt dann beim Folgen und Entfolgen.
-export const SNAP_MS = 380;
-
-// Das Einrasten läuft als kritisch gedämpfte Feder statt als Kurve mit fester
-// Dauer. Der Unterschied ist genau das, was man als „flüssig" empfindet: Die
-// Bewegung übernimmt die Geschwindigkeit, mit der der Finger losgelassen hat,
-// statt bei jedem Wisch dieselbe Zeit abzuwarten. Ein harter Flick rastet
-// dadurch schnell ein, ein sanftes Schubsen läuft weich aus.
+// Bis hierhin hat dieser Hook jede Berührung selbst abgefangen und die Kacheln
+// per `transform` + requestAnimationFrame bewegt. Das lief komplett auf dem
+// Haupt-Thread — jeder React-Render und jede Video-Dekodierung kostete Frames.
+// Jetzt scrollt der Browser selbst (CSS Scroll Snap, Klassen `snap-feed` und
+// `snap-feed-slide` in styles.css). Die Bewegung läuft im Compositor und
+// erreicht die volle Bildrate, auch wenn JavaScript gerade beschäftigt ist.
 //
-// `SPRING_DAMPING` ist bewusst aus der Härte abgeleitet (2·√k) und keine freie
-// Zahl: Genau dieser Wert ist die Grenze, an der die Kachel so schnell wie
-// möglich in ihre Endlage läuft, ohne darüber hinauszuschießen. Ein Feed, der
-// am Ende nachwippt, wirkt billig — wer hier schraubt, sollte die Kopplung
-// beibehalten und nur `SPRING_STIFFNESS` anfassen.
+// Was hier übrig bleibt:
+//  - welcher Slide aktiv ist (IntersectionObserver, kein `scroll`-Rechnen),
+//  - wann die Bewegung steht (`scrollend`, mit Fallback),
+//  - Quer-Wisch (Swipe-Follow) und Tipp aus Pointer-Events,
+//  - eine Schutzfläche, die Berührungen während des Nachlaufens abfängt,
+//  - die sichtbare Kachel festhalten, wenn sich die Liste darüber ändert.
 //
-// Die Härte ist nicht geraten, sondern durchgerechnet (bei 800 px Kachelhöhe,
-// 60 fps, Weg = halbe Kachel). „Sichtbar" = bis 90 % der Strecke zurückgelegt
-// sind, danach kriecht die Feder nur noch unmerklich:
+// Weggefallen: Feder, Gummiband, Momentum-Projektion, Wheel-Handler,
+// Maus-Drag für eine x-Achse (hatte keinen Aufrufer mehr).
 //
-//     Härte    sichtbar    bis Stillstand
-//       260      250 ms          667 ms
-//       600      167 ms          467 ms
-//       800      150 ms          417 ms   ← gewählt
-//      1400      117 ms          333 ms
-//
-// Die alte Kurve mit fester Dauer war nach rund 230 ms optisch fertig. 260 wäre
-// also spürbar TRÄGER gewesen als der Zustand davor — genau das, was hier
-// abgestellt werden sollte. 800 ist merklich direkter als vorher und bleibt
-// durch die kritische Dämpfung trotzdem weich.
-const SPRING_STIFFNESS = 800;
-const SPRING_DAMPING = 2 * Math.sqrt(SPRING_STIFFNESS);
-// Ab hier gilt die Bewegung als beendet. Ein Pixel Restabstand ist auf keinem
-// Display zu sehen — enger abzubrechen kostet nur Frames und verzögert das
-// Nachladen des Video-Fensters.
-const SPRING_REST_PX = 1;
-const SPRING_REST_VELOCITY = 40; // px/s
-
-// Zähigkeit des Gummibands an den Feed-Rändern. Kleiner = härterer Anschlag.
-const RUBBER_TENSION = 0.55;
-
-/**
- * Widerstand jenseits des ersten/letzten Moments. Ohne ihn folgt der Rand dem
- * Finger 1:1 ins Leere und schnappt hart zurück — das fühlt sich nach Fehler an,
- * nicht nach Grenze. Die Dämpfung ist progressiv: die ersten Pixel gehen fast
- * frei, danach wird es zäh und läuft asymptotisch gegen einen festen Anschlag,
- * egal wie weit man zieht.
- */
-function rubberBand(overflow: number, dim: number) {
-  const sign = overflow < 0 ? -1 : 1;
-  const ratio = Math.abs(overflow) / dim;
-  return sign * (1 - 1 / (ratio * RUBBER_TENSION + 1)) * dim;
-}
+// ⚠️ Nirgends `preventDefault()` auf Touch-Events und keine nicht-passiven
+// Touch-Listener. Ein einziger davon zwingt den Compositor, vor jedem Frame
+// auf JavaScript zu warten — und der ganze Umbau wäre umsonst.
 
 // Ab dieser Fingerbewegung (px) entscheidet sich die Achse einer Geste.
 const AXIS_LOCK_SLOP = 10;
 
-// So viele Slides um die aktuelle Position herum werden pro Frame tatsächlich
-// bewegt. Alles darüber hinaus steht ohnehin außerhalb des Bildschirms — es in
-// jedem Frame mitzuschreiben kostete in einem lang gescrollten Discovery-Feed
-// hunderte Style-Writes, von denen niemand etwas sieht.
-const RENDER_WINDOW = 3;
+// So lange ohne `scroll`-Event gilt die Bewegung als beendet. Ohne `scrollend`
+// (ältere Safaris) ist das DER Weg; mit `scrollend` nur ein Sicherheitsnetz,
+// denn nicht jede Engine meldet ein Ende für einen harten `scrollTop`-Sprung.
+// Ohne das Netz bliebe `movingRef` hängen, und Tipps kämen nicht mehr an.
+// Kürzer als 120 ms ließe Momentum-Pausen als Ende durchgehen.
+const supportsScrollEnd = typeof window !== "undefined" && "onscrollend" in window;
+const SCROLL_IDLE_MS = supportsScrollEnd ? 250 : 120;
+
+// Toleranz, ab der eine Scroll-Position als „auf der Kachel eingerastet" gilt.
+const ALIGN_TOLERANCE_PX = 2;
+
+// Längstens so lange blockiert die Schutzfläche (siehe unten) neue Berührungen,
+// auch wenn das Ende der Bewegung nie gemeldet wird. Ein natives Einrasten
+// dauert auf dem iPhone deutlich kürzer.
+const SHIELD_MAX_MS = 1200;
 
 /**
- * Quer zur Feed-Achse wischen (Swipe-Follow): Der Feed meldet die horizontale
- * Geste an den Aufrufer, statt sie zu schlucken. Die ERSTE eindeutige
- * Bewegungsrichtung sperrt die Geste auf ihre Achse — ein Wisch ist entweder
- * Scrollen ODER Folgen, nie beides gleichzeitig (kein Zittern unterm Finger).
+ * Quer zur Feed-Achse wischen (Swipe-Follow). Vertikal scrollt der Browser
+ * (`touch-action: pan-y`); was horizontal beginnt, kommt hier an. Beginnt der
+ * Browser doch zu scrollen, bricht er die Geste ab (`pointercancel`) — ein
+ * Wisch ist also entweder Scrollen ODER Folgen, nie beides.
  */
 export interface SwipeXHandlers {
   /** Finger bewegt sich horizontal — dx relativ zum Gestenstart (px, rechts > 0). */
@@ -89,146 +59,136 @@ export interface SwipeXHandlers {
 /**
  * Ein Tipp auf den Feed — ohne Bewegung losgelassen.
  *
- * ⚠️ WARUM DAS HIER SITZT UND NICHT ALS onClick AM ELEMENT:
- * `onMove` ruft `e.preventDefault()`, sobald eine Geste im Container beginnt.
- * Nach der Touch-Events-Spezifikation unterdrückt ein abgebrochenes touchmove
- * die Kompatibilitäts-Mausereignisse — WebKit dispatcht dann **kein `click`**.
- * Da ein echter Fingertipp praktisch immer ein paar Pixel zittert, sind
- * `onClick`-Handler INNERHALB eines Snap-Containers auf iOS unzuverlässig.
- * Der Tipp muss deshalb aus der Touch-Geste selbst kommen.
+ * Kommt weiterhin aus dem Hook statt aus `onClick` am Element: So entscheidet
+ * EINE Stelle, was Tipp, Quer-Wisch und Scroll ist. Ein Tipp, der eine noch
+ * laufende Scroll-Bewegung anhält, zählt bewusst nicht als Tipp.
  */
 export interface TapInfo {
   /** Slide, auf dem getippt wurde. */
   index: number;
   x: number;
   y: number;
+  /** Rechteck des Feed-Containers — Bezug für die Tipp-Zonen (tapDirection). */
+  rect: DOMRect;
   /** Getroffenes Element — für Aufrufer, die Bedienelemente aussparen wollen. */
   target: EventTarget | null;
 }
 
-/**
- * Physik-basiertes Snap-Scroll: Bild folgt direkt dem Finger,
- * nach dem Loslassen schnappt es mit RAF + easeOutCubic ein.
- */
 export function useSnapScroll({
   count,
-  axis = "y",
   onSwipeX,
   onTap,
 }: {
   count: number;
-  axis?: "x" | "y";
-  /** Nur für axis "y" ausgewertet: horizontale Wisch-Gesten (Swipe-Follow). */
+  /** Horizontale Wisch-Gesten (Swipe-Follow). */
   onSwipeX?: SwipeXHandlers;
-  /** Tipp ohne Bewegung. Siehe TapInfo — bewusst hier statt als onClick. */
+  /** Tipp ohne Bewegung. Siehe TapInfo. */
   onTap?: (info: TapInfo) => void;
 }) {
-  const [currentIndex, setCurrentIndex] = useState(0);
   // Zwei Indizes, bewusst getrennt:
-  //  - `currentIndex` wechselt SOFORT beim Überqueren der Slide-Hälfte. Daran
-  //    hängt, welcher Moment spielt — das muss ohne Verzögerung passieren.
-  //  - `settledIndex` zieht erst nach, wenn die Bewegung wirklich steht. Daran
-  //    gehören die teuren Entscheidungen: welche <video>-Elemente überhaupt im
-  //    DOM sind. Vorher hing beides am selben Wert, das Video-Fenster wanderte
-  //    also mitten in der Wischgeste mit und React montierte/demontierte
-  //    <video>-Elemente im laufenden Frame — genau dort verschluckte sich die
-  //    Animation.
+  //  - `currentIndex` wechselt SOFORT, sobald eine Kachel zur Hälfte im Bild
+  //    ist. Daran hängt, welcher Moment spielt.
+  //  - `settledIndex` zieht erst nach, wenn die Bewegung steht. Daran gehören
+  //    die teuren Entscheidungen, etwa welche <video>-Elemente im DOM sind.
+  //    Ein <video>-Mount mitten in der Geste kostet Frames.
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [settledIndex, setSettledIndex] = useState(0);
+  // Richtung der letzten Bewegung (+1 = weiter, -1 = zurück). Das Medien-Fenster
+  // der Feeds lädt in diese Richtung voraus (lib/feed-media-window.ts).
+  const [direction, setDirection] = useState<1 | -1>(1);
   const indexRef = useRef(0);
-  // Weltposition in Pixeln: indexRef.current * Bildschirmhöhe/-breite
-  const posRef = useRef(0);
-  const slidesRef = useRef<(HTMLElement | null)[]>([]);
-  // 0 = keine Snap-Animation läuft. Wird am Animationsende zurückgesetzt, damit
-  // Effekte unterscheiden können, ob sie in eine Bewegung hineinfunken würden.
-  const rafRef = useRef(0);
-  // Finger (oder Maus) liegt gerade auf dem Feed.
-  const gestureRef = useRef(false);
-  // Stabile Callback-Refs pro Slide-Index — verhindert React-Re-Registration bei Re-Render
-  const callbacksRef = useRef<((el: HTMLElement | null) => void)[]>([]);
-  // Der Feed-Container. Die Gesten-Listener hängen aus Robustheitsgründen weiter am
-  // window (der Container kann später mounten), werden aber darauf eingegrenzt, ob
-  // die Geste IM Container beginnt. Ohne das steuert jeder Wisch irgendwo auf der
-  // Seite den Feed — auch einer auf einem Overlay darüber (Tages-Prompt-Splash).
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  // Slide-Zahl als Ref. Dadurch bleiben `clampIndex` und `snapTo` über die ganze
-  // Sitzung dieselben Funktionen — und damit auch die Gesten-Effekte, die daran
-  // hängen. Vorher hing `clampIndex` direkt an `count`: Jede nachgeladene Seite
-  // und jeder Follow registrierte die Touch-Listener neu. Der Gesten-Zustand
-  // (gestureActive, history, startWorldPos) lebt aber in deren Closure, ging
-  // dabei verloren, und der Feed hörte mitten im Wischen auf, dem Finger zu
-  // folgen — ohne abschließenden Snap.
   const countRef = useRef(count);
   countRef.current = count;
-  // Zuletzt bewegter Slide-Bereich. Was daraus herausfällt, wird EINMAL
-  // stillgelegt statt in jedem Frame neu beschrieben.
-  const paintedRef = useRef({ lo: 0, hi: -1 });
 
-  // Geste zählt nur, wenn sie im Feed beginnt. Kein Container gesetzt → wie bisher.
-  const isInsideContainer = useCallback((target: EventTarget | null) => {
-    const el = containerRef.current;
-    if (!el) return true;
-    return target instanceof Node && el.contains(target);
+  // Der Container als State statt nur als Ref: Er mountet in mehreren Screens
+  // erst später (Ladezustand, leer → besetzt). Die Effekte unten müssen sich
+  // dann neu an den frischen Knoten hängen. Mit einem reinen Ref liefen sie nur
+  // beim ersten Mount und gingen bei einem späten Container leer aus.
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const containerElRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useCallback((el: HTMLDivElement | null) => {
+    containerElRef.current = el;
+    setContainer(el);
   }, []);
 
-  // Maß aus dem Container, nicht aus window.innerHeight: der Container ist `h-dvh`
-  // und folgt damit der ein-/ausfahrenden Browser-Leiste auf dem Handy. innerHeight
-  // driftet dagegen auseinander → Slides säßen um die Leistenhöhe versetzt.
-  const getDim = useCallback(() => {
-    const el = containerRef.current;
-    if (el) {
-      const measured = axis === "y" ? el.clientHeight : el.clientWidth;
-      if (measured > 0) return measured;
+  const slidesRef = useRef<(HTMLElement | null)[]>([]);
+  const slideCallbacksRef = useRef<((el: HTMLElement | null) => void)[]>([]);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+
+  // Die Kachel, die zuletzt ruhig im Bild stand. Ändert sich die Liste darüber
+  // (Kachel nach Follow entfernt, neue Momente oben einsortiert), bleibt genau
+  // diese Kachel stehen — siehe Layout-Effekt unten.
+  const anchorRef = useRef<HTMLElement | null>(null);
+  // Finger liegt auf dem Feed / der Feed bewegt sich noch. In beiden Fällen
+  // darf niemand `scrollTop` anfassen, sonst kämpft JavaScript gegen den
+  // Browser.
+  const touchingRef = useRef(false);
+  const movingRef = useRef(false);
+  // Wartet auf das Ende der aktuellen Bewegung (Choreografien nach dem Folgen).
+  const settleWaitersRef = useRef<(() => void)[]>([]);
+  // Ziel einer laufenden `snapTo`-Bewegung und Richtung des letzten Scrolls —
+  // beides braucht die Schutzfläche, um zu wissen, auf welche Kachel der Feed
+  // gerade zuläuft.
+  const targetRef = useRef<number | null>(null);
+  const lastTopRef = useRef(0);
+  const scrollDirRef = useRef<1 | -1 | 0>(0);
+  // Der nächste Scroll-Event stammt von `jumpTo` (unsichtbares Festhalten) und
+  // soll die Schutzfläche nicht auslösen.
+  const suppressShieldRef = useRef(false);
+
+  // ── Schutzfläche während des Nachlaufens ──────────────────────────────────
+  // Problem (Befund 16. Sep 2026, iPhone): Setzt man den Finger auf, während der
+  // Feed nach einem Wisch noch einrastet, übernimmt iOS die Berührung sofort für
+  // den laufenden Scroll. Unser Code bekommt nur noch `pointercancel` — ein
+  // Quer-Wisch zum Folgen kommt nie an, und der vertikale Anteil der Bewegung
+  // scrollt einfach weiter.
+  //
+  // Lösung: Solange der Feed ohne Finger nachläuft, liegt über ihm eine
+  // unsichtbare Fläche (`snap-feed-shield`, `touch-action: none`). Eine
+  // Berührung landet dann dort statt im Scroller. Das Einrasten darunter läuft
+  // ungestört zu Ende, und die Geste gehört uns:
+  //  - quer → Swipe-Follow auf der Kachel, auf die der Feed zuläuft,
+  //  - senkrecht → ein Schritt weiter/zurück per `snapTo`.
+  // Im Ruhezustand ist die Fläche durchlässig (`pointer-events: none`), dann
+  // scrollt wieder allein der Browser.
+  const [shield, setShield] = useState<HTMLDivElement | null>(null);
+  const shieldElRef = useRef<HTMLDivElement | null>(null);
+  const shieldRef = useCallback((el: HTMLDivElement | null) => {
+    shieldElRef.current = el;
+    setShield(el);
+  }, []);
+  const shieldOnRef = useRef(false);
+  // Eine Geste auf der Fläche läuft gerade — dann bleibt sie an, auch wenn der
+  // Feed darunter schon steht. Ein Abschalten mitten in der Geste könnte den
+  // Pointer-Strom abreißen lassen.
+  const shieldGestureRef = useRef(false);
+  const shieldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Zuletzt benutzte Eingabeart. Die Schutzfläche gilt nur für Touch: Am
+  // Desktop würde sie das Mausrad-Scrollen blockieren (Wheel-Events auf der
+  // Fläche erreichen den Scroller nicht).
+  const lastPointerTypeRef = useRef<string | null>(null);
+
+  const setShieldActive = useCallback((on: boolean) => {
+    if (on && lastPointerTypeRef.current !== "touch") return;
+    if (on === shieldOnRef.current) return;
+    if (!on && shieldGestureRef.current) return;
+    if (shieldTimerRef.current) {
+      clearTimeout(shieldTimerRef.current);
+      shieldTimerRef.current = null;
     }
-    return axis === "y" ? window.innerHeight : window.innerWidth;
-  }, [axis]);
-
-  const applyPos = useCallback(
-    (pos: number) => {
-      const dim = getDim();
-      const tr = axis === "y" ? "Y" : "X";
-      const slides = slidesRef.current;
-      const center = Math.round(pos / dim);
-      const lo = Math.max(0, center - RENDER_WINDOW);
-      const hi = Math.min(slides.length - 1, center + RENDER_WINDOW);
-
-      // Was aus dem Fenster gefallen ist, einmal stilllegen: aus dem Paint
-      // nehmen und die Compositor-Ebene freigeben. `will-change` dauerhaft auf
-      // jedem Slide eines langen Feeds zu lassen kostet auf iOS mehr Speicher,
-      // als es an Glätte bringt.
-      const prev = paintedRef.current;
-      for (let i = prev.lo; i <= prev.hi; i++) {
-        if (i >= lo && i <= hi) continue;
-        const el = slides[i];
-        if (!el) continue;
-        el.style.visibility = "hidden";
-        el.style.willChange = "";
-      }
-
-      for (let i = lo; i <= hi; i++) {
-        const el = slides[i];
-        if (!el) continue;
-        const offset = i * dim - pos;
-        el.style.transform = `translate${tr}(${offset}px)`;
-        if (el.style.visibility === "hidden") {
-          el.style.visibility = "";
-          el.style.willChange = "transform";
-        }
-      }
-
-      paintedRef.current = { lo, hi };
-    },
-    [axis, getDim],
-  );
-
-  // Aktiven Index übernehmen. Bewusst SOFORT und nicht erst am Ende der
-  // Snap-Animation: `currentIndex` steuert, welches Video spielt (isActive).
-  // Wurde er erst am Animationsende gesetzt, lief während des ganzen Wischens
-  // noch der alte Moment weiter, während der neue eingefroren stehenblieb.
-  const commitIndex = useCallback((idx: number) => {
-    if (indexRef.current === idx) return;
-    indexRef.current = idx;
-    haptic("tick");
-    setCurrentIndex(idx);
+    shieldOnRef.current = on;
+    const el = shieldElRef.current;
+    if (el) el.style.pointerEvents = on ? "auto" : "none";
+    if (!on) return;
+    // Sicherheitsnetz: Bleibt das Ende der Bewegung aus, darf die Fläche den
+    // Feed nicht dauerhaft blockieren.
+    shieldTimerRef.current = setTimeout(() => {
+      shieldTimerRef.current = null;
+      if (shieldGestureRef.current) return;
+      shieldOnRef.current = false;
+      if (shieldElRef.current) shieldElRef.current.style.pointerEvents = "none";
+    }, SHIELD_MAX_MS);
   }, []);
 
   const clampIndex = useCallback(
@@ -236,491 +196,402 @@ export function useSnapScroll({
     [],
   );
 
+  // Aktiven Index übernehmen. Bewusst sofort und nicht erst am Ende der
+  // Bewegung: Der Moment, auf den man zieht, spielt dann schon.
+  const commitIndex = useCallback((idx: number) => {
+    if (indexRef.current === idx) return;
+    setDirection(idx > indexRef.current ? 1 : -1);
+    indexRef.current = idx;
+    haptic("tick");
+    setCurrentIndex(idx);
+  }, []);
+
+  const flushSettleWaiters = useCallback(() => {
+    const waiters = settleWaitersRef.current;
+    if (!waiters.length) return;
+    settleWaitersRef.current = [];
+    for (const fn of waiters) fn();
+  }, []);
+
+  // Die Bewegung steht. Index aus der echten Position ablesen. Der Browser hat
+  // eingerastet, das Ergebnis ist also ein ganzzahliges Vielfaches der Höhe.
+  const settle = useCallback(() => {
+    const el = containerElRef.current;
+    if (!el || touchingRef.current) return;
+    const h = el.clientHeight;
+    if (h <= 0) return;
+    const raw = el.scrollTop / h;
+    const idx = clampIndex(Math.round(raw));
+    movingRef.current = false;
+    targetRef.current = null;
+    setShieldActive(false);
+    // Noch zwischen zwei Kacheln (z. B. Ruhe-Timer in einer Momentum-Pause):
+    // Das ist kein Ende. Rastet der Browser nach, kommt ein neuer Scroll-Event.
+    // `movingRef` wird trotzdem zurückgesetzt, sonst bliebe es hängen, falls
+    // doch keiner mehr kommt.
+    if (Math.abs(el.scrollTop - idx * h) > ALIGN_TOLERANCE_PX) return;
+    commitIndex(idx);
+    setSettledIndex(idx);
+    anchorRef.current = slidesRef.current[idx] ?? null;
+    flushSettleWaiters();
+  }, [clampIndex, commitIndex, flushSettleWaiters, setShieldActive]);
+
   /**
-   * Zum Einrastpunkt federn. `velocityPxPerS` ist die Geschwindigkeit, mit der
-   * der Finger losgelassen hat (positiv = in Richtung wachsender Position) — sie
-   * geht als Anfangsgeschwindigkeit in die Feder ein, damit die Bewegung den
-   * Schwung der Geste fortsetzt statt bei null neu anzufangen.
+   * Zu einer Kachel scrollen. `onSettled` läuft, sobald die Bewegung wirklich
+   * steht. Die Dauer eines nativen Smooth-Scrolls hängt von Gerät und
+   * Systemeinstellung ab, ein fester Timer passt deshalb nicht mehr.
    */
   const snapTo = useCallback(
-    (rawIdx: number, velocityPxPerS = 0) => {
-      const targetIdx = clampIndex(rawIdx);
-      const targetPos = targetIdx * getDim();
-
-      cancelAnimationFrame(rafRef.current);
-      // Ziel sofort aktiv schalten — das Video des Ziel-Slides startet mit der
-      // Bewegung, nicht erst wenn sie steht.
-      commitIndex(targetIdx);
-
-      let velocity = velocityPxPerS;
-      let last = performance.now();
-
-      const animate = (now: number) => {
-        // Zeitschritt deckeln. Nach einem verschluckten Frame — oder wenn der
-        // Browser die Seite kurz pausiert hat — würde ein großer Sprung die
-        // Feder aufschaukeln statt sie zu beruhigen.
-        const dt = Math.min((now - last) / 1000, 1 / 30);
-        last = now;
-
-        const offset = posRef.current - targetPos;
-        velocity += (-SPRING_STIFFNESS * offset - SPRING_DAMPING * velocity) * dt;
-        posRef.current += velocity * dt;
-        applyPos(posRef.current);
-
-        if (
-          Math.abs(posRef.current - targetPos) > SPRING_REST_PX ||
-          Math.abs(velocity) > SPRING_REST_VELOCITY
-        ) {
-          rafRef.current = requestAnimationFrame(animate);
-          return;
-        }
-
-        // Endposition frisch messen: fährt die Browser-Leiste WÄHREND der Animation
-        // ein oder aus, stimmt das eingangs berechnete Ziel nicht mehr — der Feed
-        // bliebe sonst um die Leistenhöhe versetzt zwischen zwei Momenten stehen.
-        const finalPos = targetIdx * getDim();
-        posRef.current = finalPos;
-        applyPos(finalPos);
-        rafRef.current = 0;
-        // Erst jetzt steht die Bewegung — ab hier darf der Feed die teure
-        // Arbeit nachholen (Video-Fenster verschieben).
-        setSettledIndex(targetIdx);
-      };
-
-      rafRef.current = requestAnimationFrame(animate);
+    (rawIdx: number, onSettled?: () => void) => {
+      const el = containerElRef.current;
+      const idx = clampIndex(rawIdx);
+      if (onSettled) settleWaitersRef.current.push(onSettled);
+      if (!el) {
+        flushSettleWaiters();
+        return;
+      }
+      const top = idx * el.clientHeight;
+      // Schon dort: Es käme kein `scrollend`, also direkt abschließen.
+      if (Math.abs(el.scrollTop - top) <= ALIGN_TOLERANCE_PX) {
+        requestAnimationFrame(settle);
+        return;
+      }
+      // Ziel sofort aktiv schalten: Das Video startet mit der Bewegung.
+      commitIndex(idx);
+      movingRef.current = true;
+      targetRef.current = idx;
+      setShieldActive(true);
+      el.scrollTo({ top, behavior: "smooth" });
     },
-    [clampIndex, getDim, applyPos, commitIndex],
+    [clampIndex, commitIndex, flushSettleWaiters, settle, setShieldActive],
   );
 
-  // Position mit Rand-Widerstand. Innerhalb des Feeds unverändert, jenseits von
-  // erstem/letztem Moment gedämpft.
-  const withRubberBand = useCallback(
-    (pos: number) => {
-      const dim = getDim();
-      const max = Math.max(0, (countRef.current - 1) * dim);
-      if (pos < 0) return rubberBand(pos, dim);
-      if (pos > max) return max + rubberBand(pos - max, dim);
-      return pos;
-    },
-    [getDim],
-  );
+  // Harter Sprung ohne Animation — nur intern, für das Festhalten der Kachel.
+  const jumpTo = useCallback((idx: number) => {
+    const el = containerElRef.current;
+    if (!el) return;
+    const top = idx * el.clientHeight;
+    if (Math.abs(el.scrollTop - top) > ALIGN_TOLERANCE_PX) suppressShieldRef.current = true;
+    el.scrollTop = top;
+    anchorRef.current = slidesRef.current[idx] ?? null;
+    indexRef.current = idx;
+    setCurrentIndex(idx);
+    setSettledIndex(idx);
+  }, []);
 
-  // Slide-Zahl hat sich geändert: Seite nachgeladen, Kachel nach Follow verschwunden,
-  // Leerzustand → echte Momente. Drei Fälle:
-  //  - Index zeigt ins Leere (letzte Kachel weg) → auf die neue letzte schnappen,
-  //    sonst stünde man vor einem leeren Slot.
-  //  - Geste oder Snap läuft → NUR die neuen Slides einsortieren, Position nicht
-  //    anfassen. Ein Reset auf index*dim ließ den Feed unter dem Finger springen,
-  //    wenn die nächste Seite mitten im Wischen eintraf.
-  //  - Ruhe → Position sauber auf den Index setzen.
+  // ── Aktiver Index: IntersectionObserver statt `scroll`-Rechnen ────────────
+  // Der Observer meldet sich nur beim Überschreiten der Hälfte und nicht in
+  // jedem Frame. Das Scrollen selbst bleibt damit frei von Arbeit auf dem
+  // Haupt-Thread.
   useEffect(() => {
-    const clamped = Math.max(0, Math.min(count - 1, indexRef.current));
-    if (clamped !== indexRef.current) {
-      snapTo(clamped);
+    if (!container || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.5) continue;
+          const idx = slidesRef.current.indexOf(entry.target as HTMLElement);
+          if (idx >= 0) commitIndex(idx);
+        }
+      },
+      { root: container, threshold: 0.5 },
+    );
+    observerRef.current = observer;
+    for (const slide of slidesRef.current) if (slide) observer.observe(slide);
+    return () => {
+      observer.disconnect();
+      observerRef.current = null;
+    };
+  }, [container, commitIndex]);
+
+  // ── Ende der Bewegung ─────────────────────────────────────────────────────
+  // Der `scroll`-Listener ist passiv und setzt nur ein Flag. Die eigentliche
+  // Arbeit passiert erst am Ende. Ohne `scrollend` (ältere Safaris) übernimmt
+  // ein kurzer Ruhe-Timer.
+  //
+  // Die BottomNav hört über `lib/scroll-activity.ts` am Dokument mit (Capture).
+  // Ein nativer Scroll-Container erreicht sie ohne eigenes Zutun, deshalb gibt
+  // es hier keinen `pingScrollActivity()` mehr.
+  useEffect(() => {
+    if (!container) return;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const armIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(settle, SCROLL_IDLE_MS);
+    };
+    const onScroll = () => {
+      movingRef.current = true;
+      const top = container.scrollTop;
+      if (top !== lastTopRef.current) scrollDirRef.current = top > lastTopRef.current ? 1 : -1;
+      lastTopRef.current = top;
+      // Nachlaufen ohne Finger (Momentum, Einrasten, snapTo) → Schutzfläche an.
+      if (suppressShieldRef.current) suppressShieldRef.current = false;
+      else if (!touchingRef.current) setShieldActive(true);
+      armIdle();
+    };
+    const onTouchStart = () => {
+      touchingRef.current = true;
+      lastPointerTypeRef.current = "touch";
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length > 0) return;
+      touchingRef.current = false;
+      // Finger weg, Feed läuft noch nach → ab jetzt fängt die Schutzfläche
+      // neue Berührungen ab.
+      if (movingRef.current) setShieldActive(true);
+      // Während der Finger lag, hat `settle` bewusst nichts getan. Wartet noch
+      // etwas auf das Ende, jetzt nachholen.
+      if (movingRef.current || settleWaitersRef.current.length) armIdle();
+    };
+
+    container.addEventListener("scroll", onScroll, { passive: true });
+    if (supportsScrollEnd) container.addEventListener("scrollend", settle);
+    container.addEventListener("touchstart", onTouchStart, { passive: true });
+    container.addEventListener("touchend", onTouchEnd, { passive: true });
+    container.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("scrollend", settle);
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchend", onTouchEnd);
+      container.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [container, settle, setShieldActive]);
+
+  // ── Höhe ändert sich (Browser-Leiste, Drehen) ─────────────────────────────
+  // Mandatory Snap rastet in der Regel selbst neu ein. Verlassen wird sich
+  // darauf nicht: Im Ruhezustand wird die Position auf den Index gesetzt.
+  useEffect(() => {
+    if (!container || typeof ResizeObserver === "undefined") return;
+    let lastHeight = container.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const h = container.clientHeight;
+      if (h === lastHeight) return;
+      lastHeight = h;
+      if (touchingRef.current || movingRef.current) return;
+      container.scrollTop = indexRef.current * h;
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [container]);
+
+  // ── Sichtbare Kachel festhalten (Fallstrick 4) ────────────────────────────
+  // Beim nativen Scrollen verschiebt jede Änderung ÜBER der aktuellen Position
+  // das Bild: Eine gefolgte Kachel verschwindet, oder ein Refetch sortiert neue
+  // Momente oben ein. Der Effekt läuft nach jedem Commit und VOR dem Malen.
+  // Hat sich die Kachel unter dem Index verschoben, springt die Position
+  // unsichtbar mit. Der Normalfall ist ein einziger Array-Vergleich.
+  //
+  // Fällt die gehaltene Kachel selbst weg (letzte Kachel gefolgt, Moment
+  // abgelaufen), bleibt der Index stehen und wird nur geklemmt.
+  useLayoutEffect(() => {
+    const el = containerElRef.current;
+    if (!el || count === 0) return;
+    if (touchingRef.current || movingRef.current) return;
+    const slides = slidesRef.current;
+    const anchor = anchorRef.current;
+    const idx = indexRef.current;
+    if (anchor && slides[idx] === anchor && idx < count) return;
+
+    const found = anchor && anchor.isConnected ? slides.indexOf(anchor) : -1;
+    const next = found >= 0 && found < count ? found : clampIndex(idx);
+    const aligned = Math.abs(el.scrollTop - next * el.clientHeight) <= ALIGN_TOLERANCE_PX;
+    if (next === idx && aligned) {
+      anchorRef.current = slides[next] ?? null;
       return;
     }
-    if (!gestureRef.current && rafRef.current === 0) {
-      posRef.current = indexRef.current * getDim();
-    }
-    applyPos(posRef.current);
-  }, [count, getDim, applyPos, snapTo]);
+    jumpTo(next);
+  });
 
-  // Größenänderung: Orientierung, aber vor allem die ein-/ausfahrende Browser-Leiste
-  // auf dem Handy. Der ResizeObserver am Container erwischt das zuverlässiger als
-  // `resize` am window, weil `h-dvh` sich ändert, ohne dass window feuern muss.
-  useEffect(() => {
-    const onResize = () => {
-      posRef.current = indexRef.current * getDim();
-      applyPos(posRef.current);
-    };
-    window.addEventListener("resize", onResize);
-
-    const el = containerRef.current;
-    const observer =
-      el && typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
-    observer?.observe(el!);
-
-    return () => {
-      window.removeEventListener("resize", onResize);
-      observer?.disconnect();
-    };
-  }, [getDim, applyPos]);
-
-  // Swipe-X-Handler in einem Ref spiegeln: die Gesten-Listener bleiben stabil
-  // gebunden, auch wenn der Aufrufer die Callbacks pro Render neu erzeugt.
+  // ── Quer-Wisch und Tipp ───────────────────────────────────────────────────
+  // Pointer-Events statt Touch-Events: Beginnt der Browser vertikal zu
+  // scrollen, schickt er `pointercancel`. Er erledigt den Achsen-Lock also
+  // selbst. Für die Maus am Desktop gilt derselbe Pfad.
   const swipeXRef = useRef<SwipeXHandlers | undefined>(onSwipeX);
   swipeXRef.current = onSwipeX;
   const onTapRef = useRef<((info: TapInfo) => void) | undefined>(onTap);
   onTapRef.current = onTap;
 
-  // Touch: Finger folgt direkt, Velocity-Projektion beim Loslassen.
-  // Achsen-Lock: die erste eindeutige Bewegungsrichtung entscheidet, ob die
-  // Geste den Feed scrollt (Feed-Achse) oder als Quer-Wisch (Swipe-Follow) an
-  // onSwipeX geht — danach wechselt die Geste die Achse nicht mehr.
   useEffect(() => {
-    let startTouchPos = 0;
-    let startCrossPos = 0;
-    let startWorldPos = 0;
-    let swipeIndex = 0;
-    let axisLock: "none" | "main" | "cross" = "none";
-    let history: { pos: number; t: number }[] = [];
-    let gestureActive = false;
-
-    const getPos = (e: TouchEvent) => (axis === "y" ? e.touches[0].clientY : e.touches[0].clientX);
-    const getCross = (e: TouchEvent) =>
-      axis === "y" ? e.touches[0].clientX : e.touches[0].clientY;
-
-    const onStart = (e: TouchEvent) => {
-      // Nur Gesten, die im Feed beginnen. Ein Wisch auf einem Overlay darüber
-      // (z.B. dem Tages-Prompt-Splash) darf den Feed nicht fernsteuern.
-      if (!isInsideContainer(e.target)) {
-        gestureActive = false;
-        gestureRef.current = false;
-        return;
-      }
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-      gestureActive = true;
-      gestureRef.current = true;
-      axisLock = "none";
-      startTouchPos = getPos(e);
-      startCrossPos = getCross(e);
-      startWorldPos = posRef.current;
-      // Der Quer-Wisch gilt für den Slide, auf dem die Geste BEGINNT — auch wenn
-      // der aktive Index währenddessen theoretisch wechseln könnte.
-      swipeIndex = indexRef.current;
-      const now = performance.now();
-      history = [{ pos: startTouchPos, t: now }];
-    };
-
-    const onMove = (e: TouchEvent) => {
-      if (!gestureActive) return;
-      e.preventDefault();
-      const now = performance.now();
-      const cur = getPos(e);
-      const cross = getCross(e);
-
-      // Achse noch offen → bei genug Bewegung festlegen. Quer gewinnt nur, wenn
-      // ein onSwipeX-Handler da ist (sonst bleibt alles wie bisher vertikal).
-      if (axisLock === "none") {
-        const dMain = Math.abs(cur - startTouchPos);
-        const dCross = Math.abs(cross - startCrossPos);
-        if (Math.max(dMain, dCross) < AXIS_LOCK_SLOP) return;
-        axisLock = dCross > dMain && swipeXRef.current ? "cross" : "main";
-        if (axisLock === "cross") {
-          // Vertikale Startbewegung (unter dem Slop) zurücknehmen — der Feed
-          // bleibt exakt auf seinem Einrastpunkt stehen.
-          posRef.current = startWorldPos;
-          applyPos(posRef.current);
-          history = [{ pos: cross, t: now }];
-        }
-      }
-
-      if (axisLock === "cross") {
-        history.push({ pos: cross, t: now });
-        const cutoff = now - 100;
-        while (history.length > 1 && history[0].t < cutoff) history.shift();
-        swipeXRef.current?.move(swipeIndex, cross - startCrossPos);
-        return;
-      }
-
-      history.push({ pos: cur, t: now });
-      // Nur letzten 100ms behalten
-      const cutoff = now - 100;
-      while (history.length > 1 && history[0].t < cutoff) history.shift();
-      // Bild folgt Finger in Echtzeit — an den Rändern mit Widerstand, damit
-      // der erste und letzte Moment eine spürbare Grenze haben.
-      posRef.current = withRubberBand(startWorldPos + (startTouchPos - cur));
-      applyPos(posRef.current);
-      // Aktiven Slide schon beim Überqueren der Hälfte wechseln — der Moment,
-      // auf den man zieht, spielt dann bereits, statt eingefroren zu warten.
-      commitIndex(clampIndex(Math.round(posRef.current / getDim())));
-    };
-
-    const onEnd = (e: TouchEvent) => {
-      if (!gestureActive) return;
-      gestureActive = false;
-      gestureRef.current = false;
-
-      // Achse nie festgelegt = der Finger hat sich nicht über den Slop hinaus
-      // bewegt: das war ein Tipp, kein Wisch.
-      if (axisLock === "none") {
-        const t = e.changedTouches[0];
-        onTapRef.current?.({
-          index: indexRef.current,
-          x: t.clientX,
-          y: t.clientY,
-          target: e.target,
-        });
-        return;
-      }
-
-      if (axisLock === "cross") {
-        const endCross = axis === "y" ? e.changedTouches[0].clientX : e.changedTouches[0].clientY;
-        let velocityPxMs = 0;
-        if (history.length >= 2) {
-          const oldest = history[0];
-          const newest = history[history.length - 1];
-          const dt = newest.t - oldest.t;
-          if (dt > 0) velocityPxMs = (newest.pos - oldest.pos) / dt;
-        }
-        swipeXRef.current?.end(swipeIndex, endCross - startCrossPos, velocityPxMs);
-        return;
-      }
-
-      // Velocity aus Zeitfenster berechnen
-      let velocityPxMs = 0;
-      if (history.length >= 2) {
-        const oldest = history[0];
-        const newest = history[history.length - 1];
-        const dt = newest.t - oldest.t;
-        if (dt > 0) velocityPxMs = (oldest.pos - newest.pos) / dt;
-      }
-
-      const dim = getDim();
-      // Wo läge man ohne Schwung — und wohin trüge der Schwung (150 ms Projektion)?
-      const restIdx = Math.round(posRef.current / dim);
-      const projectedIdx = Math.round((posRef.current + velocityPxMs * 150) / dim);
-      // Der Schwung darf höchstens EINEN Moment weitertragen. Ohne die Klemme
-      // überspringt ein harter Flick zwei oder drei Momente, die man nie zu
-      // sehen bekommt — der Feed fühlt sich dann unkontrollierbar an. Gedämpft
-      // wird nur das Momentum: Wer den Finger langsam über mehrere Kacheln
-      // zieht, landet weiterhin dort, wo er hingezogen hat.
-      const targetIdx = Math.max(restIdx - 1, Math.min(restIdx + 1, projectedIdx));
-      // Geschwindigkeit in px/s an die Feder übergeben, damit die Bewegung ohne
-      // sichtbaren Knick aus der Geste in die Animation übergeht.
-      snapTo(targetIdx, velocityPxMs * 1000);
-    };
-
-    const abortSwipeX = () => {
-      // Quer-Geste abgebrochen → Karte zurückfedern lassen (dx 0, keine Velocity).
-      swipeXRef.current?.end(swipeIndex, 0, 0);
-    };
-
-    const onCancel = () => {
-      if (!gestureActive) return;
-      gestureActive = false;
-      gestureRef.current = false;
-      if (axisLock === "cross") {
-        abortSwipeX();
-        return;
-      }
-      snapTo(indexRef.current);
-    };
-
-    // Sicherheitsnetz: Geht die App mitten in der Geste in den Hintergrund
-    // (Home-Geste, Anruf, App-Wechsel), kommt auf iOS nicht immer ein touchend
-    // oder touchcancel an. Ohne Snap bliebe der Feed genau dort stehen, wo der
-    // Finger war — zwischen zwei Momenten. Deshalb hier auf den nächsten
-    // Einrastpunkt schnappen.
-    const onHidden = () => {
-      if (document.visibilityState !== "hidden" || !gestureActive) return;
-      gestureActive = false;
-      gestureRef.current = false;
-      if (axisLock === "cross") {
-        abortSwipeX();
-        return;
-      }
-      snapTo(Math.round(posRef.current / getDim()));
-    };
-
-    window.addEventListener("touchstart", onStart, { passive: true });
-    window.addEventListener("touchmove", onMove, { passive: false });
-    window.addEventListener("touchend", onEnd);
-    window.addEventListener("touchcancel", onCancel);
-    document.addEventListener("visibilitychange", onHidden);
-    return () => {
-      window.removeEventListener("touchstart", onStart);
-      window.removeEventListener("touchmove", onMove);
-      window.removeEventListener("touchend", onEnd);
-      window.removeEventListener("touchcancel", onCancel);
-      document.removeEventListener("visibilitychange", onHidden);
-    };
-  }, [axis, getDim, applyPos, snapTo, isInsideContainer, commitIndex, clampIndex, withRubberBand]);
-
-  // Trackpad / Mausrad
-  useEffect(() => {
-    let snapId: ReturnType<typeof setTimeout> | null = null;
-
-    const onWheel = (e: WheelEvent) => {
-      if (!isInsideContainer(e.target)) return;
-      e.preventDefault();
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-      const delta = axis === "x" ? e.deltaX || e.deltaY : e.deltaY;
-      posRef.current = withRubberBand(posRef.current + delta);
-      applyPos(posRef.current);
-      if (snapId) clearTimeout(snapId);
-      snapId = setTimeout(() => {
-        const dim = getDim();
-        snapTo(Math.round(posRef.current / dim));
-        snapId = null;
-      }, 150);
-    };
-
-    window.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      window.removeEventListener("wheel", onWheel);
-      if (snapId) clearTimeout(snapId);
-    };
-  }, [axis, getDim, applyPos, snapTo, isInsideContainer, withRubberBand]);
-
-  // Maus-Drag für den Quer-Wisch (Swipe-Follow) auf Desktop: ohne Folgen-Button
-  // wäre Folgen mit der Maus sonst unmöglich. Vertikales Maus-Ziehen bleibt wie
-  // bisher ohne Funktion (Scrollen am Desktop läuft über das Mausrad).
-  useEffect(() => {
-    if (axis !== "y") return;
-    let tracking = false;
+    if (!container) return;
+    let pointerId: number | null = null;
     let lock: "none" | "cross" | "dead" = "none";
     let startX = 0;
     let startY = 0;
     let swipeIndex = 0;
+    // Lief beim Aufsetzen noch eine Bewegung? Dann hält der Tipp sie nur an.
+    let stoppedScroll = false;
+    // Begann die Geste auf der Schutzfläche statt im Scroller?
+    let onShield = false;
     let history: { pos: number; t: number }[] = [];
 
-    const onDown = (e: MouseEvent) => {
-      if (!swipeXRef.current) return;
-      if (!isInsideContainer(e.target)) return;
-      tracking = true;
+    const velocity = () => {
+      if (history.length < 2) return 0;
+      const oldest = history[0];
+      const newest = history[history.length - 1];
+      const dt = newest.t - oldest.t;
+      return dt > 0 ? (newest.pos - oldest.pos) / dt : 0;
+    };
+
+    // Die Kachel, auf die der Feed gerade zuläuft. Bei snapTo ist das Ziel
+    // bekannt, sonst entscheidet die Richtung des letzten Scrolls. Mandatory
+    // Snap rastet in dieser Richtung auf der nächsten Kachel ein.
+    const settleTarget = () => {
+      if (targetRef.current !== null) return targetRef.current;
+      const h = container.clientHeight;
+      if (h <= 0) return indexRef.current;
+      const pos = container.scrollTop / h;
+      const dir = scrollDirRef.current;
+      const idx =
+        dir > 0 ? Math.ceil(pos - 0.02) : dir < 0 ? Math.floor(pos + 0.02) : Math.round(pos);
+      return clampIndex(idx);
+    };
+
+    const endShieldGesture = () => {
+      if (!onShield) return;
+      onShield = false;
+      shieldGestureRef.current = false;
+      if (!movingRef.current) setShieldActive(false);
+    };
+
+    const onDown = (e: PointerEvent) => {
+      if (!e.isPrimary) return;
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      pointerId = e.pointerId;
+      lastPointerTypeRef.current = e.pointerType;
       lock = "none";
       startX = e.clientX;
       startY = e.clientY;
-      swipeIndex = indexRef.current;
+      onShield = e.currentTarget !== container;
+      if (onShield) {
+        shieldGestureRef.current = true;
+        swipeIndex = settleTarget();
+        stoppedScroll = true;
+      } else {
+        // Der Quer-Wisch gilt für den Slide, auf dem die Geste BEGINNT.
+        swipeIndex = indexRef.current;
+        stoppedScroll = movingRef.current;
+      }
       history = [{ pos: e.clientX, t: performance.now() }];
     };
-    const onMove = (e: MouseEvent) => {
-      if (!tracking) return;
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
       if (lock === "none") {
         const dx = Math.abs(e.clientX - startX);
         const dy = Math.abs(e.clientY - startY);
         if (Math.max(dx, dy) < AXIS_LOCK_SLOP) return;
-        lock = dx > dy ? "cross" : "dead";
+        lock = dx > dy && swipeXRef.current ? "cross" : "dead";
+        if (lock === "cross") {
+          // Maus: Bewegungen außerhalb des Elements weiter empfangen.
+          try {
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          } catch {
+            // Pointer schon weg — die Geste endet ohnehin gleich.
+          }
+        } else if (onShield) {
+          // Senkrecht auf der Schutzfläche: Der Browser scrollt hier nicht
+          // selbst, also einen Schritt in Wischrichtung auslösen (Finger nach
+          // oben = nächster Moment).
+          const step = e.clientY < startY ? 1 : -1;
+          snapTo(settleTarget() + step);
+        }
       }
       if (lock !== "cross") return;
-      e.preventDefault();
       const now = performance.now();
       history.push({ pos: e.clientX, t: now });
-      const cutoff = now - 100;
-      while (history.length > 1 && history[0].t < cutoff) history.shift();
+      // Nur die letzten 100 ms zählen für die Geschwindigkeit.
+      while (history.length > 1 && history[0].t < now - 100) history.shift();
       swipeXRef.current?.move(swipeIndex, e.clientX - startX);
     };
-    const onUp = (e: MouseEvent) => {
-      if (!tracking) return;
-      tracking = false;
-      if (lock !== "cross") return;
-      let velocityPxMs = 0;
-      if (history.length >= 2) {
-        const oldest = history[0];
-        const newest = history[history.length - 1];
-        const dt = newest.t - oldest.t;
-        if (dt > 0) velocityPxMs = (newest.pos - oldest.pos) / dt;
-      }
-      swipeXRef.current?.end(swipeIndex, e.clientX - startX, velocityPxMs);
-    };
 
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [axis, isInsideContainer]);
-
-  // Maus-Drag horizontal für Stadt Corso auf Desktop
-  useEffect(() => {
-    if (axis !== "x") return;
-    let startX = 0;
-    let startWorldPos = 0;
-    let tracking = false;
-    let lastTouchEnd = 0;
-
-    const onTouchEnd = () => {
-      lastTouchEnd = Date.now();
-    };
-    const onDown = (e: MouseEvent) => {
-      if (Date.now() - lastTouchEnd < 600) return;
-      if (!isInsideContainer(e.target)) return;
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-      startX = e.clientX;
-      startWorldPos = posRef.current;
-      tracking = true;
-      gestureRef.current = true;
-    };
-    const onMove = (e: MouseEvent) => {
-      if (!tracking) return;
-      posRef.current = withRubberBand(startWorldPos + (startX - e.clientX));
-      applyPos(posRef.current);
-    };
-    const onUp = () => {
-      if (!tracking) return;
-      tracking = false;
-      gestureRef.current = false;
-      if (Date.now() - lastTouchEnd < 600) {
-        snapTo(indexRef.current);
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      pointerId = null;
+      endShieldGesture();
+      if (lock === "cross") {
+        swipeXRef.current?.end(swipeIndex, e.clientX - startX, velocity());
         return;
       }
-      snapTo(Math.round(posRef.current / getDim()));
+      if (lock !== "none" || stoppedScroll) return;
+      onTapRef.current?.({
+        index: indexRef.current,
+        x: e.clientX,
+        y: e.clientY,
+        rect: container.getBoundingClientRect(),
+        target: e.target,
+      });
     };
 
-    window.addEventListener("touchend", onTouchEnd);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("touchend", onTouchEnd);
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+    // Browser hat übernommen (vertikaler Scroll) oder das System hat die Geste
+    // abgebrochen. Eine angefangene Quer-Geste federt zurück.
+    const onCancel = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      pointerId = null;
+      endShieldGesture();
+      if (lock === "cross") swipeXRef.current?.end(swipeIndex, 0, 0);
     };
-  }, [axis, getDim, applyPos, snapTo, isInsideContainer, withRubberBand]);
 
-  // Index + Position OHNE Animation hart setzen. Für den unsichtbaren Umbau nach
-  // einem Swipe-Follow: erst scrollt der Feed animiert zum nächsten Moment
-  // (snapTo), dann wird die gefolgte Kachel aus der Liste genommen — alle
-  // nachfolgenden Slides rücken einen Index auf, der sichtbare Moment ist aber
-  // derselbe. realign() zieht Index/Position im selben Tick nach, damit der
-  // Frame identisch bleibt (kein Sprung, kein zweiter Scroll).
-  const realign = useCallback(
-    (idx: number) => {
-      const clamped = clampIndex(idx);
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-      indexRef.current = clamped;
-      posRef.current = clamped * getDim();
-      applyPos(posRef.current);
-      setCurrentIndex(clamped);
-      // Harte Neuausrichtung heißt: die Bewegung ist vorbei.
-      setSettledIndex(clamped);
-    },
-    [clampIndex, getDim, applyPos],
-  );
-
-  // Stabile Callback-Ref-Factory — React ruft den Callback nicht erneut auf bei Re-Render
-  const slideRef = useCallback(
-    (i: number) => {
-      if (!callbacksRef.current[i]) {
-        callbacksRef.current[i] = (el: HTMLElement | null) => {
-          slidesRef.current[i] = el;
-          if (el) {
-            const dim = getDim();
-            const offset = i * dim - posRef.current;
-            const tr = axis === "y" ? "Y" : "X";
-            el.style.transform = `translate${tr}(${offset}px)`;
-            // Ein frisch gemounteter Slide weit außerhalb des Bildschirms wird
-            // gar nicht erst gemalt und bekommt auch keine eigene Ebene —
-            // `applyPos` holt ihn zurück, sobald er in Reichweite kommt.
-            const near = Math.abs(offset) <= dim * (RENDER_WINDOW + 0.5);
-            el.style.visibility = near ? "" : "hidden";
-            el.style.willChange = near ? "transform" : "";
-          }
-        };
+    // Sicherheitsnetz: App geht mitten in der Quer-Geste in den Hintergrund
+    // und iOS liefert weder `pointerup` noch `pointercancel`.
+    const onHidden = () => {
+      if (document.visibilityState !== "hidden") return;
+      touchingRef.current = false;
+      if (pointerId !== null) {
+        pointerId = null;
+        if (lock === "cross") swipeXRef.current?.end(swipeIndex, 0, 0);
       }
-      return callbacksRef.current[i];
+      endShieldGesture();
+      setShieldActive(false);
+    };
+
+    const targets: HTMLElement[] = shield ? [container, shield] : [container];
+    for (const t of targets) {
+      t.addEventListener("pointerdown", onDown, { passive: true });
+      t.addEventListener("pointermove", onMove, { passive: true });
+      t.addEventListener("pointerup", onUp, { passive: true });
+      t.addEventListener("pointercancel", onCancel, { passive: true });
+    }
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      for (const t of targets) {
+        t.removeEventListener("pointerdown", onDown);
+        t.removeEventListener("pointermove", onMove);
+        t.removeEventListener("pointerup", onUp);
+        t.removeEventListener("pointercancel", onCancel);
+      }
+      document.removeEventListener("visibilitychange", onHidden);
+      shieldGestureRef.current = false;
+    };
+  }, [container, shield, clampIndex, snapTo, setShieldActive]);
+
+  // Aufräumen beim Unmount: kein Timer darf eine verwaiste Fläche umschalten.
+  useEffect(
+    () => () => {
+      if (shieldTimerRef.current) clearTimeout(shieldTimerRef.current);
     },
-    [axis, getDim],
+    [],
   );
 
-  return { currentIndex, settledIndex, slideRef, containerRef, snapTo, realign };
+  // Stabile Callback-Ref pro Slide-Index. React ruft sie bei einem Re-Render
+  // nicht erneut auf.
+  const slideRef = useCallback((i: number) => {
+    if (!slideCallbacksRef.current[i]) {
+      slideCallbacksRef.current[i] = (el: HTMLElement | null) => {
+        const prev = slidesRef.current[i];
+        slidesRef.current[i] = el;
+        // Beim Umsortieren löst React erst die alten Refs und setzt dann die
+        // neuen. Ein Knoten, der nur den Index wechselt, wird hier kurz
+        // abgemeldet und gleich wieder angemeldet. Das ist harmlos.
+        if (prev && prev !== el && !slidesRef.current.includes(prev)) {
+          observerRef.current?.unobserve(prev);
+        }
+        if (el) observerRef.current?.observe(el);
+      };
+    }
+    return slideCallbacksRef.current[i];
+  }, []);
+
+  return { currentIndex, settledIndex, direction, slideRef, containerRef, shieldRef, snapTo };
 }

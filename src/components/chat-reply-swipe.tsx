@@ -3,9 +3,15 @@ import { useCallback, useEffect, useRef } from "react";
 // Zieh-zum-Antworten (WhatsApp-Muster, Entscheidung Dominik 9. Sep 2026).
 //
 // GESTEN-LAGE IM CHAT: Der Chat liegt als eigenes Overlay AUSSERHALB des
-// Snap-Containers von circle.tsx. `use-snap-scroll` prüft `isInsideContainer`
-// und ignoriert Gesten von hier — es gibt also kein Durchgreifen auf den Feed
-// darunter. Im Chat selbst war bislang keine Geste belegt: der Verlauf scrollt
+// Snap-Containers von circle.tsx (Geschwister, nicht Kind). `use-snap-scroll`
+// hört nur auf Pointer-Events am eigenen Container, Gesten von hier erreichen
+// ihn also nie — es gibt kein Durchgreifen auf den Feed darunter.
+//
+// ⚠️ Der `touchmove`-Listener unten ist NICHT passiv und hängt am Dokument.
+// Das ist nur vertretbar, weil er ausschließlich lebt, solange der Chat offen
+// ist und den Feed verdeckt. Wer diesen Hook woanders einbaut: Neben einem
+// sichtbaren Feed bremst er dessen nativen Scroll aus
+// (docs/SCROLL_NATIV_UMBAU.md). Im Chat selbst war bislang keine Geste belegt: der Verlauf scrollt
 // nativ, sonst nichts. Die Reply-Geste ist damit kollisionsfrei.
 //
 // ZWEI FALLEN, die dieser Hook bewusst umgeht:

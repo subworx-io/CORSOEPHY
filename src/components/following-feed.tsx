@@ -3,7 +3,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useFollow, followFill, canRenew, type FollowedPerson } from "@/lib/follow-context";
 import { useCircle } from "@/lib/circle/use-circle";
-import { useSnapScroll, SNAP_MS } from "@/hooks/use-snap-scroll";
+import { useSnapScroll } from "@/hooks/use-snap-scroll";
+import { mediaWindow } from "@/lib/feed-media-window";
 import { useSwipeFollow, SWIPE_EXIT_MS } from "@/hooks/use-swipe-follow";
 import { SwipeFollowOverlay } from "@/components/swipe-follow-overlay";
 import { supabase } from "@/lib/supabase/client";
@@ -14,6 +15,7 @@ import { MomentMenu } from "@/components/moment-menu";
 import { getSignedMomentUrls } from "@/lib/supabase/signed-urls";
 import { SequenceMedia } from "@/components/sequence-media";
 import { MomentProgress } from "@/components/moment-progress";
+import { FeedStatus } from "@/components/feed-status";
 import {
   useMomentSequence,
   firstStepOf,
@@ -67,6 +69,7 @@ const PILL =
 const PILL_SOLID = "bg-white text-black";
 // Stabile leere Liste — eine frische [] pro Render würde die Sequenz zurücksetzen.
 const EMPTY_MOMENTS: SequenceMoment[] = [];
+const NO_MOMENTS_BY_HANDLE: Record<string, FollowedMoments> = {};
 
 // Alle lebenden Momente einer gefolgten Person, als Sequenz zum In-Place-Blättern.
 type FollowedMoments = SequenceMoment[];
@@ -84,6 +87,9 @@ function PersonSlide({
   hasSequence,
   isLastStep,
   onEnded,
+  mountMedia,
+  preload,
+  warm,
 }: {
   person: FollowedPerson;
   now: number;
@@ -100,6 +106,10 @@ function PersonSlide({
   hasSequence: boolean;
   isLastStep: boolean;
   onEnded: () => void;
+  // Video-Fenster: außerhalb bleibt nur die Kachel-Hülle stehen.
+  mountMedia: boolean;
+  preload: "auto" | "metadata";
+  warm: boolean;
 }) {
   const shown = isActive ? { step, moment: currentMoment } : firstStepOf(moments);
   const fill = followFill(person.followedAt, now);
@@ -132,13 +142,15 @@ function PersonSlide({
           </div>
         )}
 
-        {shown.step && (
+        {mountMedia && shown.step && (
           <SequenceMedia
             step={shown.step}
             moment={shown.moment}
             isActive={isActive}
             isLastStep={isActive ? isLastStep : false}
             onEnded={onEnded}
+            preload={preload}
+            warm={warm}
           />
         )}
 
@@ -201,24 +213,34 @@ export function FollowingFeed() {
   const handles = people.map((p) => p.handle);
 
   // Holt den aktuellsten LEBENDEN Post (+ signierte URLs) für jede gefolgte Person.
-  const { data: momentsByHandle = {}, isPending } = useQuery<Record<string, FollowedMoments>>({
+  const {
+    data: momentsData,
+    isPlaceholderData,
+    isError,
+    isFetching,
+    refetch,
+  } = useQuery<Record<string, FollowedMoments>>({
     queryKey: ["following-posts", handles.join(",")],
     queryFn: async () => {
       if (!handles.length) return {};
-      const { data: profiles } = await supabase
+      // Fehler WERFEN statt als „niemand zeigt etwas" durchzugehen — sonst
+      // stand nach einem Funkloch der Leerzustand da, obwohl nur das Netz fehlte.
+      const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
         .select("id, handle")
         .in("handle", handles);
+      if (profilesError) throw profilesError;
       if (!profiles?.length) return {};
 
       const authorIds = profiles.map((p) => p.id);
       // Nur lebende Momente (24h ab Post) — wer keinen hat, ist hier unsichtbar.
-      const { data: posts } = await supabase
+      const { data: posts, error: postsError } = await supabase
         .from("posts")
         .select("id, media_path, media_type, media_paths, author_id")
         .in("author_id", authorIds)
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false });
+      if (postsError) throw postsError;
       if (!posts?.length) return {};
 
       // Alle Medienpfade eines Posts (Video: einer, Foto-Moment: bis zu 5).
@@ -267,21 +289,26 @@ export function FollowingFeed() {
     // verbliebenen Handles gültig — sie zu behalten ist keine Notlüge.
     placeholderData: keepPreviousData,
   });
+  const momentsByHandle = momentsData ?? NO_MOMENTS_BY_HANDLE;
+  // Gibt es für DIESEN Handle-Satz schon eine echte Antwort? Platzhalter (der
+  // Stand vor einem Entfolgen) zählt nicht — er darf nur ein Aufblitzen des
+  // Leerzustands verhindern, aber keinen behaupten.
+  const hasAnswer = momentsData !== undefined && !isPlaceholderData;
 
   // Sichtbar ist nur, wer gerade einen lebenden Moment hat (Umbau-Regel).
   const visible = people.filter((p) => momentsByHandle[p.handle]?.length);
 
-  // snapTo/realign für die Entfolgen-Choreografie (Hook läuft erst weiter unten).
-  const snapRef = useRef<{ snapTo: (i: number) => void; realign: (i: number) => void } | null>(
-    null,
-  );
+  // snapTo für die Entfolgen-Choreografie (Hook läuft erst weiter unten).
+  const snapRef = useRef<((i: number, onSettled?: () => void) => void) | null>(null);
 
   // Rechts-Wisch = Follow erneuern (ab 12 h Follow-Alter, wie der frühere
   // Button; Karte federt zurück, das GlassHeart füllt sich wieder). Vorher
   // federt die Karte nur zäh zurück — die Regel bleibt serverseitig erzwungen
   // (0015-Trigger). Links-Wisch = entfolgen: Karte fliegt nach links raus, der
-  // Feed scrollt zum nächsten Moment, dann erst räumt unfollow() die Person aus
-  // dem Context (zu früh aufgerufen, verschwände die Kachel unterm Finger).
+  // Feed scrollt zum nächsten Moment, und erst wenn der Scroll steht, räumt
+  // unfollow() die Person aus dem Context (zu früh aufgerufen, verschwände die
+  // Kachel unterm Finger). Die Dauer des nativen Scrolls ist nicht
+  // vorhersagbar, deshalb hängt das am Ende der Bewegung statt an einem Timer.
   const { cardRef, swipeHandlers } = useSwipeFollow({
     right: {
       canCommit: (i) => {
@@ -298,35 +325,29 @@ export function FollowingFeed() {
       onCommit: (i) => {
         const person = visible[i];
         if (!person) return;
-        window.setTimeout(() => snapRef.current?.snapTo(i + 1), SWIPE_EXIT_MS);
         window.setTimeout(
-          () => {
-            unfollow(person.handle);
-            snapRef.current?.realign(i);
-          },
-          SWIPE_EXIT_MS + SNAP_MS + 60,
+          () => snapRef.current?.(i + 1, () => unfollow(person.handle)),
+          SWIPE_EXIT_MS,
         );
       },
       exitOnCommit: true,
     },
   });
 
-  const { currentIndex, slideRef, containerRef, snapTo, realign } = useSnapScroll({
-    count: visible.length,
-    axis: "y",
-    onSwipeX: swipeHandlers,
-    // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
-    // Siehe TapInfo in use-snap-scroll.ts (auf iOS feuert hier kein click).
-    onTap: ({ index, x, y, target }) => {
-      if (isControlTap(target)) return;
-      if (index !== currentIndexRef.current) return;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
-      else seqRef.current?.next();
-    },
-  });
-  snapRef.current = { snapTo, realign };
+  const { currentIndex, settledIndex, direction, slideRef, containerRef, shieldRef, snapTo } =
+    useSnapScroll({
+      count: visible.length,
+      onSwipeX: swipeHandlers,
+      // Tipp = ein Schritt weiter in der Sequenz, linkes Drittel = zurück.
+      // Siehe TapInfo in use-snap-scroll.ts.
+      onTap: ({ index, x, y, rect, target }) => {
+        if (isControlTap(target)) return;
+        if (index !== currentIndexRef.current) return;
+        if (tapDirection(x, y, rect) === "prev") seqRef.current?.prev();
+        else seqRef.current?.next();
+      },
+    });
+  snapRef.current = snapTo;
 
   // Sequenz der aktiven Person (eine pro Feed — Nachbarn zeigen ihren Anfang).
   const activePerson = visible[currentIndex];
@@ -351,10 +372,16 @@ export function FollowingFeed() {
     return () => clearTimeout(t);
   }, [activePostId]);
 
-  // Erster Aufruf, Follows vorhanden, Momente noch unterwegs: „niemand zeigt
-  // etwas" wäre eine Behauptung ohne Deckung. Lieber kurz nichts sagen.
-  if (visible.length === 0 && people.length > 0 && isPending) {
-    return <div className="absolute inset-0" />;
+  // Follows vorhanden, aber noch keine Antwort (unterwegs oder gescheitert):
+  // „niemand zeigt etwas" wäre eine Behauptung ohne Deckung. Wie in allen
+  // Zweigen hier fehlen Scroller und Shield dann gemeinsam.
+  if (visible.length === 0 && people.length > 0 && !hasAnswer) {
+    return (
+      <FeedStatus
+        state={isError && !isFetching ? "error" : "pending"}
+        onRetry={() => void refetch()}
+      />
+    );
   }
 
   if (visible.length === 0) {
@@ -388,36 +415,39 @@ export function FollowingFeed() {
   }
 
   return (
-    <div ref={containerRef} className="absolute inset-0" style={{ touchAction: "none" }}>
-      {visible.map((person, i) => {
-        const offset = i - currentIndex;
-        const isActive = offset === 0;
-        const isNeighbor = Math.abs(offset) === 1;
+    <div className="absolute inset-0">
+      <div ref={containerRef} className="snap-feed">
+        {visible.map((person, i) => {
+          const isActive = i === currentIndex;
+          // Medien-Fenster: Regel in lib/feed-media-window.ts. Vorher montierte
+          // dieser Feed für JEDE gefolgte Person gleichzeitig ein <video>.
+          const media = mediaWindow(i, currentIndex, settledIndex, direction);
 
-        return (
-          <div
-            key={person.handle}
-            ref={slideRef(i)}
-            className="absolute inset-0 w-full h-full"
-            style={{ zIndex: isActive ? 10 : isNeighbor ? 5 : 0 }}
-          >
-            <PersonSlide
-              person={person}
-              now={now}
-              moments={momentsByHandle[person.handle] ?? EMPTY_MOMENTS}
-              isActive={isActive}
-              cardRef={cardRef(i)}
-              step={seq.step}
-              currentMoment={seq.currentMoment}
-              groups={seq.groups}
-              stepIndex={seq.stepIndex}
-              hasSequence={seq.hasSequence}
-              isLastStep={seq.isLastStep}
-              onEnded={seq.autoNext}
-            />
-          </div>
-        );
-      })}
+          return (
+            <div key={person.handle} ref={slideRef(i)} className="snap-feed-slide">
+              <PersonSlide
+                person={person}
+                now={now}
+                moments={momentsByHandle[person.handle] ?? EMPTY_MOMENTS}
+                isActive={isActive}
+                cardRef={cardRef(i)}
+                step={seq.step}
+                currentMoment={seq.currentMoment}
+                groups={seq.groups}
+                stepIndex={seq.stepIndex}
+                hasSequence={seq.hasSequence}
+                isLastStep={seq.isLastStep}
+                onEnded={seq.autoNext}
+                mountMedia={media.mount}
+                preload={media.preload}
+                warm={media.warm}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {/* Fängt Berührungen ab, solange der Feed nachläuft (use-snap-scroll). */}
+      <div ref={shieldRef} className="snap-feed-shield" aria-hidden />
 
       {/* Seitenindikatoren */}
       <div className="absolute top-1/2 right-3 z-20 -translate-y-1/2 flex flex-col gap-1.5">

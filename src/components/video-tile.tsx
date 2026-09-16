@@ -15,11 +15,13 @@ export function VideoTile({
   preload = "auto",
   loop = true,
   onEnded,
+  warm = false,
 }: {
   src: string;
   isActive: boolean;
-  // "auto" für den aktiven Moment und seine direkten Nachbarn (Bild liegt bereit,
-  // wenn man hinzieht), "metadata" für den Rand des Fensters.
+  // "auto" für den aktiven Moment und die Kacheln voraus, "metadata" sonst.
+  // ⚠️ Auf dem iPhone reicht "auto" allein nicht: Safari lädt ohne Abspielen
+  // praktisch nichts vor. Dafür gibt es `warm`.
   preload?: "auto" | "metadata";
   /**
    * Endlos wiederholen? Seit dem In-Place-Blättern (9. Sep 2026) NUR noch für
@@ -29,6 +31,12 @@ export function VideoTile({
   loop?: boolean;
   /** Auto-Advance: das Video ist durchgelaufen, der nächste Schritt ist dran. */
   onEnded?: () => void;
+  /**
+   * Vorwärmen (lib/feed-media-window.ts): Die Kachel liegt kurz voraus. Das
+   * Video wird EINMAL stumm angespielt und sofort wieder angehalten, damit das
+   * erste Bild dekodiert bereitliegt, wenn man hinwischt.
+   */
+  warm?: boolean;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(true);
@@ -49,6 +57,25 @@ export function VideoTile({
       v.pause();
     }
   }, [isActive, src]);
+
+  // Vorwärmen: einmal pro Quelle. Wird die Kachel währenddessen aktiv, darf das
+  // Anhalten nicht mehr greifen — sonst stünde der Moment, den man ansieht.
+  const warmedSrcRef = useRef<string | null>(null);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !warm || isActive || warmedSrcRef.current === src) return;
+    warmedSrcRef.current = src;
+    v.play()
+      .then(() => {
+        if (!isActiveRef.current) v.pause();
+      })
+      .catch(() => {
+        // Abspielen verweigert (z. B. Stromsparmodus) — dann eben ohne
+        // Vorwärmen. `#t=` an der Quelle sorgt trotzdem für ein erstes Bild.
+      });
+  }, [warm, isActive, src]);
 
   // Anfangszustand aus dem Element lesen — bei einem Cache-Treffer ist das Bild
   // schon da, bevor der erste Event-Handler hängt.
@@ -77,7 +104,10 @@ export function VideoTile({
     <>
       <video
         ref={ref}
-        src={src}
+        // `#t=0.001`: Ohne Startmarke zeigt iOS bei preload="metadata" gar kein
+        // Bild, bis das Video spielt. Mit ihr dekodiert Safari das erste Frame.
+        // Das Fragment geht nie an den Server — die signierte URL bleibt gültig.
+        src={`${src}#t=0.001`}
         playsInline
         muted
         loop={loop}

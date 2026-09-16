@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -24,28 +24,38 @@ export interface CirclePartner {
 }
 
 const QUERY_KEY_BASE = "circle";
+// Stabile leere Liste (Grundlage des gemerkten `partnerIds`).
+const NO_PARTNERS: CirclePartner[] = [];
 
 export function useCircle() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  const { data: partners = [], isLoading } = useQuery<CirclePartner[]>({
+  const { data, isLoading, isError, isFetching, refetch } = useQuery<CirclePartner[]>({
     queryKey: [QUERY_KEY_BASE, user?.id],
     queryFn: async () => {
       if (!user) return [];
+      // Jeder Fehler WIRFT. Vorher hieß ein Funkloch „kein Circle": Der Screen
+      // zeigte „Dein Circle ist noch leer", und die Partner tauchten — mangels
+      // `partnerIds` — wieder in Discovery und „Ich folge" auf.
       // RLS (connections_read_own) liefert nur die eigenen Verbindungen.
-      const { data: rows } = await supabase
+      const { data: rows, error: rowsError } = await supabase
         .from("connections")
         .select(
           "id, user_a_id, user_b_id, connected_at, announced_a_at, announced_b_at, last_read_a_at, last_read_b_at",
         )
         .order("connected_at", { ascending: false });
+      if (rowsError) throw rowsError;
       if (!rows?.length) return [];
 
       // Blockierte Partner ausblenden (eigene Blocks sind per RLS lesbar).
       // Die Gegenrichtung (jemand blockiert MICH) filtert dessen Client analog;
       // Momente/Chat sind serverseitig ohnehin in beide Richtungen gesperrt.
-      const { data: blocks } = await supabase.from("blocks").select("blocked_id");
+      // Auch hier werfen: Ohne Block-Liste würde ein Blockierter wieder angezeigt.
+      const { data: blocks, error: blocksError } = await supabase
+        .from("blocks")
+        .select("blocked_id");
+      if (blocksError) throw blocksError;
       const blocked = new Set((blocks ?? []).map((b) => b.blocked_id));
 
       const typed = rows as Connection[];
@@ -54,10 +64,11 @@ export function useCircle() {
         .filter((id) => !blocked.has(id));
       if (!partnerIds.length) return [];
 
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profilesError } = await supabase
         .from("profiles")
         .select("id, handle, display_name")
         .in("id", partnerIds);
+      if (profilesError) throw profilesError;
       const byId = new Map((profiles ?? []).map((p) => [p.id, p]));
 
       return typed.flatMap((c): CirclePartner[] => {
@@ -81,6 +92,7 @@ export function useCircle() {
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
+  const partners = data ?? NO_PARTNERS;
 
   // Ankündigung als gesehen markieren — serverseitig pro Person, damit die
   // Feier genau einmal erscheint (nicht einmal pro Gerät wie bei localStorage).
@@ -92,11 +104,20 @@ export function useCircle() {
     [queryClient, user?.id],
   );
 
+  // Stabil über Renders: Discovery und Corso bauen ihre Kachelliste daraus.
+  // Ein neues Set pro Render ließ sie bei jedem Render neu rechnen.
+  const partnerIds = useMemo(() => new Set(partners.map((p) => p.partnerId)), [partners]);
+
   return {
     partners,
     isLoading,
+    /** Es liegt eine Antwort vor — erst dann ist „keine Partner" eine Aussage. */
+    hasData: data !== undefined,
+    /** Letzter Versuch gescheitert und gerade kein neuer unterwegs. */
+    failed: isError && !isFetching,
+    refetch,
     /** Profil-IDs aller Circle-Partner — zum Ausfiltern aus Discovery/„Ich folge". */
-    partnerIds: new Set(partners.map((p) => p.partnerId)),
+    partnerIds,
     acknowledge,
   };
 }

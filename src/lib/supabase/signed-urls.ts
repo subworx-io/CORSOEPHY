@@ -23,6 +23,10 @@ const cache = new Map<string, Entry>();
 /**
  * Liefert pro media_path eine signierte URL. Pfade, die nicht auflösbar sind
  * (gelöscht, RLS), fehlen im Ergebnis — der Aufrufer filtert.
+ *
+ * Scheitert der Aufruf als Ganzes (Netz, Server), WIRFT die Funktion. Vorher
+ * fehlten dann einfach alle Pfade, und der aufrufende Feed hielt sich für leer.
+ * Ein Fehler lässt TanStack Query dagegen den letzten guten Stand behalten.
  */
 export async function getSignedMomentUrls(paths: string[]): Promise<Record<string, string>> {
   const now = Date.now();
@@ -39,7 +43,8 @@ export async function getSignedMomentUrls(paths: string[]): Promise<Record<strin
   }
 
   if (missing.length > 0) {
-    const { data } = await supabase.storage.from(BUCKET).createSignedUrls(missing, TTL_SEC);
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrls(missing, TTL_SEC);
+    if (error) throw error;
     // Zeitstempel VOR der Antwort genommen → eher zu früh als zu spät erneuern.
     const expiresAt = now + TTL_SEC * 1000;
     for (const row of data ?? []) {

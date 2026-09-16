@@ -108,9 +108,9 @@ function FeedbackPage() {
     refetchOnWindowFocus: true,
   });
 
-  // Die Sequenz der eigenen Momente. Der Rücklauf ist KEIN Snap-Container
-  // (natives Scrollen), deshalb reicht hier ein normales onClick — das
-  // preventDefault-Problem aus den Feeds gibt es nur dort.
+  // Die Sequenz der eigenen Momente. Der Rücklauf ist KEIN Snap-Container,
+  // deshalb reicht hier ein normales onClick — `onTap` des Snap-Hooks gibt es
+  // nur in den Feeds (siehe CLAUDE.md).
   const moments = data?.moments ?? EMPTY_MOMENTS;
   const seq = useMomentSequence({ moments, isActive: true });
 
@@ -215,8 +215,8 @@ function FeedbackPage() {
             }}
             // In-Place-Blättern wie in den Feeds: rechte Hauptfläche = weiter,
             // linkes Drittel = zurück. Hier reicht onClick — der Rücklauf ist
-            // kein Snap-Container, es gibt also kein preventDefault, das die
-            // click-Ereignisse schluckt (siehe TapInfo in use-snap-scroll.ts).
+            // kein Snap-Container und hat keinen Snap-Hook, der Tipps von
+            // Wisch-Gesten trennen müsste (siehe TapInfo in use-snap-scroll.ts).
             onClick={(e) => {
               if (isControlTap(e.target)) return; // Ton-Knopf
               const rect = e.currentTarget.getBoundingClientRect();

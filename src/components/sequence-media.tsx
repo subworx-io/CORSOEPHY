@@ -20,6 +20,7 @@ export function SequenceMedia({
   isLastStep,
   onEnded,
   preload = "auto",
+  warm = false,
 }: {
   step: SequenceStep;
   /** Der Moment, zu dem der Schritt gehört — trägt die vollständige Fotoliste. */
@@ -29,6 +30,8 @@ export function SequenceMedia({
   /** Auto-Advance nach Ende des Videos. */
   onEnded: () => void;
   preload?: "auto" | "metadata";
+  /** Video vorab stumm anspielen — siehe lib/feed-media-window.ts. */
+  warm?: boolean;
 }) {
   if (step.isPhoto) {
     const urls = moment?.photoUrls?.length ? moment.photoUrls : [step.url];
@@ -39,6 +42,7 @@ export function SequenceMedia({
       src={step.url}
       isActive={isActive}
       preload={preload}
+      warm={warm}
       loop={isLastStep}
       onEnded={onEnded}
     />

@@ -14,8 +14,8 @@ import { HapticTapTarget } from "@/components/haptic-tap";
 //
 // Blättern über CSS-Scroll-Snap statt eigener Gestenlogik: Der Viewer ist ein
 // kurzlebiges Overlay über der Kamera, nicht der Feed. Native Trägheit ist hier
-// besser als alles, was wir nachbauen würden — und der Feed-Snap (use-snap-scroll)
-// bleibt der eine Ort, an dem Corso Gesten selbst rechnet.
+// besser als alles, was wir nachbauen würden. (Seit 16. Sep 2026 scrollen auch
+// die Feeds so — use-snap-scroll rechnet nur noch Quer-Wisch und Tipp selbst.)
 
 export function PhotoReview({
   photos,
