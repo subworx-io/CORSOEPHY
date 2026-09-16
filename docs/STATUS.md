@@ -1,6 +1,6 @@
 # Corso — Status
 
-**Stand: 16. September 2026** (letzter Bau-Stand: nativer Feed-Scroll, live, noch nicht committet) · **Doku-Abgleich: 16. September 2026.**
+**Stand: 16. September 2026** (letzter Bau-Stand: nativer Feed-Scroll, Abend-Push, Absicherung — committet, gepusht, live) · **Doku-Abgleich: 16. September 2026.**
 **Zweck:** Lebender Schnappschuss. Wer neu in das Projekt einsteigt (Mensch oder Agent), liest das hier zuerst und weiß, wo es steht und was der nächste konkrete Schritt ist. Diese Datei bei jedem nennenswerten Fortschritt aktualisieren.
 
 > Reihenfolge zum Reinkommen: `CLAUDE.md` → `docs/PRD.md` (was & warum) → `docs/ROADMAP.md` (was als nächstes) → **diese Datei** (wo genau stehen wir).
@@ -11,16 +11,16 @@
 
 ## 📍 Live-Stand (16. September 2026, gegen DB und Deployment geprüft)
 
-- **Code:** Der gesamte Stand vom 9. September (laufender Corso, In-Place-Blättern,
-  Chat-Medien) ist **committet (`1e070b2`) und live** auf `corso-app.pages.dev` —
-  das ausgelieferte Bundle ruft `corso_now()`, `my_moment_stats()` und den Bucket
-  `chat-media` auf. Seitdem kein weiterer Commit.
-- **Live, aber NICHT committet (Deploy 16. Sep, ~21:55):** der **native Feed-Scroll**
-  (⭐-Abschnitt direkt unten) und die **schrumpfende BottomNav** samt größerem
-  Kamera-Knopf (`__root.tsx`, `lib/scroll-activity.ts`, Arbeit einer
-  Parallel-Session). Beides hat Dominik am iPhone abgenommen. ⚠️ Bis zum Commit
-  weicht `corso-app.pages.dev` von `main` ab, und `deploy.sh` baut den
-  **gemeinsamen** Working Tree — ein Deploy nimmt alles mit, was gerade darin liegt.
+- **Code:** `main` = `origin/main` = live (Deploy 16. Sep, ~22:27, aus sauberem
+  Working Tree). Auf den Stand vom 9. September (`1e070b2`) folgen fünf Commits
+  vom 16. September: nativer Feed-Scroll samt Vorladen, Schutzfläche und
+  Absicherung der Feed-Daten (`828f03d`), schrumpfende BottomNav (`0b33009`),
+  Absicherung von Profil und Follows (`861cbaa`), Doku-Abgleich (`d87e0cc`),
+  Abend-Push (`f6c4fce`). Am iPhone abgenommen sind Scroll, Nav, Login und
+  „Ich folge". **Nicht am Gerät gesehen:** die neuen Lade- und Fehlerzustände
+  der Feeds (`feed-status.tsx`) und der Abend-Push im echten 19-Uhr-Lauf.
+- ⚠️ `deploy.sh` baut den **gemeinsamen** Working Tree — ein Deploy nimmt alles
+  mit, was gerade darin liegt, auch Uncommittetes paralleler Sessions.
 - **Migrations-Ledger:** 39 Dateien im Repo (die Nummern `0016`–`0018` gibt es je
   zweimal), 39 verbucht, nichts ausstehend. Zuletzt `0036_city_evening_push` (16. Sep, 22:05).
 - **Cron (9 aktive Jobs):** `corso-refill`, `push-dispatch`, `push-outbox-prune`,
@@ -72,7 +72,7 @@ Pointer-Events und hält die sichtbare Kachel fest, wenn sich die Liste darüber
 weiches Einrasten, eine Kachel pro Flick, Folgen ohne Mitscrollen und ohne Sprung,
 Tipp-Zonen, BottomNav schrumpft beim Wischen. **Offen:** Backlog #23 gezielt
 nachtesten, Nachlade-Grenze mit vollem Feed, Entfolgen in „Ich folge", Circle,
-Timeline-Messung — und der **Commit**.
+Timeline-Messung.
 
 ---
 

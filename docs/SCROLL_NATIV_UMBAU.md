@@ -1,7 +1,7 @@
 # Scroll-Umbau: vom JS-Feed zum nativen Scrollen
 
 **Status:** ✅ **umgesetzt, live und am iPhone abgenommen** (16. September 2026).
-Noch **nicht committet** — Stand der Umsetzung und Testergebnis: Abschnitt 0.
+Committet in `828f03d` (16. Sep 2026) — Stand der Umsetzung und Testergebnis: Abschnitt 0.
 **Angelegt:** 4. September 2026 (als Konzept, danach bis 16. Sep geparkt)
 **Auslöser:** Dominik, nach dem Test am iPhone — „ich kenne halt Apps, wo es einfach
 flüssiger aussieht, mehr fps quasi"
@@ -130,7 +130,7 @@ App** — nicht entfernen. Details: `docs/STATUS.md`, Chronik vom 2. September.
 ### Deploy und Abnahme
 
 - **Deployed:** 16. Sep 2026, ~21:55 (`bash scripts/deploy.sh`, Deployment
-  `e46d9755`). Mit ausgeliefert wurde die nicht committete BottomNav-Arbeit der
+  `e46d9755`). Mit ausgeliefert wurde die damals noch nicht committete BottomNav-Arbeit der
   Parallel-Session (schrumpfende Leiste, größerer Kamera-Knopf).
 - **Vorher ein Fehlalarm, der sich lehrreich wiederholen kann:** Der Umbau lag
   lokal fertig vor, der Live-Stand war aber noch der alte Hook. Das Gefühl
@@ -159,7 +159,6 @@ App** — nicht entfernen. Details: `docs/STATUS.md`, Chronik vom 2. September.
   einzeln abgefragt.
 - **Messung mit dem Safari Web Inspector** (Abschnitt 9) ist nicht gemacht —
   die Abnahme ist Gefühl am Gerät, keine Timeline.
-- **Commit** steht aus.
 
 ---
 
