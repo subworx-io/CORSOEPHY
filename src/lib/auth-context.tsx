@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -82,13 +83,32 @@ function raceTimeout<T>(promise: PromiseLike<T>, ms: number, onLate: (value: T) 
   });
 }
 
+// Wartezeiten zwischen den Versuchen, das Profil zu laden. Nach dem Aufwachen
+// aus dem Hintergrund ist das Netz auf dem Handy oft für ein, zwei Sekunden weg.
+const PROFILE_RETRY_DELAYS_MS = [1000, 2000, 4000];
+
+/**
+ * Lädt das Profil. `null` heißt NUR „es gibt keins" — ein Netz- oder
+ * Serverfehler wirft. Vorher kam beides als `null` zurück, und ein Funkloch
+ * schickte Bestandsnutzer auf den Handle-Screen, der die ganze App ersetzt.
+ */
 async function fetchProfile(userId: string): Promise<Profile | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", userId)
     .maybeSingle();
+  if (error) throw error;
   return (data as Profile | null) ?? null;
+}
+
+// Zwei Sessions gelten als gleich, wenn Nutzer und Token übereinstimmen.
+// supabase-js meldet bei JEDER Rückkehr aus dem Hintergrund `SIGNED_IN` mit
+// einem frisch aus dem Speicher gelesenen, aber inhaltlich identischen Objekt.
+function sameSession(a: Session | null, b: Session | null) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.access_token === b.access_token && a.user?.id === b.user?.id;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -101,27 +121,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // true, während für eine frische Session das Profil noch geholt wird. Verhindert,
   // dass der Handle-Screen kurz aufblitzt, bevor das Profil da ist.
   const [profilePending, setProfilePending] = useState(false);
+  // Das Profil ließ sich auch nach mehreren Versuchen nicht laden. Solange kein
+  // Profil bekannt ist, bleibt dann der Splash stehen (mit „Neu laden") — der
+  // Handle-Screen ist nur für Nutzer, die wirklich noch keins haben.
+  const [profileFailed, setProfileFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
     // Für welchen User zuletzt ein Profil angefordert wurde — so überschreibt eine
     // langsame Antwort nicht den inzwischen gewechselten User.
     let pendingUserId: string | null = null;
+    // Welchem User das aktuell gesetzte Profil gehört. Bei einem User-Wechsel
+    // darf das alte Profil nicht stehen bleiben, auch wenn das neue nicht lädt.
+    let profileUserId: string | null = null;
 
     async function syncProfile(userId: string | null) {
       pendingUserId = userId;
       if (!userId) {
+        profileUserId = null;
         setProfile(null);
+        setProfileFailed(false);
         return;
+      }
+      if (profileUserId !== userId) {
+        profileUserId = null;
+        setProfile(null);
       }
       setProfilePending(true);
       try {
-        const next = await fetchProfile(userId);
-        if (!active || pendingUserId !== userId) return;
-        setProfile(next);
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const next = await fetchProfile(userId);
+            if (!active || pendingUserId !== userId) return;
+            profileUserId = userId;
+            setProfile(next);
+            setProfileFailed(false);
+            return;
+          } catch (error) {
+            if (!active || pendingUserId !== userId) return;
+            const delay = PROFILE_RETRY_DELAYS_MS[attempt];
+            if (delay === undefined) {
+              // Aufgeben, aber ein schon bekanntes Profil NICHT verwerfen. Das
+              // nächste Auth-Ereignis (spätestens die nächste Rückkehr in den
+              // Vordergrund) versucht es erneut.
+              console.error("[auth] Profil konnte nicht geladen werden:", error);
+              setProfileFailed(true);
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            if (!active || pendingUserId !== userId) return;
+          }
+        }
       } finally {
         if (active && pendingUserId === userId) setProfilePending(false);
       }
+    }
+
+    // Zuletzt übernommene Session. Ein inhaltlich gleiches Objekt wird nicht
+    // übernommen: Jede neue Referenz ließe alles neu laufen, was an der Session
+    // oder am User hängt (Follows, Realtime-Kanal, Metrik-Events) — und das bei
+    // jeder Rückkehr aus dem Hintergrund.
+    let currentSession: Session | null = null;
+    function applySession(next: Session | null) {
+      if (sameSession(currentSession, next)) return;
+      currentSession = next;
+      setSession(next);
     }
 
     // Initiale Session (übernimmt auch den Magic-Link-Hash aus der URL).
@@ -132,13 +196,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // übernommen — der Nutzer rutscht dann von selbst aus dem Login in die App.
       const applyLate = (result: Awaited<ReturnType<typeof supabase.auth.getSession>>) => {
         if (!active || !result?.data?.session) return;
-        setSession(result.data.session);
+        applySession(result.data.session);
         void syncProfile(result.data.session.user?.id ?? null);
       };
       const result = await raceTimeout(supabase.auth.getSession(), SESSION_TIMEOUT_MS, applyLate);
       if (!active) return;
       if (result) {
-        setSession(result.data.session);
+        applySession(result.data.session);
         await syncProfile(result.data.session?.user?.id ?? null);
       }
       setLoading(false);
@@ -150,9 +214,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Supabase-Aufruf (hier: Profil laden) verklemmt sich mit genau diesem Lock.
     // Das ließ die App beim ersten Aufruf im Splash hängen. Profil deshalb erst
     // im nächsten Tick laden — außerhalb des Locks.
+    //
+    // supabase-js ruft diesen Callback bei JEDER Rückkehr in den Vordergrund
+    // (`SIGNED_IN`, bei abgelaufenem Token `TOKEN_REFRESHED`). Ist nichts
+    // passiert — gleiche Session, Profil schon da —, gibt es nichts zu tun.
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
       if (!active) return;
-      setSession(next);
+      const nextUserId = next?.user?.id ?? null;
+      if (sameSession(currentSession, next) && profileUserId === nextUserId) return;
+      applySession(next);
+      // Nur ein neues Token (gleicher User, Profil da): kein Profil-Neuladen nötig.
+      if (nextUserId !== null && profileUserId === nextUserId) return;
       setTimeout(() => {
         if (active) void syncProfile(next?.user?.id ?? null);
       }, 0);
@@ -171,12 +243,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    *    Adresse ein Konto an, und das Einladungs-System wäre über das Login-Formular
    *    umgehbar. Die Tür ist der Einladungs-Link, nicht dieses Feld.
    */
+  // Der User bleibt dasselbe Objekt, solange die ID gleich bleibt. Ein neues
+  // Token (TOKEN_REFRESHED) bringt ein neues User-Objekt mit — und alles, was an
+  // `[user]` hängt (Follows, Realtime-Kanal), liefe sonst bei jeder Rückkehr aus
+  // dem Hintergrund neu an.
+  const sessionUser = session?.user ?? null;
+  const userRef = useRef<User | null>(sessionUser);
+  if (userRef.current?.id !== sessionUser?.id) userRef.current = sessionUser;
+  const user = userRef.current;
+
   // app_open-Instrumentierung (Metrik-Tracking): feuert bei Kaltstart/Login
   // (sobald eine User-ID vorliegt) UND bei jeder Rückkehr in den Vordergrund
   // (visibilitychange → visible). Nur bei eingeloggtem User — log_event() würfe
   // sonst „not authenticated". Das Entprellen (max. 1 / 5 min) liegt in
   // logAppOpen(); der Mount- und der sofortige visible-Fall zählen so nicht doppelt.
-  const userId = session?.user?.id ?? null;
+  const userId = user?.id ?? null;
   useEffect(() => {
     if (!userId) return;
     // Kaltstart / frischer Login: einmal feuern, wenn die Seite sichtbar ist.
@@ -287,12 +368,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider
       value={{
         session,
-        user: session?.user ?? null,
+        user,
         profile,
         // Splash auch, solange für eine Session das Profil noch unterwegs ist —
         // sonst blitzt der Handle-Screen bei bestehendem Profil kurz auf.
+        // Ebenso, wenn es sich nicht laden ließ: Ohne Profil ist unbekannt, ob
+        // der Nutzer eins HAT, und der Handle-Screen wäre eine falsche Behauptung.
         // Beim Hintergrund-Refresh (Profil schon da) bleibt es aus.
-        loading: loading || (!!session && !profile && profilePending),
+        loading: loading || (!!session && !profile && (profilePending || profileFailed)),
         requestLoginCode,
         verifyLoginCode,
         createProfile,

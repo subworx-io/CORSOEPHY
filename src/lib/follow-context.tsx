@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { cycleStart } from "@/lib/corso-day";
@@ -67,6 +75,9 @@ export function canRenew(followedAt: number, now: number) {
 
 const FollowContext = createContext<FollowContextType | null>(null);
 
+// Wartezeiten zwischen den Ladeversuchen (Funkloch nach dem Aufwachen).
+const LOAD_RETRY_DELAYS_MS = [1000, 2000, 4000];
+
 // Followee-Profil per Handle nachschlagen (für optimistisch gefolgte Personen ohne id).
 async function profileIdByHandle(handle: string): Promise<string | null> {
   const { data } = await supabase.from("profiles").select("id").eq("handle", handle).maybeSingle();
@@ -78,34 +89,49 @@ export function FollowProvider({ children }: { children: ReactNode }) {
   // Quelle der Wahrheit ist die DB. Start leer (SSR-sicher, keine Hydration-Mismatch),
   // echte Follows werden nach dem Mount / Login geladen.
   const [followed, setFollowed] = useState<Map<string, FollowedPerson>>(() => new Map());
+  // Aktueller User — eine Antwort, die nach einem User-Wechsel eintrifft (etwa
+  // nach Wiederholungen), darf den Stand des neuen Users nicht überschreiben.
+  const userIdRef = useRef<string | null>(user?.id ?? null);
+  userIdRef.current = user?.id ?? null;
 
-  // Aktive Follows (+ Handles, +heutige Anstupser) aus der DB laden.
-  const load = useCallback(async () => {
+  // Aktive Follows (+ Handles, +heutige Anstupser) aus der DB laden. Wirft bei
+  // Fehlern — aufgerufen wird es nur über `load` unten.
+  const loadOnce = useCallback(async () => {
     if (!user) {
       setFollowed(new Map());
       return;
     }
     // Aktive Follows: expires_at liegt in der Zukunft (rollende 24h ab Follow).
     // Seit 0015 ist expires_at IMMER gesetzt — „is null" wäre jetzt immer leer.
-    const { data: rows } = await supabase
+    //
+    // ⚠️ Ein Fehler (Funkloch nach dem Aufwachen) darf den bekannten Stand NICHT
+    // leeren. Vorher kam er als „keine Follows" an: Gefolgte Personen tauchten
+    // wieder in Discovery auf, „Ich folge" war leer — bis zum nächsten Reload.
+    // Deshalb wirft jede Abfrage, und `load` behält bei einem Fehler den Stand.
+    const { data: rows, error: rowsError } = await supabase
       .from("follows")
       .select("followed_at, followee_id")
       .eq("follower_id", user.id)
       .gt("expires_at", new Date().toISOString());
+    if (rowsError) throw rowsError;
+    if (userIdRef.current !== user.id) return;
     if (!rows?.length) {
       setFollowed(new Map());
       return;
     }
 
     const followeeIds = rows.map((r) => r.followee_id);
-    const { data: profiles } = await supabase
+    const { data: profiles, error: profilesError } = await supabase
       .from("profiles")
       .select("id, handle")
       .in("id", followeeIds);
+    if (profilesError) throw profilesError;
 
     // Anstupser seit dem Zyklus-Start (21:00) → markiert „heute angestupst".
     // Das Anstups-Limit hängt weiter am Zyklus, nicht am rollenden 24h-Verfall.
     const sinceReset = new Date(cycleStart()).toISOString();
+    // Bewusst NICHT fatal: Anstupsen ist geparkt, die Markierung ist Beiwerk.
+    // Ein Fehler hier soll die Follows nicht blockieren.
     const { data: myNudges } = await supabase
       .from("nudges")
       .select("nudged_id")
@@ -126,12 +152,46 @@ export function FollowProvider({ children }: { children: ReactNode }) {
         nudged: nudgedSet.has(prof.id),
       });
     }
+    if (userIdRef.current !== user.id) return;
     setFollowed(next);
   }, [user]);
+
+  // `loadOnce` mit Wiederholungen. Schlägt es endgültig fehl, bleibt der
+  // bisherige Stand stehen — lieber etwas alt als fälschlich leer. Die nächste
+  // Rückkehr in den Vordergrund versucht es dann erneut (Effekt unten).
+  const loadFailedRef = useRef(false);
+  const load = useCallback(async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await loadOnce();
+        loadFailedRef.current = false;
+        return;
+      } catch (error) {
+        const delay = LOAD_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) {
+          console.error("[follow] Follows konnten nicht geladen werden:", error);
+          loadFailedRef.current = true;
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }, [loadOnce]);
 
   // Bei Login / User-Wechsel neu laden.
   useEffect(() => {
     void load();
+  }, [load]);
+
+  // Nur nach einem gescheiterten Laden: beim Zurückkommen erneut versuchen.
+  // Bewusst NICHT bei jeder Rückkehr — das würde die Discovery-Liste unter
+  // dem Nutzer umbauen, obwohl sich nichts geändert hat.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && loadFailedRef.current) void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load]);
 
   // Nach 24h abgelaufene Follows sofort ausblenden, ohne auf einen Reload zu warten.
