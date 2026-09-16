@@ -81,6 +81,24 @@ export interface PushSubscriptionRow {
   failure_count: number; // aufeinanderfolgende Zustellfehler
 }
 
+// Textbank des Abend-Pushes, 19:00 Berlin (0036). 🔒 Kein Client-Lesepfad (RLS ohne
+// Policy) — die Typen stehen hier nur, damit das Schema dokumentiert bleibt.
+export interface CityEveningLine {
+  id: string;
+  body: string; // 🔒 per Check ohne Ziffer, höchstens 120 Zeichen
+  city: string | null; // NULL = passt in jede Stadt
+  active: boolean; // aus der Rotation nehmen statt löschen
+  created_at: string;
+}
+
+// Welcher Abend-Text lief an welchem Corso-Tag — einer je Stadt und Tag (0036).
+export interface CityEveningDraw {
+  corso_day: string;
+  city: string;
+  line_id: string;
+  drawn_at: string;
+}
+
 export interface Nudge {
   id: string;
   nudger_id: string;

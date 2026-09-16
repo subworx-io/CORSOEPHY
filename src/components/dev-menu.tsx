@@ -140,6 +140,13 @@ const ACTIONS: DevAction[] = [
     icon: "notifications_active",
     desc: "Schickt sofort eine Push-Benachrichtigung an alle Geräte, auf denen du Push eingeschaltet hast. Kommt binnen einer Minute an. Betrifft nur dich.",
   },
+  {
+    key: "eveningpush",
+    rpc: "dev_menu_test_evening_push",
+    label: "Abend-Push an mich",
+    icon: "nights_stay",
+    desc: "Schickt den echten 19-Uhr-Push (Absender = deine Stadt, Text = heutige Ziehung aus der Textbank, Ziel = Corso) sofort an deine Geräte. Die Stadt bekommt abends denselben Satz. Betrifft nur dich.",
+  },
 ];
 
 export function DevMenu() {
