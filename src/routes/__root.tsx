@@ -15,6 +15,7 @@ import { Toaster } from "../components/ui/sonner";
 import { useUnseenBadges } from "../hooks/use-unseen-badges";
 import { HapticTapTarget } from "../components/haptic-tap";
 import { CircleInboxProvider, useCircleInbox } from "../lib/circle/inbox-context";
+import { useIsScrolling } from "../lib/scroll-activity";
 
 // Zwei-Achsen-Nav (Umbau 2. Sep 2026): genau 5 Items.
 // „Stadt" bündelt Discovery + „Ich folge" (Toggle im Screen), „Corso" ist der
@@ -24,10 +25,15 @@ import { CircleInboxProvider, useCircleInbox } from "../lib/circle/inbox-context
 // `festival` (Bühne mit Wimpeln) statt `movie` für den Stadt Corso — Entscheidung
 // Dominik, 4. Sep 2026: „Corso" heißt Umzug/Promenade, das Ritual ist eine Bühne,
 // kein Film. `movie` las sich wie ein Video-Archiv.
+//
+// `primary` (16. Sep 2026): Die Kamera ist der Kern-Act der App und bekommt
+// deshalb als einziger Tab einen eigenen, größeren weißen Kreis, der oben über
+// die Leiste hinausragt. Sie trägt bewusst KEIN Badge — was man aufnimmt,
+// entscheidet man selbst, da gibt es nichts „Ungesehenes".
 const TABS = [
   { to: "/" as const, label: "Stadt", icon: "explore", badge: "discovery" as const },
   { to: "/story" as const, label: "Corso", icon: "festival", badge: "story" as const },
-  { to: "/record" as const, label: "Kamera", icon: "photo_camera" },
+  { to: "/record" as const, label: "Kamera", icon: "photo_camera", primary: true },
   { to: "/circle" as const, label: "Circle", icon: "group", badge: "circle" as const },
   { to: "/feedback" as const, label: "Du", icon: "person" },
 ];
@@ -53,6 +59,12 @@ function BottomNav() {
   // 🔒 Punkt, keine Zahl — wie bei den anderen beiden Tabs.
   const { hasUnread } = useCircleInbox();
   const dots = { ...unseen, circle: hasUnread };
+  // Beim Scrollen zieht sich die Leiste ein Stück zusammen und gibt den Blick
+  // auf den Moment frei; sobald es still wird, wächst sie zurück (Vorbild
+  // Revolut, Wunsch Dominik 16. Sep 2026). Woher das Signal kommt — ein
+  // Capture-Listener für alle Scroll-Container, die Feeds eingeschlossen —
+  // steht in `lib/scroll-activity.ts`.
+  const isScrolling = useIsScrolling();
 
   // Sicherheitsnetz gegen hängengebliebene Overlay-Locks: Radix-Sheets und der
   // vaul-Drawer setzen `pointer-events: none` am <body> und räumen es bei
@@ -68,10 +80,66 @@ function BottomNav() {
       className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none px-4"
       style={{ paddingBottom: "max(env(safe-area-inset-bottom, 0px), 24px)" }}
     >
-      <div className="pointer-events-auto inline-flex items-center gap-1 p-1.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl">
+      <div
+        className="pointer-events-auto inline-flex items-center gap-1 p-1.5 rounded-full bg-black/60 backdrop-blur-xl border border-white/10 shadow-2xl"
+        style={{
+          // Bewusst `transform` und nicht Höhe/Padding: Layout-Animationen
+          // rechnen in jedem Frame das Flexbox-Layout neu, `transform` läuft
+          // im Compositor. Nur so bleibt es auch während eines laufenden
+          // Video-Feeds glatt. Ankerpunkt unten, damit der Abstand zum
+          // Bildschirmrand gleich bleibt.
+          transform: isScrolling ? "scale(0.86)" : "scale(1)",
+          transformOrigin: "bottom center",
+          // Zwei Dauern, kein Versehen: Das Zusammenziehen soll der Geste
+          // sofort folgen, das Zurückwachsen bewusst weich auslaufen. Eine
+          // symmetrische Kurve fühlte sich beim Loslassen zäh an.
+          transition: isScrolling
+            ? "transform 170ms cubic-bezier(0.4, 0, 0.2, 1)"
+            : "transform 420ms cubic-bezier(0.22, 1, 0.36, 1)",
+          willChange: "transform",
+        }}
+      >
         {TABS.map((item) => {
           const isActive = pathname === item.to;
           const showDot = !isActive && item.badge != null && dots[item.badge];
+
+          // Der Kamera-Knopf: größerer weißer Kreis, der oben über die Leiste
+          // hinausragt. Er ist ABSOLUT positioniert, der Platzhalter daneben
+          // hält nur seine Breite frei — läge der Kreis im Fluss, würde die
+          // Leiste auf seine 56 px aufgeblasen und die schmale Pillenform
+          // ginge verloren. Anders als die übrigen Tabs wechselt er im aktiven
+          // Zustand nicht die Farbe (er ist immer weiß); dass man auf dem
+          // Kamera-Screen steht, zeigen das gefüllte Icon und der Halo.
+          if (item.primary) {
+            return (
+              <span key={item.to} className="relative inline-flex h-10 w-14 shrink-0">
+                <span className="absolute bottom-0 left-1/2 h-14 w-14 -translate-x-1/2">
+                  {/* Siehe Haptik-Hinweis unten — hier gilt dasselbe. */}
+                  <HapticTapTarget
+                    label={`Tab ${item.label}`}
+                    onTap={() => void navigate({ to: item.to })}
+                    className="rounded-full"
+                  />
+                  <Link
+                    to={item.to}
+                    preload="render"
+                    aria-label={item.label}
+                    className={`flex h-14 w-14 items-center justify-center rounded-full bg-white text-black shadow-lg shadow-black/40 transition-all ${
+                      isActive ? "outline-2 outline-offset-[3px] outline-white/40" : ""
+                    }`}
+                  >
+                    <span
+                      className="material-symbols-outlined text-[26px] leading-none"
+                      style={{ fontVariationSettings: isActive ? "'FILL' 1" : "'FILL' 0" }}
+                    >
+                      {item.icon}
+                    </span>
+                  </Link>
+                </span>
+              </span>
+            );
+          }
+
           return (
             // ACHTUNG, nicht offensichtlich: Der Haptik-Schalter in den
             // Einstellungen schaltet hier auch den NAVIGATIONSWEG um. Ist die
