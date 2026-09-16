@@ -1,10 +1,165 @@
 # Scroll-Umbau: vom JS-Feed zum nativen Scrollen
 
-**Status:** geparkt, noch nicht begonnen
-**Angelegt:** 4. September 2026
+**Status:** ✅ **umgesetzt, live und am iPhone abgenommen** (16. September 2026).
+Noch **nicht committet** — Stand der Umsetzung und Testergebnis: Abschnitt 0.
+**Angelegt:** 4. September 2026 (als Konzept, danach bis 16. Sep geparkt)
 **Auslöser:** Dominik, nach dem Test am iPhone — „ich kenne halt Apps, wo es einfach
 flüssiger aussieht, mehr fps quasi"
 **Betrifft:** die zentrale Interaktion der App (Discovery, Ich folge, Stadt Corso, Circle)
+
+---
+
+## 0. Umsetzung (16. September 2026)
+
+> Die Abschnitte 1–11 sind das **ursprüngliche Konzept** und bleiben als
+> Begründung stehen. Wo die Umsetzung davon abweicht, steht es hier. Maßgeblich
+> für den heutigen Stand ist der Code, nicht die Schritt-Liste in Abschnitt 5.
+
+### Was gebaut wurde
+
+| Datei | Änderung |
+|-------|----------|
+| `src/styles.css` | Neue Klassen **`snap-feed`** (Container) und **`snap-feed-slide`** (Kachel) — die einzige Definition des Zielbilds aus Abschnitt 4, für alle vier Feeds gleich. Zusätzlich `overflow-x: hidden` (rausfliegende Swipe-Karten erzeugen sonst Quer-Scroll), `overflow-anchor: none` (siehe unten), ausgeblendete Scrollbar. |
+| `src/hooks/use-snap-scroll.ts` | Neu geschrieben: **726 → 451 Zeilen** (Stand `1e070b2` → heute). Keine Feder, kein Gummiband, kein Momentum, kein Wheel-Handler, kein `axis`-Parameter, kein `realign`, kein `SNAP_MS`. |
+| `discovery-feed.tsx`, `following-feed.tsx`, `story.tsx`, `circle.tsx` | Slides stehen im Fluss (`snap-feed-slide`) statt absolut mit `zIndex`. Seitenpunkte, Corso-Pille und Wisch-Hinweis liegen **außerhalb** des Scrollers, sonst scrollten sie mit. |
+
+Der Hook macht nur noch vier Dinge:
+
+1. **Aktiver Index** (`currentIndex`): `IntersectionObserver`, `threshold: 0.5`,
+   `root` = Container — wie in Schritt 2 geplant.
+2. **Ende der Bewegung** (`settledIndex`): `scrollend` plus Ruhe-Timer. Ohne
+   `scrollend` sind es 120 ms, mit `scrollend` 250 ms als reines
+   Sicherheitsnetz, weil nicht jede Engine nach einem harten `scrollTop`-Sprung
+   ein `scrollend` meldet. Als „steht" gilt eine Position erst, wenn sie auf
+   ±2 px auf einer Kachel liegt und kein Finger mehr aufliegt.
+3. **Quer-Wisch und Tipp** aus **Pointer-Events** (siehe Abweichungen).
+4. **Die sichtbare Kachel festhalten**, wenn sich die Liste darüber ändert
+   (Fallstrick 4, siehe Abweichungen).
+
+### Die Fallstricke — wie sie gelöst sind
+
+| # | Fallstrick | Lösung |
+|---|------------|--------|
+| 1 | Swipe-Follow neben nativem Scrollen | `touch-action: pan-y` auf Container und Kacheln. Kein `preventDefault`, alle Listener passiv. Beginnt der Browser vertikal zu scrollen, schickt er `pointercancel` — der Achsen-Lock liegt damit beim Browser. **Am iPhone bestätigt.** |
+| 2 | Choreografien an fester Dauer | `snapTo(i, onSettled)` — der Callback läuft erst, wenn die Bewegung wirklich steht. Discovery (Folgen) und „Ich folge" (Entfolgen) nehmen die Kachel erst dann aus der Liste. Der Timer `SWIPE_EXIT_MS` bleibt, weil das Rausfliegen der Karte eine CSS-Transition mit fester Dauer ist. `SNAP_MS` ist gestrichen. |
+| 3 | `scrollend` ist neu | Ruhe-Timer als Ersatz (siehe oben). **Nicht gemessen:** ob das Pilot-iPhone `scrollend` meldet — beide Wege führen zum selben Ergebnis. |
+| 4 | Element entfernen verschiebt das Bild | Eigenes Festhalten in einem `useLayoutEffect`, der nach jedem Commit **vor dem Malen** läuft: Hat sich die zuletzt ruhende Kachel verschoben, springt `scrollTop` unsichtbar mit. Läuft nie, solange ein Finger aufliegt oder der Feed sich bewegt. **Am iPhone bestätigt** (kein Sprung nach Folgen/Entfolgen). |
+| 5 | Kacheln exakt gleich hoch | `height: 100%` vom Container. Dazu ein `ResizeObserver`, der im Ruhezustand auf den Index nachzieht, falls die Browser-Leiste die Höhe ändert. |
+| 6 | Backlog #23 (klebt zwischen zwei Momenten) | Die Ursache `getDim()` gibt es nicht mehr. **Nicht gezielt nachgetestet** — siehe „Noch offen". |
+| 7 | Video-Dekodierung | Medien-Fenster jetzt **auch in „Ich folge", Corso und Circle** (vorher liefen dort alle Videos gleichzeitig). **Nachgeschärft am selben Abend** (`lib/feed-media-window.ts`): Beim schnellen Wischen hinkte das Fenster am `settledIndex` hinterher, die Zielkachel wurde erst nach dem Stillstand geladen (~0,5 s schwarz). Jetzt richtet sich das Einbauen sofort nach dem aktiven Index, 3 Kacheln in Bewegungsrichtung voraus und 1 zurück. Abgebaut wird erst im Stillstand. Die nächsten 2 Videos werden **vorgewärmt** (einmal stumm `play()` → `pause()`), weil iOS mit `preload="auto"` allein nichts vorlädt. Dazu `#t=0.001` an der Quelle für ein erstes Bild. Discovery lädt 8 statt 3 Kacheln vor dem Ende nach. |
+
+### Abweichungen vom Konzept — bewusst
+
+- **Pointer-Events statt Touch-Events** für Quer-Wisch und Tipp. Das
+  `pointercancel` beim Scroll-Start ist genau das Signal, das der Achsen-Lock
+  braucht. Die Maus am Desktop läuft über denselben Pfad, der eigene
+  Maus-Drag-Effekt ist weg.
+- **Es gibt einen `scroll`-Listener** — entgegen Schritt 2. Er ist passiv und
+  setzt nur ein Flag plus den Ruhe-Timer. Der Index wird **nicht** daraus
+  berechnet. Das kostet nichts am Compositor, weil passive Listener das
+  Scrollen nicht aufhalten.
+- **`overflow-anchor: none` statt Browser-Scroll-Anchoring.** Chrome hätte es,
+  bei Safari ist die Unterstützung unsicher. Das eigene Festhalten (Fallstrick 4)
+  verhält sich auf allen Engines gleich.
+- **Automatisches Festhalten ändert ein Verhalten:** Sortiert ein Refetch neue
+  Momente oben in Discovery ein, bleibt man jetzt bei der Person, die man gerade
+  ansieht. Vorher wechselte der Inhalt unter dem Finger.
+- **`realign(i)` gibt es nicht mehr** (Schritt 5) — das Festhalten ersetzt es,
+  die Feeds rufen nichts mehr nach.
+- **`use-swipe-follow.ts` ist unverändert.** Die Schnittstelle `onSwipeX` bleibt,
+  die in Abschnitt 7 angedachte Vereinfachung war nicht nötig.
+- **`TapInfo` trägt jetzt `rect`** (das Container-Rechteck). Die Feeds brauchen
+  dafür kein `containerRef.current` mehr.
+- **Ein Tipp, der eine laufende Scroll-Bewegung anhält, zählt nicht als Tipp** —
+  sonst blätterte das Anhalten eines Flicks nebenbei die Sequenz weiter.
+- **Der Container ist State, kein reiner Ref** (Callback-Ref). Mehrere Screens
+  mounten ihn erst später (Ladezustand, leer → besetzt). Die alte Fassung hängte
+  dort ihren `ResizeObserver` nie an (Befund einer Parallel-Session).
+- **Die BottomNav** (schrumpft beim Scrollen, `lib/scroll-activity.ts`, Arbeit
+  einer Parallel-Session vom selben Tag) hörte beim alten Hook auf ein eigenes
+  `pingScrollActivity()`. Das ist raus: Der native Feed feuert echte
+  `scroll`-Events, die der Capture-Listener am Dokument ohnehin bekommt.
+
+### Nachtrag: Quer-Wisch während des Einrastens (16. Sep 2026, spät)
+
+**Befund (Dominik, iPhone):** Setzt man den Finger auf, während der Feed nach
+einem Wisch noch einrastet, lässt sich die nächste Kachel nicht quer wischen —
+der Feed scrollt stattdessen weiter. **Ursache:** iOS gibt eine Berührung auf
+einem noch laufenden Scroller direkt an den Scroll weiter. Unser Hook bekommt
+nur `pointercancel`, der Quer-Wisch kommt nie an. `touch-action: pan-y` greift
+in diesem Moment nicht. Der eigene Code hat nichts blockiert.
+
+**Lösung: Schutzfläche** (`snap-feed-shield` in `styles.css`, gesteuert von
+`use-snap-scroll`). Eine unsichtbare Fläche neben dem Scroller mit
+`touch-action: none` ist **nur aktiv, solange der Feed ohne Finger nachläuft**
+(Momentum, Einrasten, `snapTo`), und nur nach Touch-Eingabe. Am Desktop würde
+sie sonst das Mausrad blockieren. Eine Berührung landet dann dort statt im
+Scroller:
+
+- **quer** → Swipe-Follow auf der Kachel, auf die der Feed gerade zuläuft,
+- **senkrecht** → ein Schritt weiter oder zurück per `snapTo`. Bewusst kein
+  Mitziehen am Finger: Das ginge nur per JS-Scroll.
+- **Tipp** → zählt nicht, wie schon vorher beim Anhalten einer Bewegung.
+
+Aus ist sie, sobald die Bewegung steht, spätestens nach 1,2 s
+(Sicherheitsnetz). Eine Geste, die auf ihr begonnen hat, läuft auf ihr zu Ende.
+Sie liegt auf z 15, unter den Bedienelementen der Screens (ab z 20). Während
+des Nachlaufens (~0,3 s) sind Menü- und Ton-Knopf auf der Kachel kurz nicht
+antippbar.
+
+✅ **Am iPhone abgenommen (Dominik, 16. Sep spät):** WebKit gibt die Berührung
+der Fläche und nicht dem laufenden Scroller, so wie angenommen. Getestet und
+bestätigt:
+
+| Test | Ergebnis |
+|------|----------|
+| Schnell mehrere Kacheln hintereinander — Momente sofort da (Vorladen, Fallstrick 7) | ✅ |
+| Direkt nach dem Loslassen quer wischen — Folgen klappt, kein Weiterscrollen | ✅ |
+| Direkt nach dem Loslassen senkrecht nachwischen — genau eine Kachel weiter | ✅ |
+| Normales Scrollen im Ruhezustand unverändert | ✅ |
+| Login und „Ich folge" nach dem Deploy (mit Änderungen einer Parallel-Session an `auth-context`/`follow-context`) | ✅ |
+
+### Nebenwirkung, die man kennen muss
+
+Die Feeds sind jetzt **native Scroller** wie Rücklauf und Einstellungen. Damit
+betrifft sie auch der WebKit-Bug 222654 (Wischgeste „latcht" in der
+installierten PWA aufs Dokument). Der Workaround `html, body { height: 100%;
+overflow: hidden }` in `styles.css` ist deshalb jetzt **tragend für die ganze
+App** — nicht entfernen. Details: `docs/STATUS.md`, Chronik vom 2. September.
+
+### Deploy und Abnahme
+
+- **Deployed:** 16. Sep 2026, ~21:55 (`bash scripts/deploy.sh`, Deployment
+  `e46d9755`). Mit ausgeliefert wurde die nicht committete BottomNav-Arbeit der
+  Parallel-Session (schrumpfende Leiste, größerer Kamera-Knopf).
+- **Vorher ein Fehlalarm, der sich lehrreich wiederholen kann:** Der Umbau lag
+  lokal fertig vor, der Live-Stand war aber noch der alte Hook. Das Gefühl
+  „hat sich nichts geändert" kam daher. Prüfweg: Im ausgelieferten
+  `use-snap-scroll-*.js` darf **kein** `passive:!1` stehen, und die geladene
+  `styles-*.css` muss `snap-feed` enthalten.
+- **Am iPhone abgenommen (Dominik, 16. Sep abends)** gegen `corso-app.pages.dev`
+  (ob installierte PWA oder Safari-Tab, ist nicht festgehalten):
+
+| Test | Ergebnis |
+|------|----------|
+| Langsam ziehen, in der Mitte halten — beide Momente sichtbar, weiches Einrasten erst beim Loslassen | ✅ |
+| Kurzer schneller Wisch — genau eine Kachel weiter | ✅ |
+| Rechts-Wisch zum Folgen — Feed scrollt nicht mit, kein Sprung danach | ✅ |
+| Tipp-Zonen (links zurück, rechts weiter) | ✅ |
+| BottomNav schrumpft beim Wischen in Stadt und Corso | ✅ |
+| Obere Kachel wechselt beim Halten in der Mitte **nicht** ihr Bild | ✅ (war als Risiko vermutet, tritt nicht auf) |
+
+### Noch offen
+
+- **Backlog #23** (von Stadt weg und zurück → klebt zwischen zwei Momenten)
+  gezielt nachtesten. Die Ursache ist entfallen, bewiesen ist es nicht.
+- **Nachlade-Grenze** in Discovery (~alle 20 Kacheln) mit vollem Feed — am
+  Testabend war der Feed dafür vermutlich zu kurz.
+- **Entfolgen per Links-Wisch** in „Ich folge" und **Circle** wurden nicht
+  einzeln abgefragt.
+- **Messung mit dem Safari Web Inspector** (Abschnitt 9) ist nicht gemacht —
+  die Abnahme ist Gefühl am Gerät, keine Timeline.
+- **Commit** steht aus.
 
 ---
 
@@ -41,9 +196,12 @@ nativen Apps nicht zu schließen. Kein Federparameter der Welt ändert das.
 
 ---
 
-## 3. Was bereits gemacht ist — bitte nicht wiederholen
+## 3. Was vor dem Umbau gemacht war
 
-Alles Folgende ist **live** und hat das Ruckeln messbar reduziert, aber das
+> *Stand 4. September. Was „entfällt" markiert ist, ist seit dem 16. September
+> tatsächlich weg; A2 und C gelten weiter.*
+
+Alles Folgende war **live** und hat das Ruckeln messbar reduziert, aber das
 fps-Thema nicht gelöst. Es war trotzdem nicht umsonst: Die Punkte 1–3 bleiben
 auch nach dem Umbau relevant.
 
@@ -83,6 +241,8 @@ dann ebenfalls nicht mehr über Kacheln hinwegfliegen.
 ---
 
 ## 5. Schritte
+
+> *Ursprünglicher Plan. Umgesetzt mit den Abweichungen aus Abschnitt 0.*
 
 1. **Slides umbauen:** absolut positionierte, per `transform` bewegte Slides →
    normale, im Fluss stehende Kinder eines scrollbaren Containers.
@@ -206,7 +366,10 @@ gilt die Tabelle nicht mehr.
 
 ## 7. Was wegfallen kann
 
-`use-snap-scroll.ts` hat aktuell **688 Zeilen**. Nach dem Umbau bleibt davon
+> *Erledigt am 16. Sep: 726 → 451 Zeilen. Das „Viertel" war zu optimistisch —
+> Swipe-Gesten, Tipp und das Festhalten der Kachel sind im Hook geblieben.*
+
+`use-snap-scroll.ts` hatte damals **688 Zeilen**. Nach dem Umbau bleibt davon
 schätzungsweise ein Viertel — im Wesentlichen Index-Ermittlung und das
 Video-Fenster.
 
@@ -242,6 +405,8 @@ horizontalen Gesten dann direkt statt über den Umweg `onSwipeX`.
 
 ## 9. Testen
 
+> *Ergebnis der Abnahme vom 16. Sep: Abschnitt 0.*
+
 Erst sinnvoll, wenn genug Momente im Feed liegen — realistisch **nach 21:00**,
 wenn die Pilot-Gruppe gepostet hat. Mit zwei, drei Kacheln lässt sich Scrollen
 nicht beurteilen.
@@ -270,6 +435,8 @@ zwischendurch.
 ---
 
 ## 11. Vor dem Start beachten
+
+> *Gilt für jede weitere Änderung an den Feeds genauso.*
 
 Am Repo arbeiten regelmäßig **mehrere Claude-Sessions parallel**. Vor Änderungen
 an `use-snap-scroll.ts`, den Feeds oder `use-swipe-follow.ts` per `ListAgents`

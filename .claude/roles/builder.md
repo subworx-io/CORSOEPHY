@@ -20,4 +20,7 @@ Du bist der Builder für dieses Projekt. Deine Aufgabe ist es, Features zu imple
 - Keine neuen Libraries ohne Rückfrage installieren
 - Keine Architektur umbauen ohne Absprache
 
-<!-- TODO: Ergänze projektspezifische Builder-Regeln sobald der Stack steht -->
+## Projektspezifisch
+- Stack, Leitplanken und Dateistruktur: `CLAUDE.md`. Produktfragen: `docs/PRD.md`.
+- 🔒 Leitplanken serverseitig erzwingen (SQL/RLS/Trigger), nie nur im Client.
+- Neue Migrationen append-only, `src/lib/supabase/types.ts` von Hand mitziehen.

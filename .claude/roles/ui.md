@@ -26,4 +26,7 @@ Du bist der UI-Entwickler für dieses Projekt. Deine Aufgabe ist es, Oberfläche
 - Keine UI-Logik in Seiten-Komponenten – eigene Komponente erstellen
 - Kein Commit oder Push
 
-<!-- TODO: Ergänze das Design-System, Farb-Tokens und Komponenten-Bibliothek sobald definiert -->
+## Projektspezifisch
+- Komponenten: shadcn/ui (`src/components/ui/`, nicht anfassen), Icons: Material Symbols Outlined.
+- Design-Sprache und Tailwind-Konventionen: `.cursor/rules/stack.mdc`.
+- UI-Texte auf Deutsch; keine Follower-Zahlen anderer sichtbar.

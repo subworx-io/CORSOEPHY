@@ -78,4 +78,4 @@ Wir wissen, dass wir richtig liegen, wenn **sich Daily-Open-Rate, aktiver-Post-A
 | Tagesbegriff (Kalendertag) weicht vom App-Rhythmus (Corso-Tag) ab und verwirrt die Auswertung | Niedrig | Niedrig | Roh-`created_at` gespeichert → Tag jederzeit auf beide Arten rechenbar; Konvention dokumentieren |
 
 ---
-*Status: DRAFT — requirements only. Implementation planning pending via /plan.*
+*Status: UMGESETZT — `0018_events.sql` + `src/lib/events.ts`, PR #5 (20. Aug 2026). `chat_reached` feuert inzwischen bei jeder Circle-Bildung (PRD §4.8); `story_drawn` stammt aus der abgelösten Tagesziehung. Stand 16. Sep 2026.*

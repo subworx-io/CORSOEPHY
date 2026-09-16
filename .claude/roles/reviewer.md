@@ -34,4 +34,9 @@ Verwende diese Labels in deinen Reviews:
 - Kein Commit oder Push
 - Keinen Code direkt ändern – nur reviewen und Empfehlungen geben
 
-<!-- TODO: Ergänze projektspezifische Review-Kriterien sobald der Stack und die Architektur stehen -->
+## Projektspezifische Kriterien
+- [ ] Keine Follower-/Reaktions-Zahlen anderer Nutzer lesbar (auch nicht über neue RPC-Parameter)
+- [ ] Kein neuer Galerie-/`<input type="file">`-Pfad außerhalb des Circle-Chats
+- [ ] Verfall über `expires_at > now()`, Zeitlogik über `corso-day.ts`
+- [ ] Tipps im Snap-Container über `onTap`, nicht `onClick` (iOS)
+- [ ] Migration append-only, `types.ts` nachgezogen

@@ -23,7 +23,7 @@
 > - **Der Stadt Corso läuft kontinuierlich.** Die tägliche 21:00-Ziehung mit eingefrorener Auswahl ist ersetzt durch feste **Slots** (Start 10, über `app_config.corso_slot_count` skalierbar). Eine Belegung endet exakt dann, wenn ihr Moment 24 h alt wird; ein Cron-Lauf (jede Minute) rückt den nächsten passenden Moment nach. Kein Reset, kein Leerlauf, keine vorhersehbare Uhrzeit. §4.6 neu.
 > - **Der tägliche Prompt entfällt vollständig.** Es gibt keinen gemeinsamen Anlass mehr; der einzige Grund zu posten ist die Chance, dass ein Corso-Slot frei wird und der eigene Moment nachrückt. §4.2 gestrichen, §1/§4.9/§5 entsprechend. Die Tabellen `prompts`/`daily_prompt` bleiben als Pilot-Historie in der DB liegen, der Client liest sie nicht mehr. Damit entfällt bewusst auch die Auswertung „welcher Prompt treibt Momente" (`prompt_performance`).
 > - **Mehrere lebende Momente pro Person erlaubt** (kippt die bisherige Regel in §4.1). Nötig, damit ein neuer Post den bereits laufenden Corso-Slot desselben Menschen nicht herausreißt. Pro Person steht weiterhin nur EIN Moment im Corso; Discovery und „Ich folge" zeigen weiterhin EINE Kachel pro Person (den neuesten Moment).
-> - **Neuer Screen „Profil"** (`/p/$handle`): alle lebenden Momente eines Menschen, durchswipebar. Einstieg per Tipp auf den Handle — bewusst keine neue Geste, weil in den Feeds beide Achsen belegt sind.
+> - **Neuer Screen „Profil"** (`/p/$handle`): alle lebenden Momente eines Menschen, durchswipebar. Einstieg per Tipp auf den Handle — bewusst keine neue Geste, weil in den Feeds beide Achsen belegt sind. *(Noch am selben Tag durch v0.7 abgelöst: kein Tap-Einstieg mehr, `/p/$handle` ist nur noch Deep-Link-Ziel.)*
 > - **Gestrichen:** die Regel „ein gezogener Moment bleibt bis zu ~48 h sichtbar". Eine Corso-Belegung endet jetzt exakt mit den 24 h des Moments.
 > - **Push:** Ritual-Push (21:01) und Vorab-Push (20:45) abgeschaltet. Neu: persönlicher Push **„Du stehst im Corso"**, wenn der eigene Moment nachrückt. Das Thema „was passiert um 21 Uhr als Event" bleibt **bewusst geparkt** — es wurde kein Ersatz gebaut.
 > - **Unverändert:** `corso_day()` (21:00→21:00) bleibt intern tragend für den verdeckten Circle-Zähler, Anstups-Limit, Snapshots und Push-dedupe. Der Circle (§4.8) ist nicht angefasst.
@@ -86,7 +86,7 @@ Dating ist der **Ausgang**, nicht der Eingang. Diese Reihenfolge prägt jede Ent
 
 ### 4.1 Der "Moment"
 - Foto oder vertikales Video. Ein Foto-Moment kann aus **bis zu 5 live aufgenommenen Fotos** bestehen (im Feed als Stapel gezeigt). Aufnahme: **Tippen = Foto, Halten = Video** (ein Auslöser, kein Modus-Umschalter).
-- 🔒 **LEITPLANKE: Live-Kamera-Pflicht, kein Galerie-Upload.** Gilt für Foto wie Video (Fotos entstehen ausschließlich als Frame aus dem Live-Stream).
+- 🔒 **LEITPLANKE: Live-Kamera-Pflicht, kein Galerie-Upload.** Gilt für Foto wie Video (Fotos entstehen ausschließlich als Frame aus dem Live-Stream). Gilt für **Momente** — die einzige Ausnahme ist der private Circle-Chat (§4.8), physisch getrennt (eigener Bucket, eigenes Modul).
 - Mehrere Takes, **kein Schnitt, keine Filter, keine Beauty.**
 - **Kein Prompt, kein vorgegebener Anlass** *(geändert 9. Sep 2026 — vorher: täglicher Prompt)*. Der einzige Anlass zu posten ist die Chance, dass im Stadt Corso ein Platz frei wird und der eigene Moment nachrückt.
 - **Lebensdauer eines Moments: genau 24 h ab dem Upload.** Jeder Moment trägt seine eigene Uhr (`posts.expires_at = created_at + 24 h`), es gibt keinen stadtweiten Reset. Danach ist er überall weg — auch für den Autor.
@@ -191,8 +191,8 @@ Circle) keine Migration braucht.
     Moment. Grund: pro Person ist immer nur ein Platz belegt, und der höhere
     Durchsatz (≈15 statt 8 Einzüge/Tag) verteilt die Bühne auf mehr Menschen.
 - **Pro Person immer nur EIN Moment im Corso.** Ein neuer Post ersetzt den
-  laufenden Platz **nicht** — er lebt daneben (§4.1) und ist über das Profil
-  sichtbar.
+  laufenden Platz **nicht** — er lebt daneben (§4.1) und ist per In-Place-Blättern
+  erreichbar (im Corso selbst 🔒 nur, wenn auch er freigegeben ist).
 - **Kein Mindest-Schwellwert, kein Fake-Auffüllen** *(Entscheidung #6, 15. Juli,
   weiterhin gültig)*. Bei dünner Nutzerbasis stehen eben 3 von 10 Plätzen — ein
   Corso aus 3 echten Momenten ist richtig, einer aus 10 aufgefüllten falsch.
@@ -234,6 +234,12 @@ Ersetzt die frühere offene Verbindungs-Mechanik (Entscheidungen #2/#8).
 - **Chat:** lebt **ausschließlich im Circle** und ist erst nach Circle-Eintritt
   möglich. Kein eigenes Chat-Menü. Block sperrt Chat und Sichtbarkeit serverseitig
   in beide Richtungen.
+  - **Medien im Chat** *(Entscheidung Dominik, 9. Sep 2026)*: Text, Foto, Video,
+    Sprachnachricht, Antworten auf einzelne Nachrichten. **Galerie-Upload ist hier
+    erlaubt** — privater Eins-zu-eins-Raum ohne Publikum. 🔒 Die Ausnahme ist
+    physisch abgetrennt: eigener privater Bucket `chat-media` (Zugriff nur für die
+    beiden Partner), eigenes Modul, keine Berührung mit `posts`/`moments`. Chat-Inhalte
+    **verfallen nicht**. Migration `0035_chat_media_and_replies.sql`.
 - **Zweiter Eintrittsweg: persönliche Circle-Einladung** *(ergänzt 2. Sep 2026,
   spät — Entscheidung Dominik)*: Ein Nutzer kann einen persönlichen Link teilen
   (`/c/<token>`), der den Empfänger direkt in den gemeinsamen Circle bringt — am
@@ -258,7 +264,7 @@ Ersetzt die frühere offene Verbindungs-Mechanik (Entscheidungen #2/#8).
 | **laufend** | Content-Phase | Posten und Entdecken zu jeder Zeit; der Anlass ist der freie Platz, nicht die Uhrzeit |
 | ~~21:00~~ | ~~Ziehung + neuer Prompt~~ | **Entfallen.** Ersetzt durch die laufende Nachbesetzung |
 | ~~20:45~~ | ~~Vorab-Push + Countdown-Vorhang~~ | **Entfallen.** Cron abgestellt |
-| **19–22 Uhr (variabel)** | Privater Corso (Push) | `[ENTSCHEIDUNG OFFEN]` |
+| **19:00** | Privater Corso = Abend-Push | **Entschieden 16. Sep 2026** — ein Push täglich an alle mit Push: Absender ist die Stadt, ein leiser, verspielter Satz aus einer rotierenden Textbank (keine Wiederholung binnen 20 Tagen), Tipp führt in den Corso. 🔒 Nie ein Befehl, nie eine Zahl. Entfällt, wenn der 18:00-Push „Dein Publikum wird still" schon kam. Kein Ritual, keine Ziehung — das 21-Uhr-Event bleibt geparkt (`0036`) |
 
 > ⚠️ **Bewusst geparkt:** „Was passiert um 21 Uhr als Event?" — der alte Reset ist
 > entfernt worden, **ohne** einen Ersatz-Event zu bauen. Das ist keine Lücke,
@@ -286,9 +292,10 @@ Ersetzt die frühere offene Verbindungs-Mechanik (Entscheidungen #2/#8).
 6. **Circle** (beständige Partner-Leiste + moment-gated Feed + Chat; Ankündigungs-Splash bei neuem Circle)
 7. **Du** (bisheriger Rücklauf: private Bilanz + Self-Screen + Weg zu den Einstellungen)
 8. Settings / Safety
-9. **Profil** *(neu 9. Sep 2026, `/p/$handle`)* — alle lebenden Momente eines Menschen, horizontal durchswipebar. **Kein Nav-Punkt**, sondern eine Ansicht über allem: Einstieg per **Tipp auf den Handle** in Discovery, „Ich folge" und Corso.
-   - 🔒 **Gesten-Trennung:** In den Feeds sind beide Achsen belegt (vertikal = Moment wechseln, horizontal = folgen/entfolgen). Deshalb ist der Einstieg ein Tipp, keine Geste, und die Ansicht bringt ihren **eigenen Gesten-Container** mit. Darin: horizontal = zwischen den Momenten, Wisch nach unten = schließen, Tipp links/rechts = zurück/weiter. **Kein Follow-Wisch** — Folgen läuft hier über einen expliziten Knopf, damit dieselbe Geste nicht an zwei Orten Verschiedenes bedeutet.
+9. **Profil** *(`/p/$handle`, seit v0.7 nur noch Deep-Link-Ziel)* — alle lebenden Momente eines Menschen. **Kein Nav-Punkt und kein Tap-Einstieg aus den Feeds** (dort wird in place geblättert). Erreichbar nur über Links von außen: Push „Du stehst im Corso", geteilte Links.
+   - Innen dieselbe flache Sequenz wie auf jeder Kachel (Tipp rechts = weiter, linkes Drittel = zurück, ein Fortschrittsbalken); schließen per X oder Wisch nach unten.
    - 🔒 Keine Follower-Zahl, kein Archiv: nur was gerade lebt.
+   - *(v0.6-Fassung — Einstieg per Tipp auf den Handle, horizontal durchswipebar — ist abgelöst.)*
 
 ### Kern-Flows
 - **A — Erster Besuch:** Onboarding → ID → Stadt Corso (wer steht gerade drauf?) → Discovery → folgen → optional ein eigener Moment.
@@ -366,12 +373,12 @@ Der Pilot läuft in zwei Schritten (siehe `docs/ROADMAP.md`):
 | 4 | Strukturierter Treffen-Vorschlag UI | **NEIN** ✓ |
 | 5 | Tech-Stack Pilot | **PWA** ✓ (native App nicht für Pilot) |
 | 6 | Frequenz/Größe des Stadt Corso | **NEU ENTSCHIEDEN (9. Sep 2026)** ✓ — laufend statt täglich, 10 Plätze (konfigurierbar), kein Minimum, kein Fake-Auffüllen (§4.6) |
-| 7 | Privater Corso (Push 19–22 Uhr) — genaue Mechanik | offen |
-| 11 | „Was passiert um 21 Uhr als Event?" | **BEWUSST GEPARKT (9. Sep 2026)** — der Reset ist entfernt, ein Ersatz wurde absichtlich NICHT gebaut |
+| 7 | Privater Corso (Push 19–22 Uhr) — genaue Mechanik | **ENTSCHIEDEN (16. Sep 2026)** ✓ — täglicher Abend-Push um 19:00, rotierender Satz der Stadt, keine Zahl, kein Befehl (§ Tagesablauf, `0036`) |
 | 8 | Verbindungs-Trigger bei täglich-verfallenden Follows | **ENTSCHIEDEN (2. Sep)** ✓ — Circle-Schwelle: 5 Corso-Tage gegenseitig (konfigurierbar, versteckt), §4.8 |
 | 9 | Live-Kamera-Lösung für Telegram-Pilot | **HINFÄLLIG** ✓ (PWA + `getUserMedia`, kein Telegram) |
 | 10 | Mitigation Geschlechter-Asymmetrie | offen |
+| 11 | „Was passiert um 21 Uhr als Event?" | **BEWUSST GEPARKT (9. Sep 2026)** — der Reset ist entfernt, ein Ersatz wurde absichtlich NICHT gebaut |
 
 ---
 
-*Ende PRD v0.5 — Stand 2. September 2026.*
+*Ende PRD v0.7 — Stand 9. September 2026.*

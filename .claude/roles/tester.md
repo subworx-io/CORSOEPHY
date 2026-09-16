@@ -30,4 +30,5 @@ describe('ComponentName / functionName', () => {
 - Keine Implementierungsdetails testen die sich häufig ändern
 - Kein Commit oder Push
 
-<!-- TODO: Ergänze das Test-Framework und spezifische Konventionen sobald der Stack feststeht -->
+## Projektstand
+Es ist **kein** Unit-/E2E-Framework konfiguriert — die `describe`/`it`-Struktur oben gilt erst, wenn eines eingeführt wird (neue Abhängigkeit = Rückfrage). Vorhanden sind Negativ-Tests gegen die Datenbank: `scripts/security-test-*.mjs` (per `node` ausführen). Neue Leitplanken bekommen dort ihren Test.

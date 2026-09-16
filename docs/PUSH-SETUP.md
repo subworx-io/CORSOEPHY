@@ -1,10 +1,41 @@
 # Push in Betrieb nehmen
 
-Der Code steht vollständig (Migrationen 0016/0018/0019, `public/sw.js`,
-`src/hooks/use-push.ts`, `supabase/functions/send-push/`). Was fehlt, sind
-Zugangsdaten und ein Deploy. Fünf Schritte, danach klingelt es.
+> **Stand 16. September 2026: Push ist in Betrieb** (seit PR #6, 20. August). Diese Anleitung
+> bleibt als Referenz für eine Neueinrichtung (neues Projekt, neue Schlüssel) und für die
+> Fehlersuche unten.
 
-Bezug: `docs/ROADMAP.md` Phase 1, letzter offener Punkt.
+Der Code: Migrationen `0016`/`0018`/`0019` (+ spätere Anlässe in `0028`, `0031`, `0035`),
+`public/sw.js`, `src/hooks/use-push.ts`, `supabase/functions/send-push/`. Abend-Push: `0036`. Für eine
+Neueinrichtung braucht es Zugangsdaten und einen Deploy — fünf Schritte.
+
+**Aktive Anlässe** (Tabelle `push_outbox`, Spalte `kind`):
+
+| Anlass | Wann |
+|---|---|
+| `corso_entered` | „Du stehst im Corso" — der eigene Moment ist nachgerückt (seit `0031`) |
+| `new_moment` | eine gefolgte Person hat gepostet |
+| `audience_expiring` | „Dein Publikum wird still", täglich 18:00 Berlin |
+| `city_evening` | Abend-Push, täglich 19:00 Berlin (seit `0036`): Absender = Stadtname, Text aus `city_evening_lines`, Ziel `/story`. Entfällt für alle, die am selben Abend schon `audience_expiring` bekamen |
+| `circle_message` | neue Chat-Nachricht im Circle, nennt die Sorte, 🔒 nie den Inhalt |
+| `broadcast` | nur Dev-Menü (Test-Push) |
+| ~~`city_story`~~ / ~~`city_story_soon`~~ | abgeschaltet seit 9. Sep (21:01-Ritual-Push, 20:45-Vorab-Push) |
+
+### Texte des Abend-Pushes pflegen
+
+Die Bank liegt in `city_evening_lines` — kein Deploy nötig, nur SQL:
+
+```sql
+-- neuen Text aufnehmen (city NULL = jede Stadt; Ziffern lehnt die DB ab)
+insert into city_evening_lines (body, city) values ('Die Stadt …', null);
+-- Text aus der Rotation nehmen (nie löschen — die Ziehungs-Historie zeigt darauf)
+update city_evening_lines set active = false where body = 'Die Stadt …';
+-- welcher Satz lief wann
+select d.corso_day, d.city, l.body from city_evening_draws d
+  join city_evening_lines l on l.id = d.line_id order by d.corso_day desc;
+```
+
+🔒 Zahlwörter („zwei", „einmal") erkennt die Prüfung nicht — beim Schreiben selbst darauf achten.
+Testen: Dev-Menü → **Abend-Push an mich** (echter Titel, Tages-Text, Ziel — nur an dich).
 
 ---
 
@@ -31,7 +62,7 @@ node scripts/db-apply.mjs   # 0016, 0018, 0019
 ```
 
 - `0016` — Abo-Tabelle `push_subscriptions` + RLS
-- `0018` — Warteschlange `push_outbox`, die drei Anlässe, Cron-Jobs
+- `0018` — Warteschlange `push_outbox`, die ersten drei Anlässe, Cron-Jobs
 - `0019` — „Test-Push an mich" im Dev-Menü
 
 ## 3. Edge Function deployen
@@ -97,5 +128,5 @@ Dann auf dem iPhone:
 - **Anstupser-Rücklauf als Push** (PRD §121) — als Anlass zurückgestellt.
 - **Kein Push-Text enthält je eine Zahl.** Publikumsgröße und Zuschauer sind
   privat; ein Sperrbildschirm ist kein privater Ort.
-- **Kein Nachliefern verpasster Rituale.** Ein 21:00-Push, der um 7 Uhr morgens
-  ankommt, ist Müll — die Warteschlange verwirft Zeilen nach drei Stunden.
+- **Kein Nachliefern veralteter Meldungen.** Ein Push, der Stunden zu spät ankommt,
+  ist Müll — die Warteschlange verwirft Zeilen nach drei Stunden.

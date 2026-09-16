@@ -54,6 +54,10 @@ Ledger). Der Regelweg ist ab jetzt `migrate.mjs`.
 
 # TODO für dich — ohne diese Werte läuft der Workflow nicht
 
+> **Stand 16. September:** Die Punkte 1–4 und 6 sind erledigt und am 20. August durch einen
+> Preview- und einen Produktions-Lauf verifiziert. Offen ist nur Punkt 5 (Schlüssel rotieren)
+> und optional Punkt 7.
+
 ## 1. Repository-Secrets
 
 GitHub → Repo → **Settings → Secrets and variables → Actions → Secrets → New repository secret**
@@ -96,12 +100,13 @@ Nach heutigem Stand ist er dort bereits gesetzt (die Einladungs-Links funktionie
 live). Bitte einmal bestätigen: Cloudflare → Workers & Pages → corso-app → Settings
 → Variables and Secrets.
 
-## 4. Environment „production" (empfohlen, 1 Minute)
+## 4. Environment „production" ✅ entschieden (20. August)
 
-Settings → **Environments → New environment → `production`**. Der Workflow verweist
-schon darauf. Dort optional **Required reviewers** eintragen — dann muss ein Release
-bestätigt werden, bevor er läuft. Ohne diesen Schritt läuft der Workflow trotzdem,
-GitHub legt das Environment beim ersten Lauf selbst an.
+Der Workflow verweist auf das Environment `production`. **Entscheidung Dominik:
+bewusst ohne Protection Rules** — keine Required Reviewers, kein Wait Timer. Jeder mit
+Write-Rolle kann ohne Rückfrage deployen und migrieren (Details in `docs/STATUS.md`,
+„Keine Freigabe vorgeschaltet"). Wer das später ändern will: Settings → Environments →
+`production` → Required reviewers.
 
 ## 5. Schlüssel rotieren (überfällig, unabhängig vom Workflow)
 
@@ -119,7 +124,7 @@ mit der Produktions-DB in Deckung gebracht — **hier ist nichts mehr zu tun**:
   wurden mit `--mark-applied` verbucht, nicht erneut ausgeführt.
 - `0018_events.sql` aus PR #5 war **nicht** auf der DB — der Migrator hat sie
   angewendet (`events`-Tabelle, RLS an, keine Policy, `log_event()` steht).
-- Damit gilt: 23 Dateien im Repo, 23 im Ledger, nichts ausstehend.
+- Damit galt: 23 Dateien im Repo, 23 im Ledger, nichts ausstehend. *(Stand 16. Sep: 38 / 38.)*
 
 Prüfen kannst du das jederzeit mit `node scripts/migrate.mjs --list`.
 

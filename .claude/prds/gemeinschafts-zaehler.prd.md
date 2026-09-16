@@ -63,4 +63,4 @@ Wir wissen, dass wir richtig liegen, wenn **die Post-Rate der Stadt (geposteten 
 | Zähler wird als Challenge/Vanity-Metric gelesen und erzeugt Druck | Niedrig | Mittel | Keine Schwelle/kein Fortschritt; nur aggregiert, nie personenbezogen |
 
 ---
-*Status: DRAFT — requirements only. Implementation planning pending via /plan.*
+*Status: UMGESETZT — als Stadt-Zähler (Glas-Pille im Stadt-Screen), `0016_city_moment_counts.sql`, `src/lib/city/use-city-moment-counts.ts`. Stand 16. Sep 2026. Der „Problem“-Abschnitt spricht noch von den Ritual-Zeiten um 21:00 — die gibt es seit 9. Sep 2026 nicht mehr (PRD v0.6).*

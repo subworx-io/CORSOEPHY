@@ -84,4 +84,4 @@ Wir wissen, dass wir richtig liegen, wenn **Nutzer in ≤ 2 Taps melden/blockier
 | Follow-Auflösung/Nudge-Sperre übersehen → „Geist"-Verbindung bleibt | Mittel | Mittel | Beim Block atomar in einer Transaktion/Funktion: Follows löschen + Block setzen |
 
 ---
-*Status: DRAFT — requirements only. Implementation planning pending via /plan.*
+*Status: UMGESETZT — `0017_report_block.sql`, `src/components/moment-menu.tsx`, `src/lib/blocks/use-blocks.ts`. Stand 16. Sep 2026. „Stadt-Story“ heißt inzwischen „Stadt Corso“.*

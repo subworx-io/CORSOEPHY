@@ -32,7 +32,8 @@ bun run build                # Production Build
 bun run preview              # Build lokal vorschauen
 bun run lint                 # ESLint
 bun run format               # Prettier (semi: true, double quotes, printWidth 100)
-node scripts/db-apply.mjs    # Supabase-Migrationen aus supabase/migrations/ anwenden
+node scripts/migrate.mjs     # Ausstehende Migrationen anwenden + im Ledger verbuchen (Regelweg)
+node scripts/db-apply.mjs    # Einzelne Migration ohne Ledger — danach migrate.mjs --mark-applied!
 bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 ```
 
@@ -40,7 +41,7 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 - Kein Unit-/E2E-Framework konfiguriert. Vorhanden sind Security-Smoke-Tests: `scripts/security-test-*.mjs`.
 
 ### Kern-Mechaniken (nicht verhandelbar)
-- 🔒 Live-Kamera-Pflicht — kein Galerie-Upload, keine Filter (gilt für Foto UND Video)
+- 🔒 Live-Kamera-Pflicht — kein Galerie-Upload, keine Filter (gilt für Foto UND Video, für alle **Momente**). Einzige Ausnahme: Medien im privaten **Circle-Chat** (seit `0035`) — physisch getrennt über Bucket `chat-media` + `lib/circle/chat-media.ts`, das einzige `<input type="file">` steht in `circle-chat.tsx`. Diese Trennung nie aufweichen (kein Chat-Code in `posts`/`moments`, kein Galerie-Pfad in `record.tsx`)
 - 🔒 Follower-Zahlen sind für andere unsichtbar
 - 🔒 Kein Publikums-Verfall durch Zahlung verlängerbar
 - 🔒 Einwilligung pro Moment, ob für den Stadt Corso freigegeben
@@ -48,7 +49,8 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
 - Verfallendes Publikum: Follow = 24h **ab dem Follow** (individuelle Uhr pro Datensatz, kein stadtweiter Reset), danach aktiver Re-Entscheid; Erneuern ab 12h möglich
 - Moment = 24h ab dem Upload, danach überall weg. **Mehrere lebende Momente pro Person sind erlaubt** (seit `0032`)
 - **In-Place-Blättern (seit 9. Sep 2026, PRD v0.7):** Die Momente eines Menschen sind EINE flache Sequenz — Bilder einer Reihe und die Momente selbst sind gleichrangige Schritte, keine verschachtelten Ebenen. Tipp rechts = weiter (am Ende zur nächsten Person), Tipp linkes Drittel = zurück. **Keine Zwischenebene, kein Vollbild-Layer.** `/p/$handle` ist nur noch Deep-Link-Ziel — von einer Kachel führt kein Tap dorthin. Logik zentral in `hooks/use-moment-sequence.ts`, Balken in `components/moment-progress.tsx`
-- ⚠️ **`onClick` ist innerhalb eines Snap-Containers auf iOS unzuverlässig**: `use-snap-scroll` ruft `preventDefault()` auf `touchmove`, WebKit unterdrückt danach die Kompatibilitäts-Mausereignisse. Tipps dort **immer** über `onTap` des Snap-Hooks führen, nie über `onClick`
+- **Nativer Feed-Scroll (seit 16. Sep 2026, `docs/SCROLL_NATIV_UMBAU.md`):** Die vier Feeds scrollen per CSS Scroll Snap (Klassen `snap-feed` / `snap-feed-slide` in `styles.css`), nicht mehr per JS-`transform`. `use-snap-scroll` liefert nur noch Index, Quer-Wisch, Tipp und das Festhalten der sichtbaren Kachel. ⚠️ Im Feed **nie** `preventDefault()` auf Touch-Events und **nie** `passive: false` — sonst wartet der Compositor wieder auf JavaScript und der Gewinn ist weg. Choreografien hängen an `snapTo(i, onSettled)`, nicht an Timern. Overlays, die stehen bleiben sollen, gehören **neben** den Scroller
+- ⚠️ **Tipps in den Feeds immer über `onTap` des Snap-Hooks, nie über `onClick` auf der Kachel.** Der Hook ist die eine Stelle, die Tipp, Quer-Wisch und das Anhalten einer laufenden Scroll-Bewegung auseinanderhält. Ein `onClick` kennt diese Unterscheidung nicht und würde zwei Tipp-Wege schaffen. (Bis 16. Sep kam dazu, dass der alte Hook per `preventDefault()` die click-Ereignisse auf iOS ganz verschluckte.) Echte Bedienelemente (`button`, `a`) auf der Kachel behalten ihr `onClick` — `isControlTap` nimmt sie vom Blättern aus
 - **Laufender Corso (seit 9. Sep 2026, `0031`):** feste Platzzahl (`app_config.corso_slot_count`, Default 10), eine Belegung endet exakt mit den 24h ihres Moments, `refill_corso()` besetzt per pg_cron **jede Minute** nach. Pro Person immer nur EIN Moment im Corso — ein neuer Post verdrängt den laufenden Platz nicht. Kein 21-Uhr-Reset, **kein Prompt**, und „was um 21 Uhr als Event passiert" ist bewusst **geparkt** (nichts dafür bauen)
 - ⚠️ **`corso_day()` (21:00→21:00) bleibt trotzdem** — sie trägt den verdeckten Circle-Zähler, das Anstups-Limit, `reach_snapshots` und alle Push-`dedupe_key`s. Nicht entfernen, nur nicht mehr anzeigen
 - **Zwei Achsen (seit 2. Sep 2026, PRD §4.4/§4.8):** Achse 1 „Stadt" (Discovery + „Ich folge", flüchtige Follows; sichtbar nur wer einen lebenden Moment hat) · Achse 2 „Circle" (beständig, gegenseitig, entsteht serverseitig nach 5 Corso-Tagen gegenseitigen Folgens — Default via `app_config`, verfällt nie, unbegrenzt; zweiter Eintrittsweg: persönlicher Einladungs-Link `/c/<token>`, Migration 0026)
@@ -69,13 +71,13 @@ bash scripts/deploy.sh       # Deploy nach Cloudflare Pages (nur auf Ansage)
   Grund: `bun.lock` ist seit `d5acfe4` verwaist (es fehlt u. a. `@supabase/supabase-js`),
   `package-lock.json` dagegen vollständig. Wer `package.json` anfasst, sollte **beide**
   Lockfiles nachziehen — sonst bricht der Release-Workflow an `npm ci`.
-- **Backend:** **Supabase** — Auth (Magic-Link), Postgres mit RLS, Storage (Bucket `moments`), pg_cron für die Zeit-Rituale. Migrationen liegen als nummerierte SQL-Dateien in `supabase/migrations/`.
+- **Backend:** **Supabase** — Auth (6-stelliger Login-Code / Magic-Link, Einladungs-Links), Postgres mit RLS, Storage (Buckets `moments` und privat `chat-media`), Realtime (Circle-Chat), pg_cron (`corso-refill` jede Minute, Push, Snapshots), Edge Function `send-push`. Migrationen liegen als nummerierte SQL-Dateien in `supabase/migrations/`.
 - **Deployment:** **Cloudflare Pages** (Worker-SSR), live auf `https://corso-app.pages.dev`. Einziger Befehl: `bash scripts/deploy.sh`.
 
 ### Wichtige Backend-Prinzipien
 - **Leitplanken werden serverseitig erzwungen, nicht im Client.** Der Einwilligung für den Stadt Corso-Filter, die Follower-Privatsphäre und der 24h-Verfall leben in SQL-Funktionen, Triggern und RLS-Policies. Eine UI-seitige „Lösung" für eine 🔒 Leitplanke ist keine.
-- **Kennzahl-Funktionen sind argumentlos.** `my_reach()` / `my_feedback()` sind `SECURITY DEFINER` ohne Parameter — es gibt bewusst keinen Weg, die Zahl eines *anderen* Users abzufragen. Nicht „für Debugging" einen Parameter ergänzen.
-- **Der service_role-Key gehört nicht in den Client und nach Möglichkeit nicht in den Edge.** Nur das Einlösen von Einladungs-Links braucht ihn noch.
+- **Kennzahl-Funktionen sind argumentlos.** `my_reach()` / `my_feedback()` sind `SECURITY DEFINER` ohne Parameter — es gibt bewusst keinen Weg, die Zahl eines *anderen* Users abzufragen. Nicht „für Debugging" einen Parameter ergänzen. Einzige Ausnahme: `my_moment_stats(post_id)` (`0033`/`0034`) — nimmt eine **Post-ID**, nie eine User-ID, und filtert als Erstes auf `author_id = auth.uid()`; fremde Momente liefern 0 Zeilen (Negativtest in `security-test-feedback.mjs`).
+- **Der service_role-Key gehört nicht in den Client und nach Möglichkeit nicht in den Edge.** Nur die beiden Einlöse-Pfade im Worker brauchen ihn noch: Einladungs-Links (`/invite/<token>`) und Circle-Einladungen (`/circle-join/<token>`).
 
 ## Dateistruktur
 
@@ -84,7 +86,10 @@ CORSO_EPHY/
 ├── docs/
 │   ├── PRD.md                # Product Requirements (Source of Truth — was & warum)
 │   ├── ROADMAP.md            # Bau-Reihenfolge nach Abhängigkeit (Phasen 0–3)
-│   └── STATUS.md             # Lebender Schnappschuss: aktueller Stand + nächster Schritt
+│   ├── STATUS.md             # Lebender Schnappschuss: aktueller Stand + nächster Schritt
+│   ├── RELEASE.md            # Release per GitHub Actions, Migrations-Ledger
+│   ├── PUSH-SETUP.md         # Web-Push einrichten + Fehlersuche
+│   └── SCROLL_NATIV_UMBAU.md # Nativer Feed-Scroll: Konzept + Umsetzung (Abschnitt 0, 16. Sep 2026)
 ├── src/
 │   ├── routes/               # file-based routing — Konventionen: src/routes/README.md
 │   │   ├── __root.tsx        # Root-Layout, BottomNav, QueryClientProvider, AuthGate, Splashes
@@ -93,6 +98,7 @@ CORSO_EPHY/
 │   │   ├── story.tsx         # Stadt Corso (Nav-Label „Corso"; LAUFEND, Swipe vertikal, PRD §4.6)
 │   │   ├── p.$handle.tsx     # Profil — NUR Deep-Link-Ziel (Push/geteilte Links), kein Tap-Einstieg aus den Feeds
 │   │   ├── circle.tsx        # Circle (Achse 2): Partner-Leiste + moment-gated Feed + Chat (circle-chat.tsx)
+│   │   ├── circle-redeem.$token.tsx # Circle-Einladung einlösen (hinter /c/<token>)
 │   │   ├── feedback.tsx      # „Du" (Rücklauf: private Bilanz + Self-Screen)
 │   │   ├── settings.tsx      # Einstellungen (Screen 10, bewusst minimal)
 │   │   ├── impressum|datenschutz|agb.tsx   # Rechts-Platzhalter (Gerüst: components/legal-page.tsx)
@@ -101,21 +107,36 @@ CORSO_EPHY/
 │   │   ├── auth-gate.tsx     # Login-Screen + Session-Gate
 │   │   ├── city-backdrop.tsx # Geblurrte s/w Düsseldorf-Clips (Leerzustand des Stadt Corso)
 │   │   ├── dev-menu.tsx      # Admin-Dev-Menü, NUR für dominik@subworx.io (serverseitig geprüft)
-│   │   ├── heart-burst.tsx, legal-page.tsx, photo-stack.tsx, video-tile.tsx
+│   │   ├── discovery-feed.tsx, following-feed.tsx # die beiden Feeds des Stadt-Screens
+│   │   ├── moment-progress.tsx, sequence-media.tsx # Balken + aktueller Schritt der Sequenz
+│   │   ├── circle-chat.tsx, chat-attachment.tsx, chat-reply-swipe.tsx # Circle-Chat
+│   │   ├── moment-menu.tsx   # Melden/Blockieren am Moment
+│   │   ├── onboarding-flow.tsx, circle-splash.tsx, push-optin-splash.tsx, city-story-hit-splash.tsx
+│   │   ├── swipe-follow-overlay.tsx, haptic-tap.tsx
+│   │   ├── heart-burst.tsx, legal-page.tsx, photo-stack.tsx, photo-review.tsx, video-tile.tsx
 │   │   └── ui/               # shadcn/ui Komponenten (nicht anfassen)
 │   ├── hooks/
 │   │   ├── use-camera.ts     # 🔒 getUserMedia + MediaRecorder — die Live-Kamera-Pflicht
-│   │   ├── use-snap-scroll.ts# Snap-Feed (vertikal = Person, horizontal = folgen) + onTap
+│   │   ├── use-snap-scroll.ts# Nativer Snap-Feed: aktiver/ruhender Index, Quer-Wisch (folgen), onTap, Kachel festhalten
 │   │   ├── use-moment-sequence.ts # 🔒 Die flache Sequenz einer Person — eine Quelle für alle Screens
+│   │   ├── use-swipe-follow.ts   # Quer-Wisch = folgen/erneuern/entfolgen
+│   │   ├── use-push.ts           # Web-Push-Abo
+│   │   ├── use-voice-recorder.ts # Sprachnachricht im Chat (nur Mikro)
+│   │   ├── use-pinch-zoom.ts, use-unseen-badges.ts
 │   │   └── use-mobile.tsx
 │   ├── lib/
 │   │   ├── auth-context.tsx  # Session + Profil (Vorsicht: Auth-Lock, siehe STATUS)
 │   │   ├── follow-context.tsx# Follow/Renew/Unfollow — alle Follow-DB-Writes zentral hier (Circle-Zähler hängt per DB-Trigger daran)
-│   │   ├── circle/           # use-circle.ts — Circle-Verbindungen, Partner-IDs, acknowledge
+│   │   ├── circle/           # use-circle.ts (Verbindungen, acknowledge), inbox-context.tsx (Chat live), chat-media.ts (🔒 Galerie-Ausnahme)
+│   │   ├── circle-invites/   # Circle-Einladungs-Links /c/<token> (Server-Teil)
+│   │   ├── blocks/           # use-blocks.ts — Blockieren
+│   │   ├── city/             # Stadt-Zähler
+│   │   ├── events.ts         # Metrik-Events (log_event)
+│   │   ├── haptics.ts        # Haptik (Android: vibrate; iOS: nur über HapticTapTarget)
 │   │   ├── corso-day.ts      # Der 21:00-Zyklusschnitt (intern, unsichtbar) — überall benutzen, nie neu berechnen
 │   │   ├── record-view.ts    # Anonyme Ansichten-Erfassung (500-ms-Verweil-Schwelle)
 │   │   ├── invites/          # ⚠️ Pilot-Provisorium: E-Mail-freie Einladungs-Links
-│   │   ├── supabase/         # client.ts, upload.ts, types.ts (handgepflegt!)
+│   │   ├── supabase/         # client.ts, server.ts, upload.ts, signed-urls.ts, types.ts (handgepflegt!)
 │   │   └── utils.ts
 │   ├── assets/               # .asset.json Lovable-Assets
 │   ├── styles.css            # Globale Tailwind-Styles
@@ -125,12 +146,15 @@ CORSO_EPHY/
 │   └── routeTree.gen.ts      # auto-generiert — nie von Hand editieren
 ├── supabase/
 │   ├── migrations/           # Nummerierte SQL-Migrationen (0001…) — Reihenfolge ist bindend
-│   ├── seed/                 # Prompt-Seeds (Historie — der Prompt ist seit 9. Sep 2026 abgeschafft)
+│   ├── functions/            # Edge Function send-push
+│   ├── seed/                 # Prompt-Seeds (Historie — der Prompt ist seit 9. Sep 2026 abgeschafft) + dev-moments/
 │   └── templates/            # Auth-E-Mail-Template (auth_email_de.html)
 ├── scripts/
 │   ├── deploy.sh             # Der einzige Deploy-Befehl
 │   ├── db-apply.mjs          # Migration anwenden (braucht SBP-Token)
+│   ├── migrate.mjs           # Migrationen mit Ledger (Regelweg, auch in CI)
 │   ├── make-invites.mjs      # Einladungs-Links erzeugen (lokal, service_role)
+│   ├── verify-corso-weighting.mjs # Simulation der Corso-Gewichtung
 │   └── security-test-*.mjs   # Negativ-Tests für die Privatsphäre-Leitplanken
 ├── public/                   # inkl. empty-bg-4…9.mp4 (~35 MB Hintergrund-Clips, in Git)
 ├── .claude/                  # Claude Code Konfiguration
@@ -163,4 +187,4 @@ CORSO_EPHY/
 - Keine `.env`-Datei anlegen oder befüllen ohne explizite Anweisung
 - Keine der 🔒 LEITPLANKEN aus dem PRD umgehen oder weichspülen
 - Keine Dummy-Daten in produktive Endpoints schreiben
-- Kein Galerie-Upload implementieren (egal wie klein der Scope klingt)
+- Kein Galerie-Upload implementieren (egal wie klein der Scope klingt) — die bestehende Chat-Ausnahme (s. o.) ist die einzige und wird nicht erweitert

@@ -21,6 +21,6 @@ diese Datei zuerst lesen. Danach der Reihe nach:
 
 Cursor-Nutzer: `.cursor/rules/*.mdc` werden zusätzlich automatisch geladen.
 
-Nicht verhandelbar (Details in `CLAUDE.md` / PRD): Live-Kamera-Pflicht (kein Galerie-Upload),
+Nicht verhandelbar (Details in `CLAUDE.md` / PRD): Live-Kamera-Pflicht für Momente (kein Galerie-Upload; einzige, physisch getrennte Ausnahme: der Circle-Chat),
 Follower-Zahlen für andere unsichtbar, `git commit`/`push` nur nach Rückfrage,
 keine neuen Abhängigkeiten ohne Rückfrage.

@@ -7,7 +7,9 @@ alwaysApply: true
 
 ## Package Manager
 
-**Bun** — nicht npm oder yarn. Immer `bun install`, `bun add`, `bun run`.
+**Bun** lokal — nicht yarn. Immer `bun install`, `bun add`, `bun run`.
+**Ausnahme CI/Release:** der Workflow fährt `npm ci` gegen `package-lock.json`, weil `bun.lock`
+verwaist ist. Wer `package.json` ändert, zieht **beide** Lockfiles nach (siehe `CLAUDE.md`).
 
 ## Frontend-Framework
 
@@ -26,7 +28,7 @@ alwaysApply: true
 
 ## Backend
 
-- **Supabase** (`@supabase/supabase-js`) — Auth (Magic-Link), Postgres + RLS, Storage, Cron.
+- **Supabase** (`@supabase/supabase-js`) — Auth (Login-Code / Magic-Link), Postgres + RLS, Storage, Realtime, Cron, Edge Function `send-push`.
 - Browser-Client: `src/lib/supabase/client.ts` (VITE_-Keys, öffentlich). Server-Client: `src/lib/supabase/server.ts` (service_role, nie ins Bundle).
 - DB-Schema = `supabase/migrations/`. Änderungen immer als neue Migration, nie am Live-Schema vorbei.
 
@@ -55,7 +57,7 @@ alwaysApply: true
 
 ## Verbotene Patterns
 
-- ❌ Kein `<input type="file">` — Corso erlaubt nur Live-Kamera (WebRTC)
+- ❌ Kein `<input type="file">` — Momente entstehen nur über die Live-Kamera (WebRTC). Einzige Ausnahme ist das bestehende Feld in `circle-chat.tsx` (privater Chat, eigener Bucket `chat-media`); kein weiteres anlegen
 - ❌ Keine Follower-Zahlen / Publikumsgröße sichtbar für andere Nutzer
 - ❌ Kein globaler Store (Redux, Zustand) ohne Absprache
 - ❌ Keine neuen Libraries ohne Rückfrage (`bun add` immer erst fragen)
@@ -82,5 +84,6 @@ Tailwind CSS v4 — utility-first.
 ## Testing
 
 Kein Unit-/E2E-Framework konfiguriert. Vorhanden sind Security-Smoke-Tests als
-Node-Skripte: `scripts/security-test-follows.mjs`, `scripts/security-test-feedback.mjs`
-(prüfen RLS-Härtung; per `node scripts/…` gegen eine Supabase-Instanz laufen lassen).
+Node-Skripte: `scripts/security-test-follows.mjs`, `security-test-feedback.mjs`,
+`security-test-circle.mjs`, `security-test-chat-media.mjs` (prüfen RLS-Härtung; per
+`node scripts/…` gegen eine Supabase-Instanz laufen lassen).

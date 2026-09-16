@@ -8,8 +8,8 @@ alwaysApply: true
 ## Überblick
 
 Corso ist eine **mobile-first Web-App** (TanStack Start, SSR-fähig).
-Aktueller Stand: Frontend **und** Supabase-Backend integriert (Auth via Magic-Link,
-Postgres mit RLS, Storage, Cron). Das DB-Schema ist die Source of Truth in
+Aktueller Stand: Frontend **und** Supabase-Backend integriert (Auth via Login-Code /
+Magic-Link / Einladungs-Link, Postgres mit RLS, Storage, Realtime, Cron, Edge Function für Push). Das DB-Schema ist die Source of Truth in
 `supabase/migrations/`. Reine Demo-Daten leben nur noch in `city-backdrop.tsx`
 und `story-empty-lab.tsx`.
 
@@ -19,14 +19,16 @@ Jede Datei in `src/routes/` wird automatisch zur Route:
 
 | Datei | Route | Screen |
 |---|---|---|
-| `__root.tsx` | Layout | BottomNav, QueryClientProvider, Error Boundaries |
-| `index.tsx` | `/` | Discovery-Screen — vertikaler Swipe durch Nutzer-Tiles + Countdown |
-| `record.tsx` | `/record` | Aufnahme — Live-Kamera + Tages-Prompt |
-| `story.tsx` | `/story` | Stadt-Story — **vertikaler** Swipe (UX wie Discovery, PRD §4.6), 21:00-Ritual |
-| `story-empty-lab.tsx` | `/story-empty-lab` | Empty-/Loading-States der Story (isoliert, Demo-Daten) |
-| `connections.tsx` | `/connections` | „Ich folge" + verdienter Chat (Chat = Phase 3) |
-| `feedback.tsx` | `/feedback` | Rücklauf — morgendliche Reichweite (privat) |
+| `__root.tsx` | Layout | BottomNav, QueryClientProvider, AuthGate, Splashes, Error Boundaries |
+| `index.tsx` | `/` | „Stadt" — Toggle Discovery ⇄ Ich folge (Feeds in `components/discovery-feed.tsx`, `following-feed.tsx`) |
+| `story.tsx` | `/story` | Stadt Corso — **laufend**, feste Plätze, vertikaler Swipe (PRD §4.6) |
+| `record.tsx` | `/record` | Kamera — Live-Kamera, Tippen = Foto, Halten = Video |
+| `circle.tsx` | `/circle` | Circle — Partner-Leiste, Momente der Partner, Chat |
+| `circle-redeem.$token.tsx` | `/circle-redeem/:token` | Circle-Einladung einlösen |
+| `feedback.tsx` | `/feedback` | „Du" — private Bilanz zum eigenen Moment + Self-Screen |
+| `p.$handle.tsx` | `/p/:handle` | Profil — **nur Deep-Link-Ziel** (Push, geteilte Links) |
 | `settings.tsx` | `/settings` | Einstellungen |
+| `story-empty-lab.tsx` | `/story-empty-lab` | Leerzustand des Stadt Corso (Sandbox, Demo-Daten) |
 | `impressum.tsx` · `datenschutz.tsx` · `agb.tsx` | `/impressum` … | Rechtstexte |
 
 **Neue Routes:** Immer als neue Datei in `src/routes/` anlegen. Kein manuelles Routing.
@@ -66,21 +68,25 @@ Route Component
 
 | Mechanik | Wo implementiert |
 |---|---|
-| Verfallendes Publikum (24h) | `supabase/migrations/0003_follows_expiry.sql` + `/feedback` |
-| Stadt-Story Auswahl (gedämpft) | `supabase/migrations/0005_city_story_draw.sql` + `/story` |
-| Live-Kamera Pflicht | `/record` — WebRTC/MediaRecorder, kein `<input type="file">` |
-| Verdienter Chat (3–4 Runden) | `/connections` + DB-Logik |
-| Follow (24h Ablauf) | `follow-context.tsx` + `0003_follows_expiry.sql` |
-| Reach-Grant / Sichtbarkeit | `0004_reach_grant_hardening.sql`, `0010_post_views_feedback.sql` |
+| Verfall (Moment + Follow, je 24 h ab Entstehung) | `0015_rolling_24h_expiry.sql` (Trigger, `expires_at > now()`) |
+| Follow / Erneuern / Entfolgen | `follow-context.tsx` (alle Writes zentral) + `use-swipe-follow.ts` |
+| Laufender Stadt Corso (gedämpfte Auswahl) | `0031_corso_running.sql` (`corso_slots`, `refill_corso()`, `corso_now()`) + `/story` |
+| Mehrere lebende Momente / In-Place-Blättern | `0032_multiple_living_moments.sql` + `hooks/use-moment-sequence.ts` |
+| Live-Kamera-Pflicht (Momente) | `/record` + `hooks/use-camera.ts` — kein Galerie-Pfad |
+| Circle + verdienter Chat | `0024_circle.sql` (verdeckter Zähler), `0026` (Einladungen), `0028` (Chat live), `0035` (Medien) + `/circle` |
+| Chat-Medien (🔒 einzige Galerie-Ausnahme) | Bucket `chat-media` + `lib/circle/chat-media.ts` + `circle-chat.tsx` |
+| Rücklauf / private Zahlen | `0017_feedback_two_forces.sql` (`my_feedback()`), `0033`/`0034` (`my_moment_stats`) + `/feedback` |
+| Report + Block | `0017_report_block.sql` + `moment-menu.tsx`, `lib/blocks/` |
+| Push | `0016`/`0018` + `public/sw.js`, `use-push.ts`, `supabase/functions/send-push/` |
+| Metrik-Events | `0018_events.sql` + `lib/events.ts` |
 
 ## Navigation
 
 BottomNav in `__root.tsx` mit 5 Tabs:
-Discovery → Story → Aufnahme → Ich folge (Connections) → Rücklauf (Feedback)
+Stadt (`/`) → Corso (`/story`) → Kamera (`/record`) → Circle (`/circle`) → Du (`/feedback`)
 
 ## Was noch fehlt (Stand: Pilot-Phase)
 
-- Push-Notifications (PWA, VAPID — Phase 1)
 - Stripe-Abo (zahlender Fremden-Pilot — nicht im MVP)
 - ID-Verifizierung (über Magic-Link-Auth hinaus)
 - Automatisiertes Test-Framework (nur `scripts/security-test-*.mjs` vorhanden)

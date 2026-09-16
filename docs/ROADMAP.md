@@ -1,6 +1,6 @@
 # Corso — Roadmap
 
-**Version:** 0.3 (Stand 9. September 2026)
+**Version:** 0.3 (Stand 9. September 2026, Status-Abgleich 16. September 2026)
 **Bezug:** Ergänzt das PRD (`docs/PRD.md`). Bei Konflikt gewinnt das PRD.
 **Zweck:** Priorisierte Bau-Reihenfolge vom aktuellen Klick-Prototyp zu einem mit Freunden teilbaren MVP.
 
@@ -12,24 +12,24 @@
 > tägliche Prompt sind abgeschafft; der Stadt Corso hat feste Plätze und besetzt laufend
 > nach (PRD v0.6 §4.6, Migrationen `0031`/`0032`). Für diese Roadmap heißt das:
 > - Der „Konsum-Loop end-to-end" aus Phase 1 gilt weiter, nur ohne Prompt und ohne Ritual-Uhrzeit.
-> - **Neu und ungetestet:** Profil-Screen `/p/$handle`, persönlicher Push „Du stehst im Corso".
+> - **Neu und am Gerät ungetestet:** In-Place-Blättern (PRD v0.7, `/p/$handle` nur noch Deep-Link-Ziel), persönlicher Push „Du stehst im Corso", Medien im Circle-Chat.
 > - **Die zentrale offene Wette:** Prompt und 21:00 waren die beiden Dinge, die die Stadt
 >   gleichzeitig aktiviert haben. Ob die ständige, leisere Chance auf einen freien Platz genug
 >   Zug erzeugt, entscheidet sich erst im Pilot an der Post-Rate (PRD §8, Risiko 5).
 > - „Was um 21 Uhr als Event passiert" ist **bewusst geparkt** — nichts dafür bauen.
 
-## Aktueller Stand (19. August 2026)
+## Aktueller Stand (16. September 2026)
 
-**Phase 0 ist abgeschlossen. Phase 1 ist zu ~60 % gebaut.**
+**Phase 0 ist abgeschlossen. Phase 1 ist feature-vollständig. Phase 2 ist weitgehend gebaut. Phase 3 ist in neuer Form (Circle) gebaut.**
 
-Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop läuft **ohne Mock**: posten → in Discovery erscheinen → folgen → in den Stadt Corso gezogen werden → private Zahl im Rücklauf. Alle 5 Kern-Screens plus ein minimaler Einstellungen-Screen (Screen 10) und drei Rechts-Platzhalterseiten existieren.
+Die App läuft live auf `https://corso-app.pages.dev` (Stand-Commit `1e070b2`, 9. Sep). Der Kern-Loop läuft **ohne Mock**: posten → in Discovery erscheinen → folgen → im laufenden Stadt Corso nachrücken → private Zahl im Rücklauf → Push bringt zurück. Dazu der Circle mit Chat (Achse 2).
 
-**Am 19. August gegen die Live-DB verifiziert:** Alle drei Server-Jobs laufen mit echten Daten — der Stadt Corso wurde am 1., 2. und 13. August real um 20:00 Berlin aus echten einwilligenden Momenten gezogen; der Reichweiten-Snapshot lief zuletzt heute Morgen; der Follow-Verfall stempelte zuverlässig um 08:00. **Überholt seit 19. August abends:** der 08:00-Reset ist durch den individuellen 24h-Verfall ersetzt, die Ziehung läuft um 21:00 (`0015_rolling_24h_expiry.sql`).
+- **Phase 1:** Infinite Scroll (19. Aug) und Web-Push (PR #6, 20. Aug) sind gebaut und live.
+- **Phase 2:** Onboarding-Flow (`0021`), Metrik-Tracking (`0018_events`), Report + Block (`0017_report_block`) sind gebaut und live. Offen: Kill-Metriken-Dashboard und der Beweis am Gerät.
+- **Phase 3:** Der verdiente Chat ist als **Circle** umgesetzt (PRD §4.8, `0024`–`0028`, `0035`) — die ursprünglich hier beschriebene 3–4-Runden-Mechanik ist ersetzt.
+- **Was fehlt überall:** der Test am echten Gerät (Gesten, Push, Einladungs-Link mit zwei Geräten). Details in `docs/STATUS.md`.
 
-**Es fehlt in Phase 1:** Infinite Scroll in der Discovery und Push-Notifications.
-**Noch gar nicht gebaut:** verdienter Chat (Phase 3), Metrik-Tracking und Report/Block (Phase 2).
-
-> ⚠️ **Der Freundes-Pilot hat noch nicht begonnen.** Die `invites`-Tabelle ist leer, und das Cloudflare-Secret zum Einlösen der Einladungs-Links ist nicht gesetzt — der Haupt-Onboarding-Weg ist damit funktionsunfähig. Es gibt entsprechend **kein einziges Signal zu den Kill-Metriken.** Details und Befehle in `docs/STATUS.md`.
+> ⚠️ **Der Freundes-Pilot hat noch nicht begonnen.** Technisch ist der Weg frei (CF-Secret gesetzt, `0014` angewendet), aber die `invites`-Tabelle ist weiterhin leer (geprüft 16. Sep) — es wurde noch kein Einladungs-Link erzeugt. Es gibt entsprechend **kein Signal zu den Kill-Metriken.**
 
 > Tagesaktueller Detail-Stand und die konkreten nächsten Schritte → `docs/STATUS.md`.
 
@@ -79,23 +79,23 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 **Die Kette:** Moment hochladen → erscheint in Discovery → folgbar → kann in Stadt Corso gezogen werden → Rücklauf zeigt echte Zahl → Push bringt zurück.
 
 **Scope:**
-- ✅ **Auswahl für den Stadt Corso als echter Mechanismus** (statt 8 Mock-Clips) — **erledigt 15. Juli** (`0005_city_story_draw.sql` live, `story.tsx` de-mockt, Details in `docs/STATUS.md`). Serverseitige gewichtete Zufallsziehung: `w = 1 + ln(1 + aktive_follower)`, Grundchance > 0 für jeden Clip, stadtweit eingefroren via pg_cron um 21:00 Berlin (bis 19. Aug: 20:00).
+- ✅ **Auswahl für den Stadt Corso als echter Mechanismus** (statt 8 Mock-Clips) — **erledigt 15. Juli** (`0005_city_story_draw.sql`), seit 9. Sep als **laufende Nachbesetzung** (`0031_corso_running.sql`, `refill_corso()` jede Minute, 10 Plätze). Gewichtung unverändert: `w = 1 + ln(1 + aktive_follower)`, Grundchance > 0 für jeden Moment. *(15. Jul–8. Sep: einmal täglich eingefrorene Ziehung, erst 20:00, ab 19. Aug 21:00.)*
   - 🔒 LEITPLANKE: keine sichtbaren Reaktions-/Follower-Zahlen während des Stadt Corso. ✅ eingehalten (Query selektiert keine Zahlen).
   - 🔒 LEITPLANKE: nur einwilligungs-markierte Momente kommen in Frage. ✅ serverseitig erzwungen.
-  - ~~`[ENTSCHEIDUNG OFFEN]` Größe des Stadt Corso/Frequenz~~ → **entschieden:** immer mit so vielen einwilligenden Momenten wie da sind (max. 8), kein Mindest-Schwellwert, kein Fake-Auffüllen.
-- **Discovery als langer Scroll-Feed** — **noch nicht gebaut** (`src/routes/index.tsx:99-100` hat weiterhin ein hartes `limit 20` ohne Pagination und ohne Tages-Ordering). Ziel: **Infinite Scroll** (erst ~20, beim Erreichen des Endes nächste 20 nachladen), Reihenfolge **heute zuerst → ältere als Nachschub**, um ein ausgedehntes Scrollverhalten zu etablieren. Details in `docs/STATUS.md`.
-  - **Entschieden (15. Juli):** Area = **ganze Stadt Düsseldorf** (Area-Filter vorerst No-Op). Interim ältere Momente als Nachschub, **Endzustand nur heute** (`prompt_date = corso_day(now())`) — bewusst erst später, nicht jetzt eingrenzen.
+  - ~~`[ENTSCHEIDUNG OFFEN]` Größe des Stadt Corso/Frequenz~~ → **entschieden (15. Jul), neu entschieden 9. Sep:** laufend, 10 Plätze (konfigurierbar), kein Mindest-Schwellwert, kein Fake-Auffüllen.
+- ✅ **Discovery als langer Scroll-Feed** — **gebaut 19. Aug** (`components/discovery-feed.tsx`): Infinite Scroll, 20 pro Seite, alle **lebenden** Momente (jünger als 24 h), neueste zuerst, eine Kachel pro Person.
+  - **Entschieden (15. Juli):** Area = **ganze Stadt Düsseldorf** (Area-Filter vorerst No-Op). Die damalige Interim-Regel „ältere Momente als Nachschub" ist mit dem 24h-Verfall (19. Aug) hinfällig — kein Auffüllen mit alten Momenten.
 - ~~**Rücklauf-Screen mit echten Zahlen**~~ → **✅ gebaut & live (15. Juli):** `feedback.tsx` zeigt zwei private Kennzahlen — **Publikum** (aktive Follower) + **Zuschauer** (eindeutige Betrachter des letzten Moments, inkl. anonymer Pool-Zuschauer, PRD-Entscheidung #3 = JA) — je mit neutralem „seit gestern"-Delta. Bewusst **zwei** statt drei Zahlen: „Follower" und „Publikum" wären identisch → keine Redundanz. Ansichten anonym via `post_views`/`record_view`; „seit gestern"-Basis via nächtlichem `snapshot_reach`-Cron; alles über `my_feedback()` (RLS-privat, SECURITY DEFINER). Migration `0010`, deployed. **Dies ist die Datenquelle für die Kill-Metrik „aktiver-Moment-Anteil".**
-- **Push-Notifications** (PWA-fähig): 21:00-Push zum Stadt Corso + Push, wenn eine gefolgte Person postet. **Noch nicht begonnen** — im Code existiert nur `public/manifest.json`, kein Service Worker, keine `PushManager`-Anbindung.
-  - ⚠️ Dies ist der wichtigste offene Punkt der Phase: **ohne Push gibt es keinen strukturellen Grund zurückzukommen.** Die Kill-Metrik „Daily-Open-Rate ≥ 50 %" wäre ohne Push nicht fair messbar.
-  - `[ENTSCHEIDUNG OFFEN]` Die genaue Mechanik des „Privaten Corso" (Push-Fenster 19–22 Uhr, PRD #7) ist ungeklärt und wird hier zum ersten Mal relevant.
+- ✅ **Push-Notifications** (PWA) — **gebaut und live seit 20. Aug** (PR #6; `public/sw.js`, `use-push.ts`, Edge Function `send-push`, Einrichtung in `docs/PUSH-SETUP.md`). Anlässe heute: „Du stehst im Corso", neuer Moment einer gefolgten Person, „Dein Publikum wird still", Circle-Nachricht, **Abend-Push 19:00** (seit 16. Sep). *(Der 21:00-Ritual-Push und der 20:45-Vorab-Push sind seit 9. Sep abgeschaltet.)*
+  - Zustellung am Gerät belegt (Test-Push, 16. Sep).
+  - ✅ **„Privater Corso" (PRD #7) entschieden und gebaut (16. Sep, `0036`):** täglicher Abend-Push um 19:00 Berlin — Absender ist die Stadt, ein leiser Satz aus einer rotierenden Textbank (`city_evening_lines`, keine Wiederholung binnen 20 Tagen), Ziel Corso. Entfällt, wer um 18:00 schon „Dein Publikum wird still" bekam.
 
 **Akzeptanzkriterien:**
-- [x] Stadt Corso zeigt zur Ziehungszeit real geposteten Content, nicht Mock. *(15. Juli gebaut; **19. August in der Live-DB bestätigt**: echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Momenten. Damit ist auch ein echter Cron-Lauf mit echtem Content belegt, nicht nur ein manueller Force-Draw.)*
-- [x] Ein Clip ohne Einwilligung erscheint NIE in der Stadt Corso. *(Serverseitiger `city_story_consent = true`-Filter in `draw_city_story`.)*
-- [ ] Discovery lädt beim Runterscrollen weitere Momente nach (Infinite Scroll), heute zuerst.
+- [x] Stadt Corso zeigt real geposteten Content, nicht Mock. *(15. Juli gebaut; **19. August in der Live-DB bestätigt**: echte Ziehungen am 1., 2. und 13. August, jeweils exakt 18:00 UTC = 20:00 Berlin, aus echten einwilligenden Momenten. Damit ist auch ein echter Cron-Lauf mit echtem Content belegt, nicht nur ein manueller Force-Draw.)*
+- [x] Ein Clip ohne Einwilligung erscheint NIE in der Stadt Corso. *(Serverseitiger `city_story_consent = true`-Filter — früher in `draw_city_story`, seit 9. Sep in `refill_corso()` und im Blätter-Query von `story.tsx`.)*
+- [x] Discovery lädt beim Runterscrollen weitere Momente nach (Infinite Scroll). *(19. Aug; Stillstand-Bug am 9. Sep behoben.)*
 - [x] Rücklauf zeigt für jeden User die korrekte private Zahl. *(15. Juli: `my_feedback()` — Publikum + Zuschauer; RLS-privat, Negativ-Test `scripts/security-test-feedback.mjs` Layer 1 grün. **Die „seit gestern"-Deltas sind seit dem laufenden `snapshot_reach`-Cron real** — zuletzt am 19. August ausgeführt.)*
-- [ ] 21:00-Push kommt zuverlässig an.
+- [ ] Push kommt zuverlässig an. *(Gebaut; früher als „21:00-Push" formuliert — am Gerät noch nicht belegt.)*
 
 ---
 
@@ -107,9 +107,9 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 - **Onboarding (Screen 1), pragmatisch:** Magic-Link/Telefon-Login + Selbst-Bestätigung „18+". Kurz-Erklärung von Stadt Corso + verfallendem Publikum in unter 30 Sek.
   - **Pilot-Weg gebaut (15. Juli):** E-Mail-freie **Einladungs-Links** (Maxim erzeugt pro Freund, WhatsApp, Klick = eingeloggt). Einmalig, 7 Tage gültig, serverseitig eingelöst. ⚠️ Bewusstes Pilot-Provisorium — der zahlende Fremden-Pilot bekommt echte Self-Service-Registrierung. Details in `docs/STATUS.md`.
   - `[ENTSCHEIDUNG OFFEN]` Volle ID-Verifizierung gehört VOR öffentlichen Launch, NICHT vor Freundes-Pilot. Nicht jetzt bauen.
-- **Metrik-/Event-Tracking** (ab Tag 1 instrumentieren, sonst nachträglich nicht rekonstruierbar): Daily-Open-Rate, aktiver-Moment-Anteil, Follow-Events, Auftritte im Stadt Corso, Verbindungen.
-- **Report + Block** (minimale Safety): Report = sofort aus allen Pools.
-  - **Vorarbeit (16. Juli):** Der **Einstellungen-Screen (Screen 10)** ist minimal gebaut & deployed (`src/routes/settings.tsx`) — mit einer **Blockierte-Personen-Sektion als Platzhalter**, die sauber leer anzeigt und in dieser Phase an eine künftige `blocks`-Tabelle andockt (`useBlockedProfiles`-Stub). Das eigentliche Report/Block-Feature (Blockieren auslösen, Report → aus allen Pools) ist noch NICHT gebaut. Details in `docs/STATUS.md`.
+- ✅ **Metrik-/Event-Tracking** (ab Tag 1 instrumentieren, sonst nachträglich nicht rekonstruierbar): Daily-Open-Rate, aktiver-Moment-Anteil, Follow-Events, Auftritte im Stadt Corso, Verbindungen. **Gebaut und live** (`0018_events.sql`, PR #5, 20. Aug; `chat_reached` feuert seit dem Circle). Offen: das Dashboard.
+- ✅ **Report + Block** (minimale Safety): Report = sofort aus allen Pools. **Gebaut und live** (`0017_report_block.sql`, `components/moment-menu.tsx`, `lib/blocks/use-blocks.ts`; Block sperrt seit dem Circle auch Chat und Circle-Anbahnung). *(Vorarbeit 16. Juli: Einstellungen-Screen mit Blockierte-Platzhalter.)*
+- ✅ **Onboarding-Flow für neu Eingeladene** (`onboarding-flow.tsx`, `0021_onboarding_event.sql`, 20. Aug).
 
 **Akzeptanzkriterien:**
 - [ ] Neuer Nutzer kommt ohne Hilfe vom Login bis zum ersten Moment.
@@ -122,16 +122,21 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 
 **Ziel:** Der „Ausgang" geht live, sobald der Konsum-Loop Lebenszeichen zeigt. Bewusst nach Phase 1/2, weil der Pilot zuerst testet, ob überhaupt jemand täglich öffnet und postet.
 
-**Scope:**
-- **Verbindungs-Screen + verdienter Chat (Screen 8, Flow D):** gegenseitiges Folgen → stiller Hinweis → privater Moment-Austausch → nach 3–4 gegenseitigen Runden Text-Chat frei.
-  - 🔒 WICHTIG: Eine angebahnte Verbindung (im Austausch-Status) darf den täglichen Publikum-Verfall ÜBERLEBEN. Die Engine darf nicht den Dating-Ausgang bestrafen, nur weil jemand einen Tag nicht gepostet hat. **Publikum verfällt hart, Verbindungen nicht.**
-  - `[ENTSCHEIDUNG OFFEN]` Genaue Trigger-Logik bei täglich verfallenden Follows (PRD offene Entscheidung #8).
+> **Umgesetzt am 2. September 2026 als „Circle"** (PRD v0.5 §4.8) — früher als geplant und in
+> anderer Form. Die ursprüngliche Mechanik (stiller Hinweis → privater Moment-Austausch →
+> nach 3–4 Runden Chat) ist **ersetzt**, die offene Entscheidung #8 damit entschieden.
+
+**Scope (so gebaut):**
+- ✅ **Circle + verdienter Chat (Flow D):** 5 Corso-Tage gegenseitigen Folgens (konfigurierbar, 🔒 unsichtbar) → Circle-Eintritt als Überraschung (Splash) → Chat frei. Zweiter Eintrittsweg: persönlicher Einladungs-Link `/c/<token>` (`0026`/`0027`).
+  - 🔒 **Publikum verfällt hart, Verbindungen nicht:** die Circle-Verbindung verfällt nie; der verdeckte Zähler pausiert bei Lücken, statt zurückzusetzen.
+- ✅ **Chat:** live (`0028`), seit 9. Sep mit Foto/Video/Sprachnachricht und Antworten (`0035`).
 - **Richtung reales Treffen** (App verlassen = Erfolg). Kein strukturiertes Treffen-UI (PRD-Entscheidung #4 = NEIN).
 
 **Akzeptanzkriterien:**
-- [ ] Gegenseitiges Folgen erzeugt den stillen Hinweis bei beiden.
-- [ ] Chat schaltet erst nach der definierten Anzahl Austausch-Runden frei.
-- [ ] Eine Verbindung im Austausch überlebt einen Tag ohne Moment.
+- [x] Wiederholtes gegenseitiges Folgen führt zum Circle-Eintritt bei beiden *(gegen die Live-DB end-to-end verifiziert, 2. Sep)*.
+- [x] Chat schaltet erst mit dem Circle-Eintritt frei *(RLS auf `circle_messages`)*.
+- [x] Eine Circle-Verbindung überlebt Tage ohne Moment *(verfällt nie)*.
+- [ ] Alles davon mit zwei echten Geräten geprüft.
 
 ---
 
@@ -150,25 +155,27 @@ Die App läuft live auf `https://corso-app.pages.dev`. Der komplette Kern-Loop l
 
 ### Technische Blocker (nicht Entscheidungen — nur Ausführung)
 
-Beide sind am 19. August live verifiziert, kosten je unter 5 Minuten und blockieren den Pilot-Start. Befehle in `docs/STATUS.md`.
+Beide am 19. August behoben — aktuell gibt es keinen technischen Blocker für den Pilot-Start.
 
-| # | Punkt | Wirkung |
+| # | Punkt | Status |
 |---|---|---|
-| T1 | Cloudflare-Secret `SUPABASE_SERVICE_ROLE_KEY` nicht gesetzt | **Einladungs-Links sind funktionsunfähig** → der Haupt-Onboarding-Weg des Freundes-Pilots. Blockt Pilot-Start. |
-| T2 | Migration `0014_profile_settings.sql` nicht angewendet | Push-Präferenz + Anzeigename im Einstellungen-Screen werfen eine Fehler-Toast. |
+| T1 | Cloudflare-Secret `SUPABASE_SERVICE_ROLE_KEY` | ✅ gesetzt (19. Aug), `/invite/__check` grün |
+| T2 | Migration `0014_profile_settings.sql` | ✅ angewendet (19. Aug) |
+| T3 | service_role-Key rotieren | offen — **vor** dem zahlenden Fremden-Pilot (siehe STATUS, Punkt 3) |
 
 ### Offene Entscheidungen
 
 | # | Punkt | Bezug | Status |
 |---|---|---|---|
-| 1 | Stadt Corso zieht nur „wer heute gepostet hat" + Follower-Gewicht → Cold-Start-Schutz geschwächt ggü. v0.1 | PRD §4.6 | **Bewusst zurückgestellt** (vorerst ignorieren, nicht aufgreifen) |
-| 2 | Größe des Stadt Corso/Frequenz bei kleinem Pilot (8 Momente zu dünn?) | PRD offene Entscheidung #6 | ✅ **entschieden (15. Juli):** immer mit so vielen einwilligenden Momenten wie da sind (max. 8), kein Minimum, kein Fake-Auffüllen |
-| 3 | Mechanik des „Privaten Corso" (Push-Fenster 19–22 Uhr) | PRD offene Entscheidung #7 | offen — **wird mit dem Push-Feature in Phase 1 fällig** |
-| 4 | Verbindungs-Trigger bei täglich verfallenden Follows | PRD offene Entscheidung #8 | offen, blockt erst Phase 3 |
+| 1 | Stadt Corso bevorzugt Menschen mit Followern → Cold-Start-Schutz geschwächt ggü. v0.1 | PRD §4.6 | **Bewusst zurückgestellt** (vorerst ignorieren, nicht aufgreifen). Messung 9. Sep: der laufende Corso ist gerechter als die Tagesziehung (Spreizung 6,1× → 2,5×). |
+| 2 | Größe des Stadt Corso/Frequenz bei kleinem Pilot | PRD offene Entscheidung #6 | ✅ **neu entschieden (9. Sep):** laufend, 10 Plätze, kein Minimum, kein Fake-Auffüllen |
+| 3 | Mechanik des „Privaten Corso" (Push-Fenster 19–22 Uhr) | PRD offene Entscheidung #7 | ✅ **entschieden 16. Sep** — täglicher Abend-Push 19:00 (`0036`) |
+| 4 | Verbindungs-Trigger bei täglich verfallenden Follows | PRD offene Entscheidung #8 | ✅ **entschieden (2. Sep):** Circle, 5 gegenseitige Corso-Tage |
 | 5 | Mitigation der Geschlechter-Asymmetrie | PRD offene Entscheidung #10, Risiko §8.2 | offen — blockt keine Bauphase, ist aber das gefährlichste strukturelle Produkt-Risiko vor dem zahlenden Pilot |
+| 6 | „Was passiert um 21 Uhr als Event?" | PRD offene Entscheidung #11 | **bewusst geparkt** — nichts dafür bauen |
 
-> Phase 0 und Phase 1 sind von offenen Entscheidungen frei — außer #3, die mit dem Push-Feature fällig wird.
+> Keine Bauphase ist durch eine offene Entscheidung blockiert. #3 ist die nächste, die fällig ist.
 
 ---
 
-*Ende Roadmap v0.2 — Stand 19. August 2026.*
+*Ende Roadmap v0.3 — Stand 9. September 2026, Status-Abgleich 16. September 2026.*
